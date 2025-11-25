@@ -1,0 +1,343 @@
+// キーイベントを追加した。カーソル移動をいれてキー入力を入れたエラーの出たバージョン
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'dart:math';
+
+void main() {
+  runApp(const MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Free-form Memo',
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blueGrey),
+        useMaterial3: true,
+      ),
+      home: const EditorPage(),
+    );
+  }
+}
+
+class EditorPage extends StatefulWidget {
+  const EditorPage({super.key});
+
+  @override
+  State<EditorPage> createState() => _EditorPageState();
+}
+
+class _EditorPageState extends State<EditorPage> {
+  double _charWidth = 10.0; // 1文字の幅
+  double _charHeight = 20.0; // 1文字の高さ
+  double _lineHeight = 0.0; // 1行の高さ
+  int _cursorRow = 0; // 初期のカーソル位置
+  int _cursorCol = 0; // 初期のカーソル位置
+  List<String> _lines = ['']; // エディタのテキストエリア
+
+  // ★ 1. グリッド表示のON/OFFを管理する変数を追加
+  bool _showGrid = false; // デフォルトはOFFにしておきます
+
+  // スクロールバーを表示されるためのコントローラーの明示
+  final ScrollController _horizontalScrollController = ScrollController();
+  final ScrollController _verticalScrollController = ScrollController();
+
+  // フォーカスノードを追加
+  final FocusNode _focusNode = FocusNode();
+
+  static const _textStyle = TextStyle(
+    fontFamily: 'monospace',
+    fontSize: 14.0,
+    color: Colors.black,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _calculateGlyphMetrics();
+  }
+
+  @override
+  void dispose() {
+    _focusNode.dispose(); // focusノードの破棄
+    _horizontalScrollController.dispose(); // ScrollConttrollerの破棄
+    _verticalScrollController.dispose(); // ScrollConttrollerの破棄
+    super.dispose();
+  }
+
+  void _calculateGlyphMetrics() {
+    // Mの文字をサンプルにして幅と高さを算出
+    final painter = TextPainter(
+      text: const TextSpan(text: 'M', style: _textStyle),
+      textDirection: TextDirection.ltr,
+    );
+    painter.layout(); // ここで計算が実行される。
+
+    setState(() {
+      // ★ デバッグ用に追加 ★
+      print(
+        'DEBUG: R=${_cursorRow}, C=${_cursorCol}, L=${_lines[_cursorRow].length}',
+      );
+      // ★ ------------------ ★
+
+      _charWidth = painter.width;
+      _charHeight = painter.height;
+      _lineHeight = _charHeight * 1.2; // 行の高さは、1.2バイ。
+    });
+  }
+
+  // マウスがクリックされたときの実装
+  void _handleTap(TapDownDetails details) {
+    // charWidthやcharHeightが未計算の場合は処理を中断
+    if (_charWidth == 0 || _charHeight == 0) return;
+
+    // フォーカスを取得する（キーボード入力への準備）
+    _focusNode.requestFocus();
+
+    final Offset tapPosition = details.localPosition;
+
+    // ★ グリッド座標への変換
+    // タップ位置を文字幅・文字高さで割ることで、行と列のインデックスを算出
+    final int colIndex = (tapPosition.dx / _charWidth).floor();
+    final int rowIndex = (tapPosition.dy / _charHeight).floor();
+
+    setState(() {
+      _cursorRow = rowIndex;
+      _cursorCol = colIndex;
+    });
+  }
+
+  // KeyboardListener の キーをおされたときの実装。
+  void _handleKeyPress(KeyEvent event) {
+    // キーが押された 瞬間(KeyDownEvent) の処理 のみを行う。
+    if (event is KeyDownEvent) {
+      // PhysicalKeyboardKey は Enter や Backspace などの特定キーを識別するために使用
+      final PhysicalKeyboardKey physicalKey = event.physicalKey;
+      // character は入力された文字そのもの（例: 'a', '1', 'あ'）
+      final String? character = event.character;
+
+      setState(() {
+        // ★ DEBUG: R=0, C=0, L=0 の状態からキー入力（例： 'A'） ★
+        print(
+          'DEBUG: R=${_cursorRow}, C=${_cursorCol}, L=${_lines[_cursorRow].length}',
+        );
+
+        // 安全のため、row, colに現在のカーソル位置を代入する。．
+        final int row = _cursorRow;
+        final int col = _cursorCol;
+        final int currentLineLength = _lines[row].length;
+        /*
+        if (physicalKey == PhysicalKeyboardKey.enter) {
+          // 改行処理の実装
+        } else if (physicalKey == PhysicalKeyboardKey.backspace) {
+          // 削除処理の実装
+        } else if (physicalKey == PhysicalKeyboardKey.arrowLeft) {
+          // 左キー カーソルを左に移動( 最小 0 )
+          _cursorCol = max(0, col - 1);
+        } else if (physicalKey == PhysicalKeyboardKey.arrowRight) {
+          // 右キー カーソルを右に移動( 最大 行末)
+          _cursorCol = min(currentLineLength, col + 1);
+        } else if (physicalKey == PhysicalKeyboardKey.arrowUp) {
+          // 上キー
+          final int newRow = max(0, row - 1);
+          _cursorRow = newRow;
+          // 新しい行の長さに合わせてカーソル位置を調整（行末を超えないように）
+          _cursorCol = min(_lines[newRow].length, col);
+        } else if (physicalKey == PhysicalKeyboardKey.arrowDown) {
+          // 下キー
+          final int newRow = min(_lines.length - 1, row + 1);
+          _cursorRow = newRow;
+          // 新しい行の長さに合わせてカーソル位置を調整（行末を超えないように）
+          _cursorCol = min(_lines[newRow].length, row);
+        } else */
+        if (character != null && character.isNotEmpty) {
+          // 通常の文字挿 入口 ロジック
+          final int row = _cursorRow;
+          final int col = _cursorCol;
+
+          // 現在の行の文字列を取得
+          final String currentLine = _lines[row];
+
+          // 文字列をカーソルの位置で分割し、間に新しい文字を挿入
+          final String newLine =
+              currentLine.substring(0, col) +
+              character +
+              currentLine.substring(col);
+
+          _lines[row] = newLine; // _lines の該当行を新しい文字列で更新
+          _cursorCol++; // カーソル位置（col）を1つ右へ移動
+        }
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Free-form Memo'),
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        // ★ 2. アプリバーに切り替えスイッチを追加
+        actions: [
+          Row(
+            children: [
+              const Text('Grid'),
+              Switch(
+                value: _showGrid,
+                onChanged: (value) {
+                  setState(() {
+                    _showGrid = value;
+                  });
+                },
+              ),
+            ],
+          ),
+        ],
+      ),
+      body:
+          // 水平方向でスクロールバーを表示する
+          Scrollbar(
+            controller: _verticalScrollController,
+            thumbVisibility: true, // スクロールバーの表示を明示する。
+            trackVisibility: true, // 常にスクロールバーを表示させる。
+            child: Scrollbar(
+              controller: _horizontalScrollController,
+              thumbVisibility: true,
+              trackVisibility: true,
+              notificationPredicate: (notif) => notif.depth == 1, //念のため深さ１を指定
+              // 垂直スクロールバーの表示
+              child: SingleChildScrollView(
+                controller: _verticalScrollController,
+                scrollDirection: Axis.vertical,
+                // 垂直のスクロールバーの表示
+                child: KeyboardListener(
+                  focusNode: _focusNode,
+                  onKeyEvent: _handleKeyPress,
+                  // 垂直のスクロールバーの表示
+                  child: SingleChildScrollView(
+                    controller: _horizontalScrollController,
+                    scrollDirection: Axis.horizontal,
+                    child: GestureDetector(
+                      onTapDown: _handleTap,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(
+                          minWidth: 2000,
+                          minHeight: 2000,
+                        ),
+                        child: CustomPaint(
+                          painter: MemoPainter(
+                            lines: _lines,
+                            charWidth: _charWidth,
+                            charHeight: _charHeight,
+                            showGrid: _showGrid, // Grid ON/OFFの状態をPainterに渡す
+                            cursorRow: _cursorRow, // カーソルの位置を渡す
+                            cursorCol: _cursorCol,
+                            lineHeight: _lineHeight,
+                            textStyle: _textStyle,
+                          ),
+                          child: Container(),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+    );
+  }
+}
+
+class MemoPainter extends CustomPainter {
+  final List<String> lines;
+  final double charWidth;
+  final double charHeight;
+  final double lineHeight;
+  final bool showGrid;
+  final int cursorRow;
+  final int cursorCol;
+  final TextStyle textStyle; // TextPainter に渡すスタイル
+
+  MemoPainter({
+    required this.lines,
+    required this.charWidth,
+    required this.charHeight,
+    required this.showGrid,
+    required this.cursorRow,
+    required this.cursorCol,
+    required this.lineHeight,
+    required this.textStyle,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // カーソル描画のための Setting
+    final cursorPaint = Paint()
+      ..color = Colors.black
+      ..strokeWidth = 2.0
+      ..strokeCap = StrokeCap.square;
+
+    double verticalOffset = 0.0; // Y 座標初期値
+
+    for (int i = 0; i < lines.length; i++) {
+      final String line = lines[i];
+
+      final textSpan = TextSpan(text: line, style: textStyle);
+      final textPainter = TextPainter(
+        text: textSpan,
+        textDirection: TextDirection.ltr,
+      );
+
+      // layoutの実行
+      textPainter.layout(minWidth: 0, maxWidth: size.width);
+
+      // 2. テキストの描画
+      // (0, verticalOffset)の位置から開始
+      textPainter.paint(canvas, Offset(0, verticalOffset));
+
+      // 3.カーソルの描画
+      if (i == cursorRow) {
+        //  charWidth * cursorCol でX座標を計算
+        final double cursorX = charWidth * cursorCol;
+
+        // カーソル描画の開始点と終了点を計算
+        final Offset startPoint = Offset(cursorX, verticalOffset);
+        // lineHeight を使用して終了Y座標を計算
+        final Offset endPoint = Offset(cursorX, verticalOffset + lineHeight);
+
+        canvas.drawLine(startPoint, endPoint, cursorPaint);
+      }
+      verticalOffset += lineHeight;
+    }
+
+    // showGridがtrueのときだけ線を描く
+    if (showGrid) {
+      final paint = Paint()
+        ..color = Colors.grey.withOpacity(0.3)
+        ..strokeWidth = 1.0;
+
+      for (double x = 0; x < size.width; x += charWidth) {
+        canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
+      }
+
+      for (double y = 0; y < size.height; y += charHeight) {
+        canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant MemoPainter oldDelegate) {
+    // ★ 6. グリッドの表示設定が変わった時も再描画する
+    return oldDelegate.lines != lines ||
+        oldDelegate.charWidth != charWidth ||
+        oldDelegate.charHeight != charHeight ||
+        oldDelegate.showGrid != showGrid ||
+        oldDelegate.cursorRow != cursorRow ||
+        oldDelegate.cursorCol != cursorRow ||
+        oldDelegate.textStyle != textStyle;
+  }
+}
