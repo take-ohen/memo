@@ -31,14 +31,14 @@ class EditorPage extends StatefulWidget {
 }
 
 class _EditorPageState extends State<EditorPage> {
-  double _charWidth = 10.0; // 1文字の幅
-  double _charHeight = 20.0; // 1文字の高さ
+  double _charWidth = 0.0; // 1文字の幅
+  double _charHeight = 0.0; // 1文字の高さ
   double _lineHeight = 0.0; // 1行の高さ
   int _cursorRow = 0; // 初期のカーソル位置
   int _cursorCol = 0; // 初期のカーソル位置
   List<String> _lines = ['']; // エディタのテキストエリア
 
-  // ★ 1. グリッド表示のON/OFFを管理する変数を追加
+  //  グリッド表示のON/OFFを管理する変数を追加
   bool _showGrid = false; // デフォルトはOFFにしておきます
 
   // スクロールバーを表示されるためのコントローラーの明示
@@ -49,8 +49,8 @@ class _EditorPageState extends State<EditorPage> {
   final FocusNode _focusNode = FocusNode();
 
   static const _textStyle = TextStyle(
-    fontFamily: 'monospace',
-    fontSize: 14.0,
+    fontFamily: 'BIZ UDゴシック',
+    fontSize: 16.0,
     color: Colors.black,
   );
 
@@ -58,6 +58,11 @@ class _EditorPageState extends State<EditorPage> {
   void initState() {
     super.initState();
     _calculateGlyphMetrics();
+    // フレーム描画後に実行する必要があるため、
+    // 非同期で呼び出すでフォーカスを当てる。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _focusNode.requestFocus();
+    });
   }
 
   @override
@@ -70,6 +75,7 @@ class _EditorPageState extends State<EditorPage> {
 
   void _calculateGlyphMetrics() {
     // Mの文字をサンプルにして幅と高さを算出
+
     final painter = TextPainter(
       text: const TextSpan(text: 'M', style: _textStyle),
       textDirection: TextDirection.ltr,
@@ -77,15 +83,9 @@ class _EditorPageState extends State<EditorPage> {
     painter.layout(); // ここで計算が実行される。
 
     setState(() {
-      // ★ デバッグ用に追加 ★
-      print(
-        'DEBUG: R=${_cursorRow}, C=${_cursorCol}, L=${_lines[_cursorRow].length}',
-      );
-      // ★ ------------------ ★
-
       _charWidth = painter.width;
       _charHeight = painter.height;
-      _lineHeight = _charHeight * 1.2; // 行の高さは、1.2バイ。
+      _lineHeight = _charHeight * 1.2; // 行の高さは、1.2倍
     });
   }
 
@@ -94,23 +94,25 @@ class _EditorPageState extends State<EditorPage> {
     // charWidthやcharHeightが未計算の場合は処理を中断
     if (_charWidth == 0 || _charHeight == 0) return;
 
-    // フォーカスを取得する（キーボード入力への準備）
-    _focusNode.requestFocus();
-
-    final Offset tapPosition = details.localPosition;
-
-    // ★ グリッド座標への変換
+    // グリッド座標への変換
     // タップ位置を文字幅・文字高さで割ることで、行と列のインデックスを算出
-    final int colIndex = (tapPosition.dx / _charWidth).floor();
-    final int rowIndex = (tapPosition.dy / _charHeight).floor();
 
     setState(() {
-      _cursorRow = rowIndex;
-      _cursorCol = colIndex;
+      final Offset tapPosition = details.localPosition;
+      int colIndex = (tapPosition.dx / _charWidth).round();
+      int rowIndex = (tapPosition.dy / _lineHeight).floor();
+      print('colIndex=${colIndex}, rowIndex=${rowIndex}');
+      _cursorRow = max(0, rowIndex); // マイナスは防ぐ
+      _cursorCol = max(0, colIndex); // マイナスは防ぐ
+      print(
+        'colIndex=${colIndex}, rowIndex=${rowIndex}, _cursorRow=${_cursorRow}, _cursorCol=${_cursorCol}',
+      );
+      // フォーカスを取得する（キーボード入力への準備）
+      _focusNode.requestFocus();
     });
   }
 
-  // KeyboardListener の キーをおされたときの実装。
+  // KeyboardListener の キーを押されたときの実装。
   void _handleKeyPress(KeyEvent event) {
     // キーが押された 瞬間(KeyDownEvent) の処理 のみを行う。
     if (event is KeyDownEvent) {
@@ -120,16 +122,26 @@ class _EditorPageState extends State<EditorPage> {
       final String? character = event.character;
 
       setState(() {
-        // ★ DEBUG: R=0, C=0, L=0 の状態からキー入力（例： 'A'） ★
-        print(
-          'DEBUG: R=${_cursorRow}, C=${_cursorCol}, L=${_lines[_cursorRow].length}',
-        );
-
         // 安全のため、row, colに現在のカーソル位置を代入する。．
         final int row = _cursorRow;
         final int col = _cursorCol;
         final int currentLineLength = _lines[row].length;
-        /*
+
+        // 縦の隙間を埋める
+        // カーソル行が、現在の行数より下にある場合、
+        // 追いつくまで空行("")を追加し続ける。
+        while (_lines.length <= _cursorRow) {
+          _lines.add("");
+        }
+
+        // 横の隙間を埋める
+        // カーソル行が、現在の行数より下にある場合、
+        // 追いつくまで空行("")を追加し続ける。
+        if (_cursorCol > _lines[_cursorRow].length) {
+          // padRightを使うと、足りない分だけスペースで埋めてくれる
+          _lines[_cursorRow] = _lines[_cursorRow].padRight(_cursorCol);
+        }
+
         if (physicalKey == PhysicalKeyboardKey.enter) {
           // 改行処理の実装
         } else if (physicalKey == PhysicalKeyboardKey.backspace) {
@@ -152,8 +164,7 @@ class _EditorPageState extends State<EditorPage> {
           _cursorRow = newRow;
           // 新しい行の長さに合わせてカーソル位置を調整（行末を超えないように）
           _cursorCol = min(_lines[newRow].length, row);
-        } else */
-        if (character != null && character.isNotEmpty) {
+        } else if (character != null && character.isNotEmpty) {
           // 通常の文字挿 入口 ロジック
           final int row = _cursorRow;
           final int col = _cursorCol;
@@ -274,15 +285,17 @@ class MemoPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // カーソル描画のための Setting
+    print('PAINTER !! 0');
+    // カーソル描画のための設定
     final cursorPaint = Paint()
       ..color = Colors.black
       ..strokeWidth = 2.0
       ..strokeCap = StrokeCap.square;
 
     double verticalOffset = 0.0; // Y 座標初期値
-
+    print('PAINTER !! 1');
     for (int i = 0; i < lines.length; i++) {
+      print('PAINTER !! 2${i} ${lines.length}');
       final String line = lines[i];
 
       final textSpan = TextSpan(text: line, style: textStyle);
@@ -294,15 +307,15 @@ class MemoPainter extends CustomPainter {
       // layoutの実行
       textPainter.layout(minWidth: 0, maxWidth: size.width);
 
-      // 2. テキストの描画
+      // テキストの描画
       // (0, verticalOffset)の位置から開始
       textPainter.paint(canvas, Offset(0, verticalOffset));
 
-      // 3.カーソルの描画
+      // カーソルの描画
       if (i == cursorRow) {
         //  charWidth * cursorCol でX座標を計算
         final double cursorX = charWidth * cursorCol;
-
+        print('verticalOffset=${verticalOffset}, lineHeight=${lineHeight}');
         // カーソル描画の開始点と終了点を計算
         final Offset startPoint = Offset(cursorX, verticalOffset);
         // lineHeight を使用して終了Y座標を計算
@@ -337,7 +350,7 @@ class MemoPainter extends CustomPainter {
         oldDelegate.charHeight != charHeight ||
         oldDelegate.showGrid != showGrid ||
         oldDelegate.cursorRow != cursorRow ||
-        oldDelegate.cursorCol != cursorRow ||
+        oldDelegate.cursorCol != cursorCol ||
         oldDelegate.textStyle != textStyle;
   }
 }
