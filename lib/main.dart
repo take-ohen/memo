@@ -1,6 +1,6 @@
 // キーイベントを追加した。カーソル移動をいれてキー入力を入れたエラーの出たバージョン
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:flutter/services.dart'; // HardwareKeyboardのため
 import 'dart:math';
 
 void main() {
@@ -101,12 +101,10 @@ class _EditorPageState extends State<EditorPage> {
       final Offset tapPosition = details.localPosition;
       int colIndex = (tapPosition.dx / _charWidth).round();
       int rowIndex = (tapPosition.dy / _lineHeight).floor();
-      print('colIndex=${colIndex}, rowIndex=${rowIndex}');
+
       _cursorRow = max(0, rowIndex); // マイナスは防ぐ
       _cursorCol = max(0, colIndex); // マイナスは防ぐ
-      print(
-        'colIndex=${colIndex}, rowIndex=${rowIndex}, _cursorRow=${_cursorRow}, _cursorCol=${_cursorCol}',
-      );
+
       // フォーカスを取得する（キーボード入力への準備）
       _focusNode.requestFocus();
     });
@@ -125,21 +123,13 @@ class _EditorPageState extends State<EditorPage> {
         // 安全のため、row, colに現在のカーソル位置を代入する。．
         final int row = _cursorRow;
         final int col = _cursorCol;
-        final int currentLineLength = _lines[row].length;
+        // Altキーが押されているかチェック
+        bool isAlt = HardwareKeyboard.instance.isAltPressed;
 
-        // 縦の隙間を埋める
-        // カーソル行が、現在の行数より下にある場合、
-        // 追いつくまで空行("")を追加し続ける。
-        while (_lines.length <= _cursorRow) {
-          _lines.add("");
-        }
-
-        // 横の隙間を埋める
-        // カーソル行が、現在の行数より下にある場合、
-        // 追いつくまで空行("")を追加し続ける。
-        if (_cursorCol > _lines[_cursorRow].length) {
-          // padRightを使うと、足りない分だけスペースで埋めてくれる
-          _lines[_cursorRow] = _lines[_cursorRow].padRight(_cursorCol);
+        // 現在の行の長さを取得（行が存在しない場合は 0 とする）
+        int currentLineLength = 0;
+        if (_cursorRow < _lines.length) {
+          currentLineLength = _lines[_cursorRow].length;
         }
 
         if (physicalKey == PhysicalKeyboardKey.enter) {
@@ -150,8 +140,19 @@ class _EditorPageState extends State<EditorPage> {
           // 左キー カーソルを左に移動( 最小 0 )
           _cursorCol = max(0, col - 1);
         } else if (physicalKey == PhysicalKeyboardKey.arrowRight) {
-          // 右キー カーソルを右に移動( 最大 行末)
-          _cursorCol = min(currentLineLength, col + 1);
+          if (isAlt) {
+            // [Alt] 虚空移動: 制限なしで右へ
+            _cursorCol++;
+          } else {
+            // [通常] 行末で止まり、それ以上で次行へ
+            if (_cursorCol < currentLineLength) {
+              _cursorCol++;
+            } else if (_cursorRow < _lines.length - 1) {
+              // 次の行の先頭へ
+              _cursorRow++;
+              _cursorCol = 0;
+            }
+          }
         } else if (physicalKey == PhysicalKeyboardKey.arrowUp) {
           // 上キー
           final int newRow = max(0, row - 1);
@@ -159,29 +160,51 @@ class _EditorPageState extends State<EditorPage> {
           // 新しい行の長さに合わせてカーソル位置を調整（行末を超えないように）
           _cursorCol = min(_lines[newRow].length, col);
         } else if (physicalKey == PhysicalKeyboardKey.arrowDown) {
-          // 下キー
-          final int newRow = min(_lines.length - 1, row + 1);
-          _cursorRow = newRow;
-          // 新しい行の長さに合わせてカーソル位置を調整（行末を超えないように）
-          _cursorCol = min(_lines[newRow].length, row);
+          if (isAlt) {
+            // [Alt] 虚空移動: 制限なしで下へ
+            _cursorRow++;
+          } else {
+            // [通常] データがある行までしか移動できない
+            if (_cursorRow < _lines.length - 1) {
+              _cursorRow++;
+              // 移動先の行の長さに合わせる（スナップ）
+              int nextLineLen = _lines[_cursorRow].length;
+              _cursorCol = min(_cursorCol, nextLineLen);
+            }
+          }
         } else if (character != null && character.isNotEmpty) {
-          // 通常の文字挿 入口 ロジック
-          final int row = _cursorRow;
-          final int col = _cursorCol;
+          // 通常の文字挿
+
+          // 文字入力モードの最初で「虚空」を「実データ」に変換する
+          _fillVirtualSpaceIfNeeded();
 
           // 現在の行の文字列を取得
-          final String currentLine = _lines[row];
+          final String currentLine = _lines[_cursorRow];
 
           // 文字列をカーソルの位置で分割し、間に新しい文字を挿入
           final String newLine =
-              currentLine.substring(0, col) +
+              currentLine.substring(0, _cursorCol) +
               character +
-              currentLine.substring(col);
+              currentLine.substring(_cursorCol);
 
-          _lines[row] = newLine; // _lines の該当行を新しい文字列で更新
+          _lines[_cursorRow] = newLine; // _lines の該当行を新しい文字列で更新
           _cursorCol++; // カーソル位置（col）を1つ右へ移動
         }
       });
+    }
+  }
+
+  // カーソル位置までデータを埋める
+  void _fillVirtualSpaceIfNeeded() {
+    //  縦の拡張: カーソル行まで空行を増やす
+    while (_lines.length <= _cursorRow) {
+      _lines.add("");
+    }
+
+    // 横の拡張: カーソル列までスペースで埋める
+    if (_cursorCol > _lines[_cursorRow].length) {
+      // padRight で足りない分を半角スペースで埋める
+      _lines[_cursorRow] = _lines[_cursorRow].padRight(_cursorCol);
     }
   }
 
@@ -285,7 +308,6 @@ class MemoPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    print('PAINTER !! 0');
     // カーソル描画のための設定
     final cursorPaint = Paint()
       ..color = Colors.black
@@ -293,7 +315,6 @@ class MemoPainter extends CustomPainter {
       ..strokeCap = StrokeCap.square;
 
     double verticalOffset = 0.0; // Y 座標初期値
-    print('PAINTER !! 1');
     for (int i = 0; i < lines.length; i++) {
       final String line = lines[i];
 
@@ -335,7 +356,7 @@ class MemoPainter extends CustomPainter {
         canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
       }
 
-      for (double y = 0; y < size.height; y += charHeight) {
+      for (double y = 0; y < size.height; y += lineHeight) {
         canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
       }
     }

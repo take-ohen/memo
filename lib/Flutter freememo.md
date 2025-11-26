@@ -2125,3 +2125,201 @@ SingleChildScrollView(
 ```
 
 この修正により、`CustomPaint` の描画領域がデータに合わせて縦に伸び、2行目以降もクリックイベントを受け付けられるようになります。
+
+
+## 現在、マウスカーソルで2行目以降をクリックしてもマウスカーソルが移動しない現象が起きている。ただ、これはテキストのある行までしか、移動処理をしない作りになっているので、理由は分かってる。直そうかと思ったが、どうやらこの修正方針はこのエディタの本質に関わることに気づいた。マウスカーソルと画面カーソルの挙動は重要な要素の1つで、どうあるべきかを Gemにファイル「マウスカーソルと画面カーソルの挙動.txt」にある程度まとめてアップロードした。 どのようにアプローチしたら良いだろうか？
+
+共有いただいた仕様「マウスカーソルと画面カーソルの挙動.txt」を拝見しました。
+
+非常に明確です。これは一般的なエディタ（Notepadなど）と、高機能な矩形編集エディタ（VS Codeの矩形選択モードやExcel）のハイブリッドな挙動です。
+
+**核心となる仕様:**
+
+1.  **カーソルはどこにでも行ける（Virtual Space）**: マウスやAlt+矢印では、データが存在しない「虚空」にカーソルを置ける。
+2.  **データは書くまで作らない（Lazy Padding）**: カーソル移動だけではデータ（改行やスペース）を埋めない。
+3.  **書く瞬間に実体化する**: 「虚空」に文字を入力しようとした瞬間、そこまでの空白を自動生成して埋める。
+
+この仕様を実現するために、これまでのアプローチ（単純なクランプ）を捨て、\*\*「座標計算とデータの分離」\*\*を行います。
+
+順を追って、この「エディタの本質」を実装しましょう。
+
+-----
+
+## 🚀 ステップ 1: 描画ロジックの修正（虚空にカーソルを描く）
+
+まず、カーソルがデータのない場所（例えば100行目）にあっても、アプリが落ちずに描画できるように `MemoPainter` を修正します。
+
+これまでは「行のループの中でカーソルを描く」判定をしていましたが、これだと行が存在しない場所にカーソルを描けません。**カーソルの描画を行ループから独立させます。**
+
+```dart
+// MemoPainter クラス内
+
+@override
+void paint(Canvas canvas, Size size) {
+  // 1. テキストの描画（ここは変更なし）
+  double verticalOffset = 0.0;
+  for (int i = 0; i < lines.length; i++) {
+    // ... (既存のテキスト描画ロジック) ...
+    verticalOffset += lineHeight;
+  }
+
+  // 2. カーソルの描画（ループの外に出し、計算で位置を決める）
+  // これにより、データが存在しない行（虚空）にもカーソルが描画できる
+  final double cursorX = cursorCol * charWidth;
+  final double cursorY = cursorRow * lineHeight;
+
+  final Paint cursorPaint = Paint()
+    ..color = Colors.black
+    ..strokeWidth = 2.0
+    ..strokeCap = StrokeCap.square;
+
+  final Offset startPoint = Offset(cursorX, cursorY);
+  final Offset endPoint = Offset(cursorX, cursorY + lineHeight);
+
+  canvas.drawLine(startPoint, endPoint, cursorPaint);
+}
+```
+
+これで、`_cursorRow` が `100` でもエラーにならず、画面のはるか下にカーソルが表示されるようになります。
+
+-----
+
+## 🚀 ステップ 2: マウス操作の「制限解除」
+
+次に、`_handleTap`（マウスクリック時の処理）から、データ範囲内への「吸着（クランプ）処理」を撤廃します。
+
+仕様通り、**「その箇所に画面カーソルが移動するが、何もしない。エリアも拡張しない」** を実装します。
+
+```dart
+// _handleTap メソッド
+
+void _handleTap(TapDownDetails details) {
+  setState(() {
+    // 座標から単純に行と列を計算
+    int targetRow = (details.localPosition.dy / _lineHeight).floor();
+    int targetCol = (details.localPosition.dx / _charWidth).round();
+
+    // 制限（min/max）をかけずに、計算結果をそのまま採用する。
+    // これで、文字のないエリアや行外をクリックしても、そこにカーソルが移動する。
+    _cursorRow = max(0, targetRow); // マイナスだけは防ぐ
+    _cursorCol = max(0, targetCol); // マイナスだけは防ぐ
+
+    _focusNode.requestFocus();
+  });
+}
+```
+
+-----
+
+## 🚀 ステップ 3: 入力時の「自動拡張（Lazy Padding）」
+
+これがこのエディタの心臓部です。
+**「文字のある入力をすることによりそこまでエリアが拡張される」** という仕様を実装します。
+
+キー入力処理の直前に、「カーソル位置までデータを埋める」専用関数（ヘルパーメソッド）を呼び出すようにします。
+
+```dart
+// _EditorPageState クラス内に追加するヘルパーメソッド
+
+void _fillVirtualSpaceIfNeeded() {
+  // 1. 縦の拡張: カーソル行まで空行を増やす
+  while (_lines.length <= _cursorRow) {
+    _lines.add("");
+  }
+
+  // 2. 横の拡張: カーソル列までスペースで埋める
+  if (_cursorCol > _lines[_cursorRow].length) {
+    // padRight で足りない分を半角スペースで埋める
+    _lines[_cursorRow] = _lines[_cursorRow].padRight(_cursorCol);
+  }
+}
+```
+
+そして、`_handleKeyPress` の文字入力部分でこれを呼び出します。
+
+```dart
+// _handleKeyPress 内の文字入力部分
+
+      // 文字入力（Enterや矢印キー以外）
+      if (character != null && character.isNotEmpty) {
+        
+        // ★ ここで「虚空」を「実データ」に変換する
+        _fillVirtualSpaceIfNeeded();
+
+        // 以降は、データが存在することが保証されているので、既存ロジックで安全に動く
+        final String currentLine = _lines[_cursorRow];
+        final String newLine = currentLine.substring(0, _cursorCol) + 
+                               character + 
+                               currentLine.substring(_cursorCol);
+        
+        _lines[_cursorRow] = newLine;
+        _cursorCol++;
+      }
+```
+
+-----
+
+## 🚀 ステップ 4: 矢印キーの挙動（標準 vs Alt）
+
+仕様書にある以下の挙動を実装します。
+
+  * **通常:** データ範囲内で止まる（標準エディタ挙動）。
+  * **Alt+矢印:** データ範囲を無視して移動できる（虚空移動）。
+
+`_handleKeyPress` の矢印キー部分を以下のように書き換えます。
+（※ `isAltPressed` を判定するには、`RawKeyboardListener` などを併用するか、`HardwareKeyboard.instance.isAltPressed` を使います。ここでは簡単な後者を使います）
+
+```dart
+import 'package:flutter/services.dart'; // HardwareKeyboardのため
+
+// ... _handleKeyPress 内 ...
+
+    // Altキーが押されているかチェック
+    bool isAlt = HardwareKeyboard.instance.isAltPressed;
+    
+    // 現在の行の長さを取得（行が存在しない場合は 0 とする）
+    int currentLineLength = 0;
+    if (_cursorRow < _lines.length) {
+      currentLineLength = _lines[_cursorRow].length;
+    }
+
+    if (physicalKey == PhysicalKeyboardKey.arrowRight) {
+      if (isAlt) {
+        // [Alt] 虚空移動: 制限なしで右へ
+        _cursorCol++;
+      } else {
+        // [通常] 行末で止まり、それ以上で次行へ
+        if (_cursorCol < currentLineLength) {
+           _cursorCol++;
+        } else if (_cursorRow < _lines.length - 1) {
+           // 次の行の先頭へ
+           _cursorRow++;
+           _cursorCol = 0;
+        }
+      }
+
+    } else if (physicalKey == PhysicalKeyboardKey.arrowDown) {
+      if (isAlt) {
+        // [Alt] 虚空移動: 制限なしで下へ
+        _cursorRow++;
+      } else {
+        // [通常] データがある行までしか移動できない
+        if (_cursorRow < _lines.length - 1) {
+          _cursorRow++;
+          // 移動先の行の長さに合わせる（スナップ）
+          int nextLineLen = _lines[_cursorRow].length;
+          _cursorCol = min(_cursorCol, nextLineLen);
+        }
+      }
+
+    } 
+    // ... Left, Up も同様の考え方で実装
+```
+
+-----
+
+この4ステップのアプローチで、あなたの定義した「エディタの本質（虚空カーソルと遅延埋め込み）」を実現できます。
+
+まずは **ステップ1（Painterの修正）** と **ステップ2（Mouseの制限解除）** を適用するだけで、「クリックでどこにでもカーソルが行ける（でもエラーで落ちない）」状態が作れます。
+
+ここから始めましょうか？
