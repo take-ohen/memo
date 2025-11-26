@@ -295,7 +295,6 @@ class MemoPainter extends CustomPainter {
     double verticalOffset = 0.0; // Y 座標初期値
     print('PAINTER !! 1');
     for (int i = 0; i < lines.length; i++) {
-      print('PAINTER !! 2${i} ${lines.length}');
       final String line = lines[i];
 
       final textSpan = TextSpan(text: line, style: textStyle);
@@ -311,20 +310,20 @@ class MemoPainter extends CustomPainter {
       // (0, verticalOffset)の位置から開始
       textPainter.paint(canvas, Offset(0, verticalOffset));
 
-      // カーソルの描画
-      if (i == cursorRow) {
-        //  charWidth * cursorCol でX座標を計算
-        final double cursorX = charWidth * cursorCol;
-        print('verticalOffset=${verticalOffset}, lineHeight=${lineHeight}');
-        // カーソル描画の開始点と終了点を計算
-        final Offset startPoint = Offset(cursorX, verticalOffset);
-        // lineHeight を使用して終了Y座標を計算
-        final Offset endPoint = Offset(cursorX, verticalOffset + lineHeight);
-
-        canvas.drawLine(startPoint, endPoint, cursorPaint);
-      }
       verticalOffset += lineHeight;
     }
+
+    // カーソルの描画
+    //  charWidth * cursorCol でX座標を計算
+    final double cursorX = cursorCol * charWidth;
+    final double cursorY = cursorRow * lineHeight;
+
+    // カーソル描画の開始点と終了点を計算
+    final Offset startPoint = Offset(cursorX, cursorY);
+    // lineHeight を使用して終了Y座標を計算
+    final Offset endPoint = Offset(cursorX, cursorY + lineHeight);
+
+    canvas.drawLine(startPoint, endPoint, cursorPaint);
 
     // showGridがtrueのときだけ線を描く
     if (showGrid) {
