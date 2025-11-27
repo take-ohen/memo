@@ -122,7 +122,13 @@ class _EditorPageState extends State<EditorPage> {
   // KeyboardListener の キーを押されたときの実装。
   KeyEventResult _handleKeyPress(KeyEvent event) {
     // KeyDownEvent 以外は標準の処理に任せる。
-    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    // ただし、押しっぱなしにした場合は,KeyDownEventではなく、
+    // KeyRepeatEventが返ってくるのでそちらも押しっぱなしする場合,
+    // それも確認しないといけない。
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+
     // キーが押された 瞬間(KeyDownEvent) の処理 のみを行う。
 
     // PhysicalKeyboardKey は Enter や Backspace などの特定キーを識別するために使用

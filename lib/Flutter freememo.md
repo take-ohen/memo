@@ -3085,5 +3085,57 @@ child: Focus(
 
 この3ステップの変更で、**スクロール暴走の原因となった論理の漏れは完全に解消**されます。
 
-## 
+## 方針に従いコードは修正できた。簡単な挙動確認では、問題がなかった。
+ところで、
+```
+if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
+```
+この   KeyRepeatEvent とは何？現在は、コードに含めていない。
 
+コードの修正と動作確認、お疲れ様でした。スクロール暴走の問題が解消されたとのこと、承知いたしました。
+
+ご質問の **`KeyRepeatEvent`** についてですが、これは\*\*「キーの長押し」\*\*をシステムが区別するために使われる、`KeyEvent` の一種です。
+
+-----
+
+## 🔑 KeyRepeatEvent の役割
+
+`KeyEvent` には主に以下の 3 種類があります。
+
+| イベントの種類 | 役割 | 発生タイミング |
+| :--- | :--- | :--- |
+| **`KeyDownEvent`** | **キーが初めて押し下げられた瞬間** | キーを押した直後 |
+| **`KeyRepeatEvent`** | **キーが押し続けられている間** | 初回の `KeyDownEvent` の後、システムが定めた間隔ごと |
+| **`KeyUpEvent`** | **キーが離された瞬間** | キーを離した直後 |
+
+### 📌 `KeyRepeatEvent` が必要な理由
+
+テキストエディタのようなアプリケーションでは、この `KeyRepeatEvent` の扱いが重要になります。
+
+1.  **連続入力**: ユーザーが文字キー（例：'A'）を押し続けた場合、最初の 'A' は `KeyDownEvent` で処理され、続く 'A' の連続入力は全て `KeyRepeatEvent` として処理されます。
+2.  **連続移動**: カーソルキー（矢印）を押し続けた場合も同様に、カーソルを連続的に移動させるためには、`KeyDownEvent` だけでなく、この **`KeyRepeatEvent` も処理対象に含める**必要があります。
+
+### 📌 現在のあなたのコードの状況
+
+あなたが現在採用している条件式は以下の通りです。
+
+```dart
+if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
+```
+
+この式に **`KeyRepeatEvent` を含めなかった場合**、ユーザーが矢印キーを押し続けても、**カーソルは一回しか移動しません**。
+
+#### 推奨される対応
+
+カーソルの連続移動や、文字の連続入力を実現するためには、`_handleKeyPress` の冒頭の条件式に `KeyRepeatEvent` を含めることを**強く推奨**します。
+
+**変更後の条件式:**
+
+```dart
+// KeyDownEvent (最初の押し込み) と KeyRepeatEvent (長押しによる連続) のみ処理する
+if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+    return KeyEventResult.ignored;
+}
+```
+
+この `KeyRepeatEvent` の処理を含めることで、エディタとしてのユーザー体験が向上します。
