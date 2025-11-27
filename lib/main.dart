@@ -63,6 +63,15 @@ class _EditorPageState extends State<EditorPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _focusNode.requestFocus();
     });
+
+    // ★★★ 調査用リスナーを追加 ★★★
+    // スクロールが発生するたびに、どこから呼び出されたかを出力する
+    _verticalScrollController.addListener(() {
+      print(
+        '--- Vertical Scroll Detected! Offset: ${_verticalScrollController.offset} ---',
+      );
+      debugPrintStack();
+    });
   }
 
   @override
@@ -138,7 +147,7 @@ class _EditorPageState extends State<EditorPage> {
           // 削除処理の実装
         } else if (physicalKey == PhysicalKeyboardKey.arrowLeft) {
           // 左キー カーソルを左に移動( 最小 0 )
-          _cursorCol = max(0, col - 1);
+          _cursorCol = max(0, _cursorCol - 1);
         } else if (physicalKey == PhysicalKeyboardKey.arrowRight) {
           if (isAlt) {
             // [Alt] 虚空移動: 制限なしで右へ
@@ -154,12 +163,17 @@ class _EditorPageState extends State<EditorPage> {
             }
           }
         } else if (physicalKey == PhysicalKeyboardKey.arrowUp) {
+          print('In [arrowUp] _cursorCol=$_cursorCol, _cursorRow=$_cursorRow');
           // 上キー
-          final int newRow = max(0, row - 1);
+          final int newRow = max(0, _cursorRow - 1);
           _cursorRow = newRow;
           // 新しい行の長さに合わせてカーソル位置を調整（行末を超えないように）
-          _cursorCol = min(_lines[newRow].length, col);
+          _cursorCol = min(_lines[newRow].length, _cursorCol);
+          print('Out [arrowUp] _cursorCol=$_cursorCol, _cursorRow=$_cursorRow');
         } else if (physicalKey == PhysicalKeyboardKey.arrowDown) {
+          print(
+            'In [arrowDown] _cursorCol=$_cursorCol, _cursorRow=$_cursorRow',
+          );
           if (isAlt) {
             // [Alt] 虚空移動: 制限なしで下へ
             _cursorRow++;
@@ -172,6 +186,9 @@ class _EditorPageState extends State<EditorPage> {
               _cursorCol = min(_cursorCol, nextLineLen);
             }
           }
+          print(
+            'Out [arrowDown] _cursorCol=$_cursorCol, _cursorRow=$_cursorRow',
+          );
         } else if (character != null && character.isNotEmpty) {
           // 通常の文字挿
 
@@ -247,9 +264,28 @@ class _EditorPageState extends State<EditorPage> {
                 controller: _verticalScrollController,
                 scrollDirection: Axis.vertical,
                 // 垂直のスクロールバーの表示
-                child: KeyboardListener(
+                // イベントを消費しないKeyboardListenerではなく Focusを使う。
+                child: Focus(
                   focusNode: _focusNode,
-                  onKeyEvent: _handleKeyPress,
+                  // onKeyEventではなく onKey:を使う
+                  onKeyEvent: (FocusNode node, KeyEvent event) {
+                    // ※ _handleKeyPress の引数を (KeyEvent event) に修正することを推奨します
+                    // そのまま渡せない場合は、ここで直接ロジックを書くか、キャストが必要です
+                    _handleKeyPress(event);
+
+                    // 矢印キーなどが押された際、Flutter標準のフォーカス移動（スクロールジャンプ）を
+                    // 防ぐために「handled (処理済み)」を返します。
+                    // KeyDownEvent (押し込み) または KeyRepeatEvent (長押し) の場合
+                    if (event is KeyDownEvent || event is KeyRepeatEvent) {
+                      return KeyEventResult.handled;
+                    }
+                    return KeyEventResult.ignored;
+                  },
+
+                  // 垂直のスクロールバーの表示
+                  //                child: KeyboardListener(
+                  //                  focusNode: _focusNode,
+                  //                  onKeyEvent: _handleKeyPress,
                   // 垂直のスクロールバーの表示
                   child: SingleChildScrollView(
                     controller: _horizontalScrollController,
@@ -315,6 +351,7 @@ class MemoPainter extends CustomPainter {
       ..strokeCap = StrokeCap.square;
 
     double verticalOffset = 0.0; // Y 座標初期値
+    print('MemoPainter:paint lines=${lines.length}');
     for (int i = 0; i < lines.length; i++) {
       final String line = lines[i];
 
@@ -349,7 +386,7 @@ class MemoPainter extends CustomPainter {
     // showGridがtrueのときだけ線を描く
     if (showGrid) {
       final paint = Paint()
-        ..color = Colors.grey.withOpacity(0.3)
+        ..color = Colors.grey.withValues(alpha: 0.3)
         ..strokeWidth = 1.0;
 
       for (double x = 0; x < size.width; x += charWidth) {
