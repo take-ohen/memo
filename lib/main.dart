@@ -120,76 +120,73 @@ class _EditorPageState extends State<EditorPage> {
   }
 
   // KeyboardListener の キーを押されたときの実装。
-  void _handleKeyPress(KeyEvent event) {
+  KeyEventResult _handleKeyPress(KeyEvent event) {
+    // KeyDownEvent 以外は標準の処理に任せる。
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
     // キーが押された 瞬間(KeyDownEvent) の処理 のみを行う。
-    if (event is KeyDownEvent) {
-      // PhysicalKeyboardKey は Enter や Backspace などの特定キーを識別するために使用
-      final PhysicalKeyboardKey physicalKey = event.physicalKey;
-      // character は入力された文字そのもの（例: 'a', '1', 'あ'）
-      final String? character = event.character;
 
-      setState(() {
-        // 安全のため、row, colに現在のカーソル位置を代入する。．
-        final int row = _cursorRow;
-        final int col = _cursorCol;
-        // Altキーが押されているかチェック
-        bool isAlt = HardwareKeyboard.instance.isAltPressed;
+    // PhysicalKeyboardKey は Enter や Backspace などの特定キーを識別するために使用
+    final PhysicalKeyboardKey physicalKey = event.physicalKey;
+    // character は入力された文字そのもの（例: 'a', '1', 'あ'）
+    final String? character = event.character;
 
-        // 現在の行の長さを取得（行が存在しない場合は 0 とする）
-        int currentLineLength = 0;
-        if (_cursorRow < _lines.length) {
-          currentLineLength = _lines[_cursorRow].length;
-        }
+    // Altキーが押されているかチェック
+    bool isAlt = HardwareKeyboard.instance.isAltPressed;
 
-        if (physicalKey == PhysicalKeyboardKey.enter) {
-          // 改行処理の実装
-        } else if (physicalKey == PhysicalKeyboardKey.backspace) {
-          // 削除処理の実装
-        } else if (physicalKey == PhysicalKeyboardKey.arrowLeft) {
-          // 左キー カーソルを左に移動( 最小 0 )
-          _cursorCol = max(0, _cursorCol - 1);
-        } else if (physicalKey == PhysicalKeyboardKey.arrowRight) {
-          if (isAlt) {
-            // [Alt] 虚空移動: 制限なしで右へ
+    // 現在の行の長さを取得（行が存在しない場合は 0 とする）
+    int currentLineLength = 0;
+    if (_cursorRow < _lines.length) {
+      currentLineLength = _lines[_cursorRow].length;
+    }
+    switch (physicalKey) {
+      case PhysicalKeyboardKey.enter:
+        // 改行処理の実装
+        return KeyEventResult.handled;
+      case PhysicalKeyboardKey.backspace:
+        // 削除処理の実装
+        return KeyEventResult.handled;
+      case PhysicalKeyboardKey.arrowLeft:
+        // 左キー カーソルを左に移動( 最小 0 )
+        _cursorCol = max(0, _cursorCol - 1);
+        return KeyEventResult.handled;
+      case PhysicalKeyboardKey.arrowRight:
+        if (isAlt) {
+          // [Alt] 虚空移動: 制限なしで右へ
+          _cursorCol++;
+        } else {
+          // [通常] 行末で止まり、それ以上で次行へ
+          if (_cursorCol < currentLineLength) {
             _cursorCol++;
-          } else {
-            // [通常] 行末で止まり、それ以上で次行へ
-            if (_cursorCol < currentLineLength) {
-              _cursorCol++;
-            } else if (_cursorRow < _lines.length - 1) {
-              // 次の行の先頭へ
-              _cursorRow++;
-              _cursorCol = 0;
-            }
-          }
-        } else if (physicalKey == PhysicalKeyboardKey.arrowUp) {
-          print('In [arrowUp] _cursorCol=$_cursorCol, _cursorRow=$_cursorRow');
-          // 上キー
-          final int newRow = max(0, _cursorRow - 1);
-          _cursorRow = newRow;
-          // 新しい行の長さに合わせてカーソル位置を調整（行末を超えないように）
-          _cursorCol = min(_lines[newRow].length, _cursorCol);
-          print('Out [arrowUp] _cursorCol=$_cursorCol, _cursorRow=$_cursorRow');
-        } else if (physicalKey == PhysicalKeyboardKey.arrowDown) {
-          print(
-            'In [arrowDown] _cursorCol=$_cursorCol, _cursorRow=$_cursorRow',
-          );
-          if (isAlt) {
-            // [Alt] 虚空移動: 制限なしで下へ
+          } else if (_cursorRow < _lines.length - 1) {
+            // 次の行の先頭へ
             _cursorRow++;
-          } else {
-            // [通常] データがある行までしか移動できない
-            if (_cursorRow < _lines.length - 1) {
-              _cursorRow++;
-              // 移動先の行の長さに合わせる（スナップ）
-              int nextLineLen = _lines[_cursorRow].length;
-              _cursorCol = min(_cursorCol, nextLineLen);
-            }
+            _cursorCol = 0;
           }
-          print(
-            'Out [arrowDown] _cursorCol=$_cursorCol, _cursorRow=$_cursorRow',
-          );
-        } else if (character != null && character.isNotEmpty) {
+        }
+        return KeyEventResult.handled;
+      case PhysicalKeyboardKey.arrowUp:
+        // 上キー
+        final int newRow = max(0, _cursorRow - 1);
+        _cursorRow = newRow;
+        // 新しい行の長さに合わせてカーソル位置を調整（行末を超えないように）
+        _cursorCol = min(_lines[newRow].length, _cursorCol);
+        return KeyEventResult.handled;
+      case PhysicalKeyboardKey.arrowDown:
+        if (isAlt) {
+          // [Alt] 虚空移動: 制限なしで下へ
+          _cursorRow++;
+        } else {
+          // [通常] データがある行までしか移動できない
+          if (_cursorRow < _lines.length - 1) {
+            _cursorRow++;
+            // 移動先の行の長さに合わせる（スナップ）
+            int nextLineLen = _lines[_cursorRow].length;
+            _cursorCol = min(_cursorCol, nextLineLen);
+          }
+        }
+        return KeyEventResult.handled;
+      default:
+        if (character != null && character.isNotEmpty) {
           // 通常の文字挿
 
           // 文字入力モードの最初で「虚空」を「実データ」に変換する
@@ -206,8 +203,10 @@ class _EditorPageState extends State<EditorPage> {
 
           _lines[_cursorRow] = newLine; // _lines の該当行を新しい文字列で更新
           _cursorCol++; // カーソル位置（col）を1つ右へ移動
+          return KeyEventResult.handled;
         }
-      });
+        // 関係ないキー（Shift単体など）は無視して、システムに任せる
+        return KeyEventResult.ignored;
     }
   }
 
@@ -269,19 +268,19 @@ class _EditorPageState extends State<EditorPage> {
                   focusNode: _focusNode,
                   // onKeyEventではなく onKey:を使う
                   onKeyEvent: (FocusNode node, KeyEvent event) {
-                    // ※ _handleKeyPress の引数を (KeyEvent event) に修正することを推奨します
-                    // そのまま渡せない場合は、ここで直接ロジックを書くか、キャストが必要です
-                    _handleKeyPress(event);
+                    // キー処理ロジックを実行し、結果を受け取る。
+                    final result = _handleKeyPress(event);
 
-                    // 矢印キーなどが押された際、Flutter標準のフォーカス移動（スクロールジャンプ）を
-                    // 防ぐために「handled (処理済み)」を返します。
-                    // KeyDownEvent (押し込み) または KeyRepeatEvent (長押し) の場合
-                    if (event is KeyDownEvent || event is KeyRepeatEvent) {
-                      return KeyEventResult.handled;
+                    // 処理済み (handled) の場合のみ setState を実行する。
+                    if (result == KeyEventResult.handled) {
+                      setState(() {
+                        // _handleKeyPress で既に状態変数は更新済み。
+                        // 何も書かなくて良い。
+                      });
                     }
-                    return KeyEventResult.ignored;
+                    // 3. 結果を Flutter に返却し、予期せぬスクロールを防ぎます
+                    return result;
                   },
-
                   // 垂直のスクロールバーの表示
                   //                child: KeyboardListener(
                   //                  focusNode: _focusNode,
