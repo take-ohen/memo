@@ -29,7 +29,7 @@ class EditorPage extends StatefulWidget {
   State<EditorPage> createState() => _EditorPageState();
 }
 
-class _EditorPageState extends State<EditorPage> {
+class _EditorPageState extends State<EditorPage> with TextInputClient {
   double _charWidth = 0.0; // 1文字の幅
   double _charHeight = 0.0; // 1文字の高さ
   double _lineHeight = 0.0; // 1行の高さ
@@ -39,6 +39,9 @@ class _EditorPageState extends State<EditorPage> {
 
   //  グリッド表示のON/OFFを管理する変数を追加
   bool _showGrid = false; // デフォルトはOFFにしておきます
+
+  // 追加: IMEとの接続を管理する変数
+  TextInputConnection? _inputConnection;
 
   // スクロールバーを表示されるためのコントローラーの明示
   final ScrollController _horizontalScrollController = ScrollController();
@@ -115,6 +118,9 @@ class _EditorPageState extends State<EditorPage> {
 
       // フォーカスを取得する（キーボード入力への準備）
       _focusNode.requestFocus();
+
+      // IME接続を開始！
+      _activateIme();
     });
   }
 
@@ -281,6 +287,26 @@ class _EditorPageState extends State<EditorPage> {
     }
   }
 
+  // IMEに接続する関数
+  void _activateIme() {
+    if (_inputConnection == null || !_inputConnection!.attached) {
+      // 構成設定（OSに「これはただのテキストだよ」と伝える）
+      final config = TextInputConfiguration(
+        inputType: TextInputType.multiline,
+        inputAction: TextInputAction.newline,
+        // Flutter 3.22以降は必須
+        viewId: View.of(context).viewId,
+      );
+
+      // 接続開始！ (this は TextInputClient である自分自身)
+      _inputConnection = TextInput.attach(this, config);
+
+      // キーボードを表示（スマホの場合。デスクトップでも念のため呼ぶ）
+      _inputConnection!.show();
+      print("IME接続開始！");
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -338,11 +364,6 @@ class _EditorPageState extends State<EditorPage> {
                     // 3. 結果を Flutter に返却し、予期せぬスクロールを防ぎます
                     return result;
                   },
-                  // 垂直のスクロールバーの表示
-                  //                child: KeyboardListener(
-                  //                  focusNode: _focusNode,
-                  //                  onKeyEvent: _handleKeyPress,
-                  // 垂直のスクロールバーの表示
                   child: SingleChildScrollView(
                     controller: _horizontalScrollController,
                     scrollDirection: Axis.horizontal,
@@ -375,6 +396,62 @@ class _EditorPageState extends State<EditorPage> {
           ),
     );
   }
+  // ------------------------------------------------------------------
+  // TextInputClient の必須実装 ↓
+  // ------------------------------------------------------------------
+
+  // Q. IME「今のテキストの状態（どこにカーソルがあるか等）を教えて？」
+  // A. とりあえず「空っぽです」と答えておく（後で実装）
+  @override
+  TextEditingValue get currentTextEditingValue {
+    return TextEditingValue.empty;
+  }
+
+  // Q. IME「ユーザーが文字を入力したよ！このデータを受け取って！」
+  // A. ここに日本語入力のデータが流れてきます。今はログに出すだけ。
+  @override
+  void updateEditingValue(TextEditingValue value) {
+    print("IMEからの入力: text=${value.text}, composing=${value.composing}");
+
+    // ★重要: ここで受け取ったデータを _lines に反映させる処理を後で書く
+  }
+
+  // Q. IME「エンターキー(決定/検索ボタンなど)が押されたよ」
+  // A. 必要なら処理する
+  @override
+  void performAction(TextInputAction action) {
+    print("IMEアクション: $action");
+  }
+
+  // その他、必須だが今回は使わないメソッド（空でOK）
+  @override
+  void updateFloatingCursor(RawFloatingCursorPoint point) {}
+
+  @override
+  void showAutocorrectionPromptRect(int start, int end) {}
+
+  @override
+  void connectionClosed() {
+    print("IME接続が切れました");
+    _inputConnection = null;
+  }
+
+  @override
+  void performPrivateCommand(String action, Map<String, dynamic> data) {}
+
+  @override
+  void insertContent(KeyboardInsertedContent content) {}
+
+  @override
+  void showToolbar() {}
+
+  // 最新の FlutterのAutofill機能に対応するための必須ゲッター(追加)
+  @override
+  AutofillScope? get currentAutofillScope => null;
+
+  // ------------------------------------------------------------------
+  //  TextInputClient の必須実装 ↑
+  // ------------------------------------------------------------------
 }
 
 class MemoPainter extends CustomPainter {
