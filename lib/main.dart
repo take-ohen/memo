@@ -1,4 +1,3 @@
-// キーイベントを追加した。カーソル移動をいれてキー入力を入れたエラーの出たバージョン
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // HardwareKeyboardのため
 import 'dart:math';
@@ -66,12 +65,12 @@ class _EditorPageState extends State<EditorPage> {
 
     // ★★★ 調査用リスナーを追加 ★★★
     // スクロールが発生するたびに、どこから呼び出されたかを出力する
-    _verticalScrollController.addListener(() {
-      print(
-        '--- Vertical Scroll Detected! Offset: ${_verticalScrollController.offset} ---',
-      );
-      debugPrintStack();
-    });
+    //_verticalScrollController.addListener(() {
+    //  print(
+    //    '--- Vertical Scroll Detected! Offset: ${_verticalScrollController.offset} ---',
+    //  );
+    //  debugPrintStack();
+    //});
   }
 
   @override
@@ -146,10 +145,62 @@ class _EditorPageState extends State<EditorPage> {
     }
     switch (physicalKey) {
       case PhysicalKeyboardKey.enter:
-        // 改行処理の実装
+        // Shiftキーと同時押しされた場合は、デフォルト動作
+        // （改行なしの決定など）を避けるため、
+        // ここで特殊な操作（例：コードエディタでのインデント挿入など）を定義しない。
+
+        // 現在の行を取得
+        final currentLine = _lines[_cursorRow];
+
+        // 現在のカーソル位置で文字列を分割
+        final part1 = currentLine.substring(0, _cursorCol);
+        final part2 = currentLine.substring(_cursorCol);
+
+        // 既存の行を part1 で上書き
+        _lines[_cursorRow] = part1;
+
+        // 新しい行として part2 を挿入
+        _lines.insert(_cursorRow + 1, part2);
+
+        // カーソル位置を新しい行の先頭に移動
+        _cursorRow++;
+        _cursorCol = 0; // 新しい行の先頭（0列目）に移動
+
         return KeyEventResult.handled;
       case PhysicalKeyboardKey.backspace:
-        // 削除処理の実装
+        if (_cursorCol > 0) {
+          // パターン 1: カーソルが行の途中にある場合
+          final currentLine = _lines[_cursorRow];
+
+          // カーソル位置の直前の文字を削除
+          final part1 = currentLine.substring(0, _cursorCol - 1);
+          final part2 = currentLine.substring(_cursorCol);
+          _lines[_cursorRow] = part1 + part2;
+
+          // カーソルを一つ前に移動
+          _cursorCol--;
+        } else if (_cursorRow > 0) {
+          // パターン 2: カーソルが行の先頭 (0列目) にあり、かつ1行目ではない場合
+
+          // 現在の行の内容を保存
+          final lineToAppend = _lines[_cursorRow];
+
+          // カーソルを前の行の末尾に移動させる準備
+          final prevLineLength = _lines[_cursorRow - 1].length;
+
+          // 現在の行の内容を前の行の末尾に追加（結合）
+          _lines[_cursorRow - 1] += lineToAppend;
+
+          // 現在の行をリストから削除
+          _lines.removeAt(_cursorRow);
+
+          // カーソルを前の行に移動させ、位置を結合した場所の末尾に設定
+          _cursorRow--;
+          _cursorCol = prevLineLength;
+        } else {
+          // パターン 3: カーソルが1行目の先頭にある場合 (何もしない)
+          return KeyEventResult.handled;
+        }
         return KeyEventResult.handled;
       case PhysicalKeyboardKey.arrowLeft:
         // 左キー カーソルを左に移動( 最小 0 )
@@ -356,7 +407,7 @@ class MemoPainter extends CustomPainter {
       ..strokeCap = StrokeCap.square;
 
     double verticalOffset = 0.0; // Y 座標初期値
-    print('MemoPainter:paint lines=${lines.length}');
+
     for (int i = 0; i < lines.length; i++) {
       final String line = lines[i];
 

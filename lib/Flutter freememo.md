@@ -3139,3 +3139,159 @@ if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
 ```
 
 この `KeyRepeatEvent` の処理を含めることで、エディタとしてのユーザー体験が向上します。
+
+## 次はEnterキーの処理。
+
+承知いたしました。次は **Enterキー** の処理ですね。
+
+Enterキーは、現在のカーソル位置で**行を分割し、新しい行を開始する**という重要な役割を持ちます。
+
+-----
+
+## 🔑 Enterキーの処理方針
+
+Enterキーが押された際、`_handleKeyPress` メソッド内の `switch` 文の `case` に、以下の処理を組み込みます。
+
+### 1\. 処理の場所
+
+`_handleKeyPress` メソッド内の `switch` 文の `PhysicalKeyboardKey.enter` に対応する `case` ブロックです。
+
+### 2\. 処理のロジック
+
+Enterキーが押された際、主に以下の2つの状態を考慮し、状態変数 (`_lines`, `_cursorRow`, `_cursorCol`) を更新します。
+
+  * **現在の行を分割する**
+  * **カーソルを新しい行の先頭に移動させる**
+
+-----
+
+## 💻 修正コードの提案
+
+既存の `_handleKeyPress` 関数（`KeyEventResult` を返す関数）に、以下の `case` ブロックを追加または更新してください。
+
+```dart
+KeyEventResult _handleKeyPress(KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
+
+    // ... (isAlt, isControl, isShift の取得ロジックがここにあると仮定) ...
+
+    switch (event.physicalKey) {
+        // ... (arrowDown, arrowUp の case がここにあると仮定) ...
+
+        case PhysicalKeyboardKey.enter:
+            // Shiftキーと同時押しされた場合は、デフォルト動作（改行なしの決定など）を避けるため、
+            // ここで特殊な操作（例：コードエディタでのインデント挿入など）を定義できますが、
+            // 今回は単純な改行として扱います。
+            
+            // 1. 現在の行を取得
+            final currentLine = _lines[_cursorRow];
+            
+            // 2. 現在のカーソル位置で文字列を分割
+            final part1 = currentLine.substring(0, _cursorCol);
+            final part2 = currentLine.substring(_cursorCol);
+            
+            // 3. 既存の行を part1 で上書き
+            _lines[_cursorRow] = part1;
+            
+            // 4. 新しい行として part2 を挿入
+            _lines.insert(_cursorRow + 1, part2);
+            
+            // 5. カーソル位置を新しい行の先頭に移動
+            _cursorRow++;
+            _cursorCol = 0; // 新しい行の先頭（0列目）に移動
+
+            return KeyEventResult.handled;
+
+        // ... (default: の case が続く) ...
+    }
+}
+```
+
+この修正を適用した後、`Focus` ウィジェットの `onKeyEvent` で `setState` を呼び出す構造（前回の修正）により、画面が更新され、改行が反映されます。
+
+この **Enterキーの処理**でよろしいでしょうか。
+
+## 次はバックスペースだな。
+
+承知いたしました。次は **Backspaceキー** の処理ですね。
+
+Backspaceキーは、現在のカーソル位置の**直前の文字を削除し、カーソル位置を一つ前に移動させる**という役割を持ちます。また、行の先頭にカーソルがある場合は、**前の行と現在の行を結合する**という特殊な処理が必要です。
+
+-----
+
+## 🔑 Backspaceキーの処理方針
+
+Backspaceキーが押された際、`_handleKeyPress` メソッド内の `switch` 文の `PhysicalKeyboardKey.backspace` に対応する `case` ブロックに、以下のロジックを組み込みます。
+
+### 1\. 処理の場所
+
+`_handleKeyPress` メソッド内の `switch` 文の `PhysicalKeyboardKey.backspace` に対応する `case` ブロックです。
+
+### 2\. 処理のロジック
+
+主に、カーソルの位置によって以下の2パターンに分けて処理します。
+
+  * **カーソルが行の途中にある場合 ($\_cursorCol > 0$)**: 直前の文字を削除し、カーソルを1つ戻す。
+  * **カーソルが行の先頭にある場合 ($\_cursorCol = 0$)**: 現在の行を前の行に結合し、前の行へカーソルを移動させる。
+
+-----
+
+## 💻 修正コードの提案
+
+既存の `_handleKeyPress` 関数に、以下の `case` ブロックを追加または更新してください。
+
+```dart
+KeyEventResult _handleKeyPress(KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
+
+    // ... (isAlt, isControl, isShift の取得ロジックがここにあると仮定) ...
+
+    switch (event.physicalKey) {
+        // ... (arrowDown, arrowUp, enter の case がここにあると仮定) ...
+
+        case PhysicalKeyboardKey.backspace:
+            
+            if (_cursorCol > 0) {
+                // パターン 1: カーソルが行の途中にある場合
+                final currentLine = _lines[_cursorRow];
+                
+                // カーソル位置の直前の文字を削除
+                final part1 = currentLine.substring(0, _cursorCol - 1);
+                final part2 = currentLine.substring(_cursorCol);
+                _lines[_cursorRow] = part1 + part2;
+                
+                // カーソルを一つ前に移動
+                _cursorCol--;
+                
+            } else if (_cursorRow > 0) {
+                // パターン 2: カーソルが行の先頭 (0列目) にあり、かつ1行目ではない場合
+                
+                // 1. 現在の行の内容を保存
+                final lineToAppend = _lines[_cursorRow];
+                
+                // 2. カーソルを前の行の末尾に移動させる準備
+                final prevLineLength = _lines[_cursorRow - 1].length;
+
+                // 3. 現在の行の内容を前の行の末尾に追加（結合）
+                _lines[_cursorRow - 1] += lineToAppend;
+                
+                // 4. 現在の行をリストから削除
+                _lines.removeAt(_cursorRow);
+                
+                // 5. カーソルを前の行に移動させ、位置を結合した場所の末尾に設定
+                _cursorRow--;
+                _cursorCol = prevLineLength;
+                
+            } else {
+                // パターン 3: カーソルが1行目の先頭にある場合 (何もしない)
+                return KeyEventResult.handled; 
+            }
+
+            return KeyEventResult.handled;
+
+        // ... (default: の case が続く) ...
+    }
+}
+```
+
+この **Backspaceキーの処理**でよろしいでしょうか。
