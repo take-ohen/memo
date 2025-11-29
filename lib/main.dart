@@ -273,6 +273,30 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     }
   }
 
+  // 文字列を現在の位置にカーソル位置に挿入する共通関数
+  void _insertText(String text) {
+    if (text.isEmpty) return;
+
+    var currentLine = _lines[_cursorRow];
+
+    // カーソル位置が行の文字数より右にある場合（フリーカーソル状態）
+    // その隙間（Void）をスペースで埋めて、データの実体を作る
+    if (_cursorCol > currentLine.length) {
+      final int spacesNeeded = _cursorCol - currentLine.length;
+      // 必要な文だけ半角スペースを追加する。
+      currentLine += ' ' * spacesNeeded;
+    }
+
+    final part1 = currentLine.substring(0, _cursorCol);
+    final part2 = currentLine.substring(_cursorCol);
+
+    // 行を更新（カーソル位置に文字を挟む）
+    _lines[_cursorRow] = part1 + text + part2;
+
+    // カーソルを進める。
+    _cursorCol += text.length;
+  }
+
   // カーソル位置までデータを埋める
   void _fillVirtualSpaceIfNeeded() {
     //  縦の拡張: カーソル行まで空行を増やす
@@ -408,12 +432,26 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   }
 
   // Q. IME「ユーザーが文字を入力したよ！このデータを受け取って！」
-  // A. ここに日本語入力のデータが流れてきます。今はログに出すだけ。
+  // A. ここに日本語入力のデータが流れてきます。
   @override
   void updateEditingValue(TextEditingValue value) {
     print("IMEからの入力: text=${value.text}, composing=${value.composing}");
 
-    // ★重要: ここで受け取ったデータを _lines に反映させる処理を後で書く
+    // 確定判定: composingの範囲が (-1, -1) なら「確定」です
+    if (!value.composing.isValid) {
+      // 文字があれば挿入する
+      if (value.text.isNotEmpty) {
+        setState(() {
+          _insertText(value.text);
+        });
+      }
+      // 3. 重要: IMEに入力完了を伝え、内部状態をリセットする
+      // これをしないと、次に入力したときに「あいうえお」が重複して送られてきたりします。
+      // 「あなたの仕事は終わりました、次は空っぽから始めてください」と伝えます。
+      if (_inputConnection != null && _inputConnection!.attached) {
+        _inputConnection!.setEditingState(TextEditingValue.empty);
+      }
+    }
   }
 
   // Q. IME「エンターキー(決定/検索ボタンなど)が押されたよ」
