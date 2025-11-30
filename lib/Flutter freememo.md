@@ -4133,3 +4133,53 @@ void _activateIme(BuildContext context) {
 ```
 
 これで、`_handleFocusChange` や `initState` から渡された `context` を受け取れるようになり、エラーが消えます。
+
+##  スマートじゃない。
+```   
+      case PhysicalKeyboardKey.arrowLeft:
+        // 左キー カーソルを左に移動( 最小 0 )
+        //_cursorCol = max(0, _cursorCol - 1);
+        if (_cursorCol - 1 == -1) {
+          if (_cursorRow == 0) {
+          } else {
+            _cursorRow--;
+            _cursorCol = _lines[_cursorRow].length;
+          }
+        } else {
+          _cursorCol--;
+        }
+        return KeyEventResult.handled;
+```
+ご指摘の通りです。現在のロジックは、条件分岐が複雑で可読性が低くなっています。
+
+これは、\*\*「左に移動可能か」**と**「行をまたぐ必要があるか」\*\*を、ガード句（先に簡単な条件で処理を終える）を使ってスマートに処理することで改善できます。
+
+### ✨ スマートな左移動ロジック
+
+新しいロジックは、以下の3つのケースを簡潔に処理します。
+
+1.  **現在の行の左側に移動できるか？** (`_cursorCol > 0`)
+2.  **行の先頭にいるが、上に移動できる行があるか？** (`_cursorRow > 0`)
+3.  **文書の先頭 (`(0, 0)`) にいるか？** (何もしない)
+
+この構造で実装すると、コードが大幅に簡潔になります。
+
+```dart
+case PhysicalKeyboardKey.arrowLeft:
+  if (_cursorCol > 0) {
+    // 1. 現在の行で左へ移動（最も頻繁なケース）
+    _cursorCol--;
+  } else if (_cursorRow > 0) {
+    // 2. 行の先頭にいる場合、上の行の末尾へ移動
+    _cursorRow--;
+    _cursorCol = _lines[_cursorRow].length;
+  }
+  // 3. (0, 0)にいる場合は何もしない（ここでは処理なし）
+
+  // ★ 描画を更新するために setState() を呼び出す必要があります
+  // setState(() {}); 
+  
+  return KeyEventResult.handled;
+```
+
+この `if...else if` 構造は、ネストを解消し、意図を明確にするため、元のコードよりもはるかに\*\*スマート（Smart）\*\*な設計となります。

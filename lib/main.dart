@@ -241,8 +241,12 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
         }
         return KeyEventResult.handled;
       case PhysicalKeyboardKey.arrowLeft:
-        // 左キー カーソルを左に移動( 最小 0 )
-        _cursorCol = max(0, _cursorCol - 1);
+        if (_cursorCol > 0) {
+          _cursorCol--;
+        } else if (_cursorRow > 0) {
+          _cursorRow--;
+          _cursorCol = _lines[_cursorRow].length;
+        }
         return KeyEventResult.handled;
       case PhysicalKeyboardKey.arrowRight:
         if (isAlt) {
