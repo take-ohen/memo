@@ -60,10 +60,23 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   void initState() {
     super.initState();
     _calculateGlyphMetrics();
-    // フレーム描画後に実行する必要があるため、
-    // 非同期で呼び出すでフォーカスを当てる。
+
+    // Bindingの初期化保証
+    WidgetsBinding.instance;
+
+    // リスナーの設定
+    _focusNode.addListener(_handleFocusChange);
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      // フレーム描画後に実行する必要があるため、
+      // 非同期で呼び出すでフォーカスを当てる。
       _focusNode.requestFocus();
+      //
+      // フォーカスが既に当たっていると判断されてリスナーが動かない場合があるため
+      // ここで明示的に呼び出す
+      if (_focusNode.hasFocus) {
+        _activateIme(context);
+      }
     });
 
     // ★★★ 調査用リスナーを追加 ★★★
@@ -120,8 +133,27 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
       _focusNode.requestFocus();
 
       // IME接続を開始！
-      _activateIme();
+      _activateIme(context);
     });
+  }
+
+  // フォーカスの状態が変わったときに呼ばれる監視役
+  void _handleFocusChange() {
+    if (_focusNode.hasFocus) {
+      // ケース1: フォーカスが当たった時 (ON)
+      // View ID の問題を避けるため、念の為フレーム描画後に接続に行く
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        // ウィジェットがまだ画面にあるか(mounted)確認してから接続
+        if (mounted) {
+          _activateIme(context);
+        }
+      });
+    } else {
+      // ケース2: フォーカスが外れた時 (OFF)
+      // IMEとの接続を確実に切断する
+      _inputConnection?.close();
+      _inputConnection = null;
+    }
   }
 
   // KeyboardListener の キーを押されたときの実装。
@@ -277,16 +309,27 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   void _insertText(String text) {
     if (text.isEmpty) return;
 
+    // ---------------------------------------------------------
+    // 行 (Row) の拡張: カーソル位置まで行が足りなければ増やす
+    // ---------------------------------------------------------
+    while (_lines.length <= _cursorRow) {
+      _lines.add(""); // 空行を追加して埋める
+    }
+
     var currentLine = _lines[_cursorRow];
 
-    // カーソル位置が行の文字数より右にある場合（フリーカーソル状態）
-    // その隙間（Void）をスペースで埋めて、データの実体を作る
+    // ---------------------------------------------------------
+    // 列 (Col) の拡張: カーソル位置まで文字が足りなければスペースで埋める
+    // --------------------------------------------------------
     if (_cursorCol > currentLine.length) {
       final int spacesNeeded = _cursorCol - currentLine.length;
       // 必要な文だけ半角スペースを追加する。
       currentLine += ' ' * spacesNeeded;
     }
 
+    // ---------------------------------------------------------
+    // 文字の挿入
+    // ---------------------------------------------------------
     final part1 = currentLine.substring(0, _cursorCol);
     final part2 = currentLine.substring(_cursorCol);
 
@@ -312,19 +355,24 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   }
 
   // IMEに接続する関数
-  void _activateIme() {
+  void _activateIme(BuildContext context) {
     if (_inputConnection == null || !_inputConnection!.attached) {
+      // ViewIDの取得(引数のCoontext)を使う。
+      final viewId = View.of(context).viewId;
+      print("IME接続試行 View ID: $viewId");
+
       // 構成設定（OSに「これはただのテキストだよ」と伝える）
       final config = TextInputConfiguration(
         inputType: TextInputType.multiline,
         inputAction: TextInputAction.newline,
         // Flutter 3.22以降は必須
-        viewId: View.of(context).viewId,
+        // viewId: View.of(context).viewId,
+        viewId: viewId,
+        readOnly: false,
       );
 
       // 接続開始！ (this は TextInputClient である自分自身)
       _inputConnection = TextInput.attach(this, config);
-
       // キーボードを表示（スマホの場合。デスクトップでも念のため呼ぶ）
       _inputConnection!.show();
       print("IME接続開始！");

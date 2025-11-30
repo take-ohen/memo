@@ -3935,3 +3935,201 @@ onTapUp: (details) {
 これで、\*\*「どこでもクリックして書ける」\*\*という思想を維持したまま、システムエラー（RangeError）だけを排除できます。
 
 この修正を適用し、再度マウスで遠くをクリックして入力を試してください。
+
+##  結果は以下に。
+```
+1) アプリ起動
+2) 半角 "abcde " (画面カーソル 0,0)
+3) 全角モード あいう 確定
+   -> 入力できない。 一度カーソルを入力フォーカスしないと入力できない。フォーカスの時点で デバッグコンソールに IME開始！
+4) マウスで abcde の後ろにカーソルを移動。あいう 確定 -> あいうと表示される。
+5) マウスカーソルで col=6,row=2に移動(なにもない場所)。あいう 確定 
+```
+
+ログの提供ありがとうございます。状況が完全に把握できました。
+
+**「エディタの思想（フリーカーソル）」** を守るために、以下の2つの修正を行います。
+
+1.  **Row (行) の不足エラーへの対応**:
+
+      * **原因**: `row=2`（3行目）をクリックしたとき、データとしての `_lines` はまだ `['abcde']`（1行しかない）状態です。この状態で `_lines[2]` にアクセスしようとして `RangeError` (Listの範囲外アクセス) が発生しています。
+      * **対策**: `_insertText` の中で、**「カーソルが行数を超えていたら、そこまで空行を自動で追加する」** 処理を入れます。これが思想を守る実装です。
+
+2.  **起動時の入力不可への対応**:
+
+      * **原因**: アプリ起動時、フォーカスが当たっていても IME接続 (`_activateIme`) が自動で走っていないためです（リスナーが初期状態の変化を検知していない可能性があります）。
+      * **対策**: `initState` で強制的に IME 接続をリクエストします。
+
+-----
+
+### 1\. `_insertText` の修正 (行と列の自動拡張)
+
+このメソッドを以下のコードに**丸ごと書き換えてください**。
+これで、まだ存在しない行（row=2）や、存在しない列（col=6）に書き込んでも、自動でデータが埋められ、エラーが消えます。
+
+```dart
+  void _insertText(String text) {
+    if (text.isEmpty) return;
+
+    // ---------------------------------------------------------
+    // 1. 行 (Row) の拡張: カーソル位置まで行が足りなければ増やす
+    // ---------------------------------------------------------
+    while (_lines.length <= _cursorRow) {
+      _lines.add(""); // 空行を追加して埋める
+    }
+
+    var currentLine = _lines[_cursorRow];
+
+    // ---------------------------------------------------------
+    // 2. 列 (Col) の拡張: カーソル位置まで文字が足りなければスペースで埋める
+    // ---------------------------------------------------------
+    if (_cursorCol > currentLine.length) {
+      final int spacesNeeded = _cursorCol - currentLine.length;
+      currentLine += ' ' * spacesNeeded;
+    }
+
+    // ---------------------------------------------------------
+    // 3. 文字の挿入
+    // ---------------------------------------------------------
+    final part1 = currentLine.substring(0, _cursorCol);
+    final part2 = currentLine.substring(_cursorCol);
+
+    _lines[_cursorRow] = part1 + text + part2;
+
+    // カーソルを進める
+    _cursorCol += text.length;
+  }
+```
+
+-----
+
+### 2\. `initState` の修正 (起動時のIME接続)
+
+アプリを起動してすぐに入力できるように、`initState` を以下のように修正してください。
+
+```dart
+  @override
+  void initState() {
+    super.initState();
+    
+    // Bindingの初期化保証
+    WidgetsBinding.instance;
+
+    // リスナー設定
+    _focusNode.addListener(_handleFocusChange);
+    
+    // ★追加: 起動直後にフォーカスとIME接続を確実に要求する
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _focusNode.requestFocus();
+      // フォーカスが既に当たっていると判断されてリスナーが動かない場合があるため
+      // ここで明示的に呼び出す
+      if (_focusNode.hasFocus) {
+         _activateIme(context);
+      }
+    });
+  }
+```
+
+-----
+
+### 期待される動作
+
+修正後、再度実行してください。
+
+1.  **起動時**: 画面をクリックしなくても、キーボードを叩けば文字が入る（IME接続開始ログが出る）。
+2.  **何もない場所への入力**: `row=2, col=6` をクリックして「あいう」と入力すると、自動的に：
+      * `_lines[1]` (2行目) に空行が作られる。
+      * `_lines[2]` (3行目) の先頭にスペースが6個埋められる。
+      * その後に「あいう」が入る。
+
+これでエラーは完全に解消され、フリーカーソルの挙動が実現できるはずです。
+
+## _handleFocusChange の実装がないんだが、これ、何をしている？ 
+
+`_handleFocusChange` の実装が抜けており、申し訳ありません。
+
+この関数の役割は、**「エディタがフォーカスを得たり失ったりしたときに、IME（キーボード）の接続状態を同期させること」** です。
+
+  * **フォーカスが当たった (ON)**: IMEに接続し、入力を受け付けられるようにする。
+  * **フォーカスが外れた (OFF)**: IME接続を切り、キーボードを閉じる。
+
+これがないと、「別の場所をクリックしたのにキーボードが出っぱなし」になったり、「戻ってきたのに入力できない」という現象が起きます。
+
+以下がその実装コードです。`_EditorPageState` クラス内に追加してください。
+
+```dart
+  // フォーカスの状態が変わったときに呼ばれる監視役
+  void _handleFocusChange() {
+    if (_focusNode.hasFocus) {
+      // ケース1: フォーカスが当たった時 (ON)
+      // View ID の問題を避けるため、念の為フレーム描画後に接続に行く
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        // ウィジェットがまだ画面にあるか(mounted)確認してから接続
+        if (mounted) {
+          _activateIme(context);
+        }
+      });
+    } else {
+      // ケース2: フォーカスが外れた時 (OFF)
+      // IMEとの接続を確実に切断する
+      _inputConnection?.close();
+      _inputConnection = null;
+    }
+  }
+```
+
+### 役割の図解
+
+1.  **ユーザーがエディタをクリック**
+    ↓
+2.  `_focusNode` が `hasFocus = true` になる
+    ↓
+3.  `_handleFocusChange` が動く
+    ↓
+4.  `_activateIme(context)` を呼び出す
+    ↓
+5.  **IME接続完了（入力可能になる）**
+
+逆（外をクリック）の場合は、`_inputConnection?.close()` が走って接続が切れます。
+
+@@
+
+## _activateIme() は 引数を取れないが。 
+
+申し訳ありません。私の指示が片手落ちでした。
+
+前回、呼び出し元で `_activateIme(context)` と引数を渡すように指示しましたが、**受け取る側の関数定義（シグネチャ）を変更する指示**が抜けていました。
+
+`_activateIme` の定義の行を、以下のように修正してください。
+
+### 修正前
+
+```dart
+void _activateIme() { 
+```
+
+### 修正後（引数 `BuildContext context` を追加）
+
+```dart
+// ★ ここに context を受け取る引数を追加してください
+void _activateIme(BuildContext context) { 
+  if (_inputConnection == null || !_inputConnection!.attached) {
+    
+    // View ID の取得 (引数の context を使う)
+    final viewId = View.of(context).viewId;
+    print("IME接続試行 View ID: $viewId"); 
+
+    final config = TextInputConfiguration(
+      inputType: TextInputType.multiline,
+      inputAction: TextInputAction.newline,
+      readOnly: false,
+    );
+    
+    _inputConnection = TextInput.attach(this, config);
+    _inputConnection!.show();
+    print("IME接続開始！");
+  }
+}
+```
+
+これで、`_handleFocusChange` や `initState` から渡された `context` を受け取れるようになり、エラーが消えます。
