@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // HardwareKeyboardのため
+import 'package:flutter/foundation.dart'; // listEquals関数のため
 import 'dart:math';
 
 void main() {
@@ -40,8 +41,11 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   //  グリッド表示のON/OFFを管理する変数を追加
   bool _showGrid = false; // デフォルトはOFFにしておきます
 
-  // 追加: IMEとの接続を管理する変数
+  // IMEとの接続を管理する変数
   TextInputConnection? _inputConnection;
+
+  // 変換中の文字（未確定文字）を保持する
+  String _composingText = "";
 
   // スクロールバーを表示されるためのコントローラーの明示
   final ScrollController _horizontalScrollController = ScrollController();
@@ -218,8 +222,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
           // カーソルを一つ前に移動
           _cursorCol--;
         } else if (_cursorRow > 0) {
-          // パターン 2: カーソルが行の先頭 (0列目) にあり、かつ1行目ではない場合
-
+          // パターン 2: カーソルが行の先頭 (0列目) にあり、かつ1行目ではない場
           // 現在の行の内容を保存
           final lineToAppend = _lines[_cursorRow];
 
@@ -239,6 +242,43 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
           // パターン 3: カーソルが1行目の先頭にある場合 (何もしない)
           return KeyEventResult.handled;
         }
+        return KeyEventResult.handled;
+      case PhysicalKeyboardKey.delete:
+        // 現在の行が存在しない場合はなにもしない。
+        if (_cursorRow >= _lines.length) return KeyEventResult.handled;
+
+        final currentLine = _lines[_cursorRow];
+
+        // カーソルが行の文字数よりも「左」にある場合（文字の上、または途中）
+        if (_cursorCol < currentLine.length) {
+          // カーソル位置の文字を削除して詰める
+          final part1 = currentLine.substring(0, _cursorCol);
+          // _cursorCol + 1 が 範囲外でないか確かめる
+          final part2 = (_cursorCol + 1 < currentLine.length)
+              ? currentLine.substring(_cursorCol + 1)
+              : '';
+          _lines[_cursorRow] = part1 + part2;
+        }
+        // カーソルが行末、または行末より右（虚空）にある場合
+        /*
+        else {
+          // 次の行が存在するか確認
+          if (_cursorRow < _lines.length - 1) {
+            // 次の行の内容を取得
+            final nextLine = _lines[_cursorRow + 1];
+
+            // 現在の行をカーソル位置までスペースで埋める（エディタの思想：空間の実体化）
+            // これにより、次の行がカーソル位置に「吸い寄せられる」形で結合される
+            final String paddedCurrentLine = currentLine.padRight(_cursorCol);
+
+            // 結合
+            _lines[_cursorRow] = paddedCurrentLine + nextLine;
+
+            // 吸い上げた次の行を削除
+            _lines.removeAt(_cursorRow + 1);
+          }
+        }
+        */
         return KeyEventResult.handled;
       case PhysicalKeyboardKey.arrowLeft:
         if (_cursorCol > 0) {
@@ -460,6 +500,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                             cursorCol: _cursorCol,
                             lineHeight: _lineHeight,
                             textStyle: _textStyle,
+                            composingText: _composingText, // Painterに渡す未確定文字
                           ),
                           child: Container(),
                         ),
@@ -489,20 +530,29 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   void updateEditingValue(TextEditingValue value) {
     print("IMEからの入力: text=${value.text}, composing=${value.composing}");
 
-    // 確定判定: composingの範囲が (-1, -1) なら「確定」です
+    // 確定判定: composingの範囲が (-1, -1) なら「確定」
     if (!value.composing.isValid) {
       // 文字があれば挿入する
       if (value.text.isNotEmpty) {
         setState(() {
           _insertText(value.text);
+          // 確定したので未確定バッファを空にする
+          _composingText = "";
         });
       }
-      // 3. 重要: IMEに入力完了を伝え、内部状態をリセットする
+      // 重要: IMEに入力完了を伝え、内部状態をリセット
       // これをしないと、次に入力したときに「あいうえお」が重複して送られてきたりします。
       // 「あなたの仕事は終わりました、次は空っぽから始めてください」と伝えます。
       if (_inputConnection != null && _inputConnection!.attached) {
         _inputConnection!.setEditingState(TextEditingValue.empty);
       }
+    }
+    // 未確定(変換中)の場合
+    else {
+      setState(() {
+        // IMEから送られてきた変換中の文字を保存して画面更新
+        _composingText = value.text;
+      });
     }
   }
 
@@ -553,6 +603,7 @@ class MemoPainter extends CustomPainter {
   final int cursorRow;
   final int cursorCol;
   final TextStyle textStyle; // TextPainter に渡すスタイル
+  final String composingText; // 未確定文字
 
   MemoPainter({
     required this.lines,
@@ -563,6 +614,7 @@ class MemoPainter extends CustomPainter {
     required this.cursorCol,
     required this.lineHeight,
     required this.textStyle,
+    required this.composingText,
   });
 
   @override
@@ -573,12 +625,58 @@ class MemoPainter extends CustomPainter {
       ..strokeWidth = 2.0
       ..strokeCap = StrokeCap.square;
 
+    // 未確定文字用のスタイル
+    final composingStyle = TextStyle(
+      color: Colors.black,
+      fontSize: textStyle.fontSize, // テキストの文字の大きさを継承
+      decoration: TextDecoration.underline, // 下線
+      decorationStyle: TextDecorationStyle.solid,
+      decorationColor: Colors.blue, // 青色
+    );
+
     double verticalOffset = 0.0; // Y 座標初期値
 
     for (int i = 0; i < lines.length; i++) {
       final String line = lines[i];
 
-      final textSpan = TextSpan(text: line, style: textStyle);
+      // 描画用の TextSpan
+      TextSpan textSpan;
+
+      // カーソルがある行、かつ未確定文字がある場合のみ、文字を合成する
+      if (i == cursorRow && composingText.isNotEmpty) {
+        // カーソルが行末より右にある場合(フリーカーソルエリア)
+        print("変換中 フリーエリア");
+        if (cursorCol > line.length) {
+          int spacesNeeded = cursorCol - line.length;
+          String spacer = ' ' * spacesNeeded;
+
+          textSpan = TextSpan(
+            children: [
+              TextSpan(text: line + spacer, style: textStyle), //前半+space
+              TextSpan(text: composingText, style: composingStyle), //未確定文字
+            ],
+          );
+        }
+        // カーソルが行の途中にある場合
+        else {
+          print("変換中 文書途中");
+          String part1 = line.substring(0, cursorCol);
+          String part2 = line.substring(cursorCol);
+
+          textSpan = TextSpan(
+            children: [
+              TextSpan(text: part1, style: textStyle), // カーソルより前
+              TextSpan(text: composingText, style: composingStyle), //未確定文字
+              TextSpan(text: part2, style: textStyle),
+            ],
+          );
+        }
+      } else {
+        //`通常の行(そのまま描画)
+        print("変換中 変換なし");
+        textSpan = TextSpan(text: line, style: textStyle);
+      }
+
       final textPainter = TextPainter(
         text: textSpan,
         textDirection: TextDirection.ltr,
@@ -586,7 +684,6 @@ class MemoPainter extends CustomPainter {
 
       // layoutの実行
       textPainter.layout(minWidth: 0, maxWidth: size.width);
-
       // テキストの描画
       // (0, verticalOffset)の位置から開始
       textPainter.paint(canvas, Offset(0, verticalOffset));
@@ -624,13 +721,14 @@ class MemoPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant MemoPainter oldDelegate) {
-    // ★ 6. グリッドの表示設定が変わった時も再描画する
-    return oldDelegate.lines != lines ||
+    return listEquals(oldDelegate.lines, lines) || // delete処理のため 文字比較が必要
+        // oldDelegate.lines != lines || // これはダメ。
         oldDelegate.charWidth != charWidth ||
         oldDelegate.charHeight != charHeight ||
-        oldDelegate.showGrid != showGrid ||
+        oldDelegate.showGrid != showGrid || // グリッドの表示設定が変わった時も再描画する
         oldDelegate.cursorRow != cursorRow ||
         oldDelegate.cursorCol != cursorCol ||
-        oldDelegate.textStyle != textStyle;
+        oldDelegate.textStyle != textStyle ||
+        oldDelegate.composingText != composingText;
   }
 }

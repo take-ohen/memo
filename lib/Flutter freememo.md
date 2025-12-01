@@ -4183,3 +4183,337 @@ case PhysicalKeyboardKey.arrowLeft:
 ```
 
 この `if...else if` 構造は、ネストを解消し、意図を明確にするため、元のコードよりもはるかに\*\*スマート（Smart）\*\*な設計となります。
+
+## 動作確認をした。さて次は？
+```
+提示された修正の他、 TextInputConfigurationのviewId; が Flutter 3.22以降では必須なので、受け取った viewIdをそのままプロパティ wiewIdに引き継いた。
+他にも _activateImeをコールしている個所があるので、引数に contextを入れた。 さて次は？
+
+・起動直後から、日本語が入力できる。
+・どこに、移動しても落ちにずに入力できる。
+・日本語、英数字切り替えても問題なく入力できた。
+・エラーなどは発生していない。
+
+デバッグログ(一部)
+
+IME接続試行 View ID: 0
+IME接続開始！
+IMEからの入力: text=, composing=TextRange(start: 0, end: 0)
+IMEからの入力: text=あ, composing=TextRange(start: 0, end: 1)
+IMEからの入力: text=あい, composing=TextRange(start: 0, end: 2)
+IMEからの入力: text=あいう, composing=TextRange(start: 0, end: 3)
+IMEからの入力: text=あいうえ, composing=TextRange(start: 0, end: 4)
+2
+IMEからの入力: text=あいうえお, composing=TextRange(start: 0, end: 5)
+IMEからの入力: text=あいうえお, composing=TextRange(start: -1, end: -1)
+IMEからの入力: text=, composing=TextRange(start: 0, end: 0)
+入力: text=かきこ, composing=TextRange(start: 0, end: 3)
+```
+
+素晴らしいです！🎉
+デバッグログの `IME接続試行 View ID: 0` は正常です（0はFlutterが割り当てたデフォルトのView IDです）。
+これで、「日本語入力（IME）のデータ受信」「フリーカーソル制御（スペース自動埋め）」「View ID必須化への対応」という、**カスタムエディタ開発における三大難所**をすべてクリアしました。
+
+現在の状況を一言で言えば、**「入力エンジンとしてのコアは完成した」** 状態です。
+
+さて、次に取り組むべき課題ですが、現在の挙動には一つだけ**大きなユーザビリティ上の欠点**が残っているはずです。
+
+それは、**「変換中の文字（未確定文字）が画面に表示されないこと」** です。
+
+現状では、「あいう」と打っている最中、ログには出ていますが、エディタ画面上には何も表示されず、Enterを押して確定した瞬間に突然「あいう」と表示される状態（ブラインドタッチ状態）ではありませんか？
+
+次は、これを解消し、**「変換中の文字をカーソル位置にリアルタイムで表示する（下線付きなどで）」** 機能を実装するのが王道です。
+
+それとも、もっと簡単な機能（**Deleteキー**の実装など）で息抜きをしますか？
+
+どちらに進みますか？
+
+1.  **変換中の文字（未確定文字）の描画** （推奨：IME周りの仕上げ）
+2.  **Deleteキーの実装** （簡単：カーソルの右側の文字を消す）
+3.  **範囲選択（Shiftキー + 矢印）** （難易度高：描画ロジックの大幅変更が必要）
+
+特に希望がなければ、**1. 変換中の文字の描画** に進み、日本語入力を完成形にすることをお勧めします。
+
+## 1で。
+
+承知いたしました。「1. 変換中の文字（未確定文字）の描画」ですね。
+ブラインドタッチ状態を脱し、入力中の文字がリアルタイムに見えるようにしましょう。
+
+これを行うには、**「データとしてはまだ確定していないが、画面には表示したい文字」** を一時的に描画処理に割り込ませる必要があります。
+
+以下の **4つのステップ** で実装します。
+
+-----
+
+### ステップ 1: 未確定文字を保持する変数の追加
+
+`_EditorPageState` クラスに、変換中の文字を一時保存する変数を追加します。
+
+```dart
+class _EditorPageState extends State<EditorPage> with TextInputClient {
+  // ... 既存の変数 ...
+  
+  // ★追加: 変換中の文字（未確定文字）を保持する
+  String _composingText = ""; 
+
+  // ...
+```
+
+-----
+
+### ステップ 2: `updateEditingValue` の修正
+
+IMEから文字が送られてきたとき、確定・未確定に応じて `_composingText` を更新するように修正します。
+
+```dart
+  @override
+  void updateEditingValue(TextEditingValue value) {
+    // 1. 確定した場合 (composingが無効)
+    if (!value.composing.isValid) {
+      if (value.text.isNotEmpty) {
+        setState(() {
+          _insertText(value.text);
+          _composingText = ""; // ★ 確定したので未確定バッファを空にする
+        });
+      }
+      // IME側の状態をリセット
+      if (_inputConnection != null && _inputConnection!.attached) {
+        _inputConnection!.setEditingState(TextEditingValue.empty);
+      }
+    } 
+    // 2. 未確定の場合 (変換中)
+    else {
+      setState(() {
+        // ★ IMEから送られてきた変換中の文字を保存して画面更新
+        _composingText = value.text;
+      });
+    }
+  }
+```
+
+-----
+
+### ステップ 3: Painterへ変数を渡す
+
+描画担当の `MemoPainter` が `_composingText` を知る必要があります。
+`CustomPaint` ウィジェットを作成している箇所（`build`メソッド内）を修正します。
+
+```dart
+// build メソッド内の CustomPaint
+CustomPaint(
+  painter: MemoPainter(
+    lines: _lines,
+    cursorRow: _cursorRow,
+    cursorCol: _cursorCol,
+    // ★追加: Painterに未確定文字を渡す
+    composingText: _composingText, 
+  ),
+  size: Size.infinite,
+),
+```
+
+これに伴い、`MemoPainter` クラスの定義（コンストラクタ）も修正が必要です。
+
+```dart
+class MemoPainter extends CustomPainter {
+  final List<String> lines;
+  final int cursorRow;
+  final int cursorCol;
+  final String composingText; // ★追加
+
+  MemoPainter({
+    required this.lines,
+    required this.cursorRow,
+    required this.cursorCol,
+    required this.composingText, // ★追加
+  });
+
+  // ... paintメソッドへ続く ...
+```
+
+-----
+
+### ステップ 4: 描画ロジックの修正 (`paint` メソッド)
+
+ここがハイライトです。
+「カーソルがある行」を描画するときだけ、**「既存の文字」の間に「未確定の文字（下線付き）」を挟み込んで**描画するようにします。
+
+`MemoPainter` の `paint` メソッドを以下のように修正してください。
+
+```dart
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..color = Colors.black;
+    final textStyle = TextStyle(color: Colors.black, fontSize: 20);
+    // ★未確定文字用のスタイル（下線を引く）
+    final composingStyle = TextStyle(
+      color: Colors.black, 
+      fontSize: 20, 
+      decoration: TextDecoration.underline, // 下線
+      decorationStyle: TextDecorationStyle.solid,
+      decorationColor: Colors.blue, // 分かりやすく青色にする
+    );
+
+    double lineHeight = 24.0;
+
+    for (int i = 0; i < lines.length; i++) {
+      // 基本の行テキスト
+      String lineText = lines[i];
+      
+      // 描画用の TextSpan を構築
+      TextSpan span;
+
+      // ★ カーソルがある行、かつ未確定文字がある場合のみ、文字を合成する
+      if (i == cursorRow && composingText.isNotEmpty) {
+        
+        // ケースA: カーソルが行末より右にある場合 (フリーカーソルエリア)
+        if (cursorCol > lineText.length) {
+          // 足りない分をスペースで埋める
+          int spacesNeeded = cursorCol - lineText.length;
+          String spacer = ' ' * spacesNeeded;
+          
+          span = TextSpan(children: [
+            TextSpan(text: lineText + spacer, style: textStyle), // 前半（+スペース）
+            TextSpan(text: composingText, style: composingStyle), // 未確定文字
+          ]);
+        } 
+        // ケースB: カーソルが行の途中にある場合
+        else {
+          String part1 = lineText.substring(0, cursorCol);
+          String part2 = lineText.substring(cursorCol);
+          
+          span = TextSpan(children: [
+            TextSpan(text: part1, style: textStyle), // カーソルより前
+            TextSpan(text: composingText, style: composingStyle), // ★未確定文字を挟む
+            TextSpan(text: part2, style: textStyle), // カーソルより後ろ
+          ]);
+        }
+
+      } else {
+        // 通常の行（そのまま描画）
+        span = TextSpan(text: lineText, style: textStyle);
+      }
+
+      // 描画実行
+      final textPainter = TextPainter(
+        text: span,
+        textDirection: TextDirection.ltr,
+      );
+      textPainter.layout();
+      textPainter.paint(canvas, Offset(0, i * lineHeight));
+    }
+    
+    // カーソルの描画ロジック (既存のままでOKですが、変換中は表示位置がずれるべき？)
+    // 厳密には変換中はカーソルを消すか、変換候補の後ろに出すのが一般的ですが、
+    // まずは「文字が出る」ことを確認しましょう。
+    // そのままにしておくと、未確定文字の「先頭」にカーソルが表示され続けます。
+  }
+```
+
+-----
+
+### 確認
+
+これで実行してみてください。
+
+1.  「あいう」と入力中、**青い下線付き**で文字がリアルタイムに表示されますか？
+2.  Enterを押すと、下線が消えて文字が確定（黒色のみに）なりますか？
+3.  行の途中（文字と文字の間）にカーソルを置いて入力したとき、既存の文字が後ろにズレて、間に未確定文字が表示されますか？
+
+これができれば、市販のエディタと遜色のない日本語入力体験になります！
+
+# 変換中の文字が反映されない。
+
+**変換中の文字が表示されない原因**は、`MemoPainter` クラスの **`shouldRepaint` メソッドの記述漏れ**です。
+
+Flutterの `CustomPainter` は、パフォーマンス最適化のため、「前回と描画条件が変わっていなければ再描画しない（`paint`を呼ばない）」という仕組みになっています。
+あなたのコードでは、IMEから `composingText`（未確定文字）を受け取って `MemoPainter` に渡しているものの、`shouldRepaint` で **「`composingText` が変わったら再描画しろ」という判定** が抜けています。そのため、Flutterは「画面は変わっていない」と判断し、変換中の文字を描画していません。
+
+以下に修正箇所と、次の機能提案を提示します。
+
+-----
+
+### 1\. 修正箇所：`MemoPainter` の `shouldRepaint`
+
+`main.dart` の一番下にある `MemoPainter` クラス内の `shouldRepaint` メソッドを以下のように修正してください。
+
+```dart
+  @override
+  bool shouldRepaint(covariant MemoPainter oldDelegate) {
+    return oldDelegate.lines != lines ||
+        oldDelegate.charWidth != charWidth ||
+        oldDelegate.charHeight != charHeight ||
+        oldDelegate.showGrid != showGrid ||
+        oldDelegate.cursorRow != cursorRow ||
+        oldDelegate.cursorCol != cursorCol ||
+        oldDelegate.textStyle != textStyle ||
+        // ★★★ 追加: 未確定文字(composingText)が変わったら再描画する ★★★
+        oldDelegate.composingText != composingText;
+  }
+```
+
+これで、IME入力中に青い下線付きの文字が表示されるようになります。
+
+-----
+
+### 2\. 次の機能提案：Deleteキーの実装
+
+基本的な入力（文字挿入、Backspace、矢印移動、日本語入力）が整いました。
+次に実装すべき必須機能は **「Deleteキー」** です。
+
+現在は `Backspace`（カーソルの左を消す）しかありませんが、`Delete`（カーソルの右を消す）がないとエディタとして片手落ちです。特にこのエディタの思想である「空間（Void）」を扱う場合、**「何もない空間でDeleteを押したらどうなるか？」** という挙動を定義する必要があります。
+
+**提案する挙動（エディタの思想準拠）:**
+
+1.  **文字の上にカーソルがある場合:**
+      * その文字を消し、後ろの文字を前に詰める。
+2.  **行末（文字がない場所）より右にカーソルがある場合:**
+      * **次の行を吸い上げる（結合する）。**
+      * その際、カーソル位置までの空間は自動的にスペースで埋められる（`_fillVirtualSpaceIfNeeded` のロジックを適用）。
+
+-----
+
+### 3\. Deleteキーの実装コード
+
+`_handleKeyPress` メソッド内の `switch` 文に、以下の `case PhysicalKeyboardKey.delete:` を追加してください。
+
+```dart
+      case PhysicalKeyboardKey.delete:
+        // 現在の行が存在しない場合は何もしな
+        if (_cursorRow >= _lines.length) return KeyEventResult.handled;
+
+        final currentLine = _lines[_cursorRow];
+
+        // ケース1: カーソルが行の文字数よりも「左」にある場合（文字の上、または途中）
+        if (_cursorCol < currentLine.length) {
+          // カーソル位置の文字を削除して詰める
+          final part1 = currentLine.substring(0, _cursorCol);
+          // _cursorCol + 1 が範囲外でないか確認
+          final part2 = (_cursorCol + 1 < currentLine.length)
+              ? currentLine.substring(_cursorCol + 1)
+              : '';
+          _lines[_cursorRow] = part1 + part2;
+        }
+        // ケース2: カーソルが行末、または行末より右（虚空）にある場合
+        else {
+          // 次の行が存在するか確認
+          if (_cursorRow < _lines.length - 1) {
+            // 次の行の内容を取得
+            final nextLine = _lines[_cursorRow + 1];
+
+            // 現在の行をカーソル位置までスペースで埋める（エディタの思想：空間の実体化）
+            // これにより、次の行がカーソル位置に「吸い寄せられる」形で結合される
+            final String paddedCurrentLine = currentLine.padRight(_cursorCol);
+
+            // 結合
+            _lines[_cursorRow] = paddedCurrentLine + nextLine;
+
+            // 吸い上げた次の行を削除
+            _lines.removeAt(_cursorRow + 1);
+          }
+        }
+        return KeyEventResult.handled;
+```
+
+**解説:**
+この実装により、`abc` と書いてある行の右側のずっと遠く（例えば10文字分右）で `Delete` を押すと、**下の行がその遠くの位置まで飛んできて結合**されます。これは「任意の場所に書ける」という思想と対をなす、「任意の場所で結合できる」という強力な操作になります。
