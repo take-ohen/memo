@@ -260,8 +260,9 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
           _lines[_cursorRow] = part1 + part2;
         }
         // カーソルが行末、または行末より右（虚空）にある場合
-        /*
-        else {
+        // else {
+        // カーソルが行末にある場合
+        else if (_cursorCol == currentLine.length) {
           // 次の行が存在するか確認
           if (_cursorRow < _lines.length - 1) {
             // 次の行の内容を取得
@@ -269,16 +270,17 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
             // 現在の行をカーソル位置までスペースで埋める（エディタの思想：空間の実体化）
             // これにより、次の行がカーソル位置に「吸い寄せられる」形で結合される
-            final String paddedCurrentLine = currentLine.padRight(_cursorCol);
+            // final String paddedCurrentLine = currentLine.padRight(_cursorCol);
 
             // 結合
-            _lines[_cursorRow] = paddedCurrentLine + nextLine;
+            //_lines[_cursorRow] = paddedCurrentLine + nextLine;
+            _lines[_cursorRow] += nextLine;
 
             // 吸い上げた次の行を削除
             _lines.removeAt(_cursorRow + 1);
           }
         }
-        */
+
         return KeyEventResult.handled;
       case PhysicalKeyboardKey.arrowLeft:
         if (_cursorCol > 0) {

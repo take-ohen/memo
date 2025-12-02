@@ -4517,3 +4517,263 @@ Flutterの `CustomPainter` は、パフォーマンス最適化のため、「�
 
 **解説:**
 この実装により、`abc` と書いてある行の右側のずっと遠く（例えば10文字分右）で `Delete` を押すと、**下の行がその遠くの位置まで飛んできて結合**されます。これは「任意の場所に書ける」という思想と対をなす、「任意の場所で結合できる」という強力な操作になります。
+
+## 表示されるようにはなった。後、提案してもらったが、バックスペースは納得いかないところがあり一部実装(虚無で繋がる部分)していない。また、BackSpaceでは表示更新にlistの内容比較が必要になり、現状のリストインスタンス比較では不備があり,ListEqualでoldxxlistとlistを比較して更新するように修正した。まだまだ、日本語入力で修正個所がある。まずは日本語入力を仕上げたい。１．と２－４の修正案を提示して欲しい。
+```
+1.日本語をいれても、カーソルの進みが半角分しかすすまない。結果、カーソルと表示の位置が合わなくなってしまう。その後はずれたまま。
+2.変換候補一覧が表示されない。
+3.変換を確定するまでは、カーソルと文字は移動しない。文字が上書きの状態になるのが他のテキストエディタの挙動。確定で挿入される。
+4.3．のような現在の挙動なので、なにもない空間で日本語入れいると変換途中が出てこない。
+
+```
+ご提示いただいた課題（日本語入力の挙動、カーソル幅、変換候補位置）を解決するための修正案を提示します。
+
+これらを解決するには、以下の3つの修正が必要です。
+
+1.  **文字幅の計算ロジック変更**: 単純な `.length` ではなく、全角＝2、半角＝1 として計算するロジック（`calcTextWidth`）を導入し、描画とカーソル位置計算に使用する。
+2.  **IME候補ウィンドウ位置の通知**: OS側に「今ここに文字を書いている」という座標情報（`Rect`）を通知する処理を追加する。
+3.  **未確定文字の描画ロジック変更**: `_lines`（確定データ）には混ぜず、Painter内で「カーソル位置」に「未確定文字（`composingText`）」をオーバーレイ描画するように変更する。
+
+以下に実装コードを提示します。
+
+-----
+
+### 1\. `_EditorPageState` へのメソッド追加・修正
+
+まず、文字幅判定とIMEへの矩形通知用のメソッドを追加し、`updateEditingValue` を修正します。
+
+```dart
+class _EditorPageState extends State<EditorPage> with TextInputClient {
+  // ... (既存の変数はそのまま) ...
+
+  // ★追加: 文字列の「表示幅」を計算する (全角=2, 半角=1)
+  // 簡易的にASCII以外を全角として扱います。必要に応じて厳密な判定に変更可能です。
+  int _calcTextWidth(String text) {
+    int width = 0;
+    for (int i = 0; i < text.runes.length; i++) {
+      // ASCII文字(0-127)は幅1、それ以外は幅2とする
+      if (text.runes.elementAt(i) < 128) {
+        width += 1;
+      } else {
+        width += 2;
+      }
+    }
+    return width;
+  }
+  
+  // ... (既存のメソッド) ...
+
+  // ★修正: updateEditingValue
+  // 未確定文字は _lines に入れず、_composingText に入れるだけにする
+  @override
+  void updateEditingValue(TextEditingValue value) {
+    print("IME入力: text=${value.text}, composing=${value.composing}");
+
+    if (!value.composing.isValid) {
+      // 1. 確定した時
+      if (value.text.isNotEmpty) {
+        setState(() {
+          _insertText(value.text);
+          _composingText = "";
+        });
+      }
+      // IMEリセット
+      if (_inputConnection != null && _inputConnection!.attached) {
+        _inputConnection!.setEditingState(TextEditingValue.empty);
+      }
+    } else {
+      // 2. 変換中の時
+      setState(() {
+        _composingText = value.text;
+      });
+      
+      // ★追加: 変換候補ウィンドウの位置をOSに教える
+      // これをしないと画面の隅っこに候補が出てしまう
+      if (_inputConnection != null && _inputConnection!.attached) {
+        // 現在のカーソル位置の計算
+        // 行のテキストを取得（範囲外アクセス防止）
+        String currentLine = "";
+        if (_cursorRow < _lines.length) {
+          currentLine = _lines[_cursorRow];
+        }
+        
+        // カーソルまでの文字列（空間埋め含む）
+        String textBeforeCursor = "";
+        if (_cursorCol <= currentLine.length) {
+          textBeforeCursor = currentLine.substring(0, _cursorCol);
+        } else {
+          // 虚空にある場合
+          textBeforeCursor = currentLine + (' ' * (_cursorCol - currentLine.length));
+        }
+
+        // 表示上のX座標を計算 (全角対応)
+        int visualX = _calcTextWidth(textBeforeCursor);
+        
+        double pixelX = visualX * _charWidth;
+        double pixelY = _cursorRow * _lineHeight;
+
+        // OSに矩形を通知 (変換候補ウィンドウ用)
+        _inputConnection!.setComposingRect(
+           Rect.fromLTWH(pixelX, pixelY, _charWidth, _lineHeight)
+        );
+      }
+    }
+  }
+  
+  // ...
+}
+```
+
+-----
+
+### 2\. `MemoPainter` の大幅修正
+
+「カーソル位置」の計算を全角対応にし、未確定文字を「既存の文字をずらさずに」カーソル位置に描画するように変更します。
+
+```dart
+class MemoPainter extends CustomPainter {
+  // ... (変数はそのまま) ...
+
+  // ★追加: 文字幅計算ヘルパー (Stateと同じロジックが必要)
+  int _calcTextWidth(String text) {
+    int width = 0;
+    for (int i = 0; i < text.runes.length; i++) {
+      if (text.runes.elementAt(i) < 128) {
+        width += 1;
+      } else {
+        width += 2;
+      }
+    }
+    return width;
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // --------------------------------------------------------
+    // 1. テキスト（確定済み）の描画
+    // --------------------------------------------------------
+    for (int i = 0; i < lines.length; i++) {
+      final String line = lines[i];
+      
+      // 描画ロジックの変更:
+      // TextSpanでまとめて描画すると文字ごとの位置計算がPainter任せになり、
+      // グリッドとズレるため、1文字ずつ、あるいは全角/半角を意識して描画するのが理想ですが、
+      // 今回は「等幅フォント」を前提に、全角が半角2つ分の幅を持つとして計算します。
+      
+      final textSpan = TextSpan(text: line, style: textStyle);
+      final textPainter = TextPainter(
+        text: textSpan,
+        textDirection: TextDirection.ltr,
+      );
+      textPainter.layout();
+      textPainter.paint(canvas, Offset(0, i * lineHeight));
+    }
+
+    // --------------------------------------------------------
+    // 2. カーソル位置のX座標計算 (全角対応)
+    // --------------------------------------------------------
+    double cursorPixelX = 0.0;
+    
+    // カーソルがある行の文字列を取得
+    String currentLineText = "";
+    if (cursorRow < lines.length) {
+      currentLineText = lines[cursorRow];
+    }
+
+    // カーソル位置までの文字列を取得（虚空対応）
+    String textBeforeCursor = "";
+    if (cursorCol <= currentLineText.length) {
+      textBeforeCursor = currentLineText.substring(0, cursorCol);
+    } else {
+      // カーソルが行末より先にある場合、スペースで埋めたと仮定して計算
+      int spacesNeeded = cursorCol - currentLineText.length;
+      textBeforeCursor = currentLineText + (' ' * spacesNeeded);
+    }
+
+    // 表示上の幅（単位: 半角文字数）を計算
+    int visualCursorX = _calcTextWidth(textBeforeCursor);
+    cursorPixelX = visualCursorX * charWidth;
+    
+    double cursorPixelY = cursorRow * lineHeight;
+
+
+    // --------------------------------------------------------
+    // 3. 未確定文字 (composingText) の描画
+    // --------------------------------------------------------
+    // 課題4対応: 虚空でもここに描画される
+    if (composingText.isNotEmpty) {
+      // 未確定文字用のスタイル
+      final composingStyle = TextStyle(
+        color: Colors.black,
+        fontSize: textStyle.fontSize,
+        decoration: TextDecoration.underline, // 下線
+        decorationStyle: TextDecorationStyle.solid,
+        decorationColor: Colors.blue,
+        backgroundColor: Colors.white.withValues(alpha: 0.8), // 背景を白くして下の文字を隠す（上書きっぽく見せる）
+      );
+
+      final span = TextSpan(text: composingText, style: composingStyle);
+      final tp = TextPainter(text: span, textDirection: TextDirection.ltr);
+      tp.layout();
+      
+      // カーソル位置に描画（既存の文字の上に被せる）
+      tp.paint(canvas, Offset(cursorPixelX, cursorPixelY));
+      
+      // ※変換中は、カーソルを未確定文字の後ろに表示したい場合
+      // visualCursorX に composingText の幅を加算する
+      int composingWidth = _calcTextWidth(composingText);
+      cursorPixelX += composingWidth * charWidth;
+    }
+
+
+    // --------------------------------------------------------
+    // 4. カーソルの描画
+    // --------------------------------------------------------
+    final cursorPaint = Paint()
+      ..color = Colors.black
+      ..strokeWidth = 2.0;
+
+    canvas.drawLine(
+      Offset(cursorPixelX, cursorPixelY),
+      Offset(cursorPixelX, cursorPixelY + lineHeight),
+      cursorPaint,
+    );
+
+    // --------------------------------------------------------
+    // 5. グリッド線 (showGrid時)
+    // --------------------------------------------------------
+    if (showGrid) {
+      final gridPaint = Paint()
+        ..color = Colors.grey.withValues(alpha: 0.3)
+        ..strokeWidth = 1.0;
+      // ... (既存のグリッド描画処理) ...
+      // 横線
+      for (double y = 0; y < size.height; y += lineHeight) {
+        canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
+      }
+      // 縦線
+      for (double x = 0; x < size.width; x += charWidth) {
+        canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridPaint);
+      }
+    }
+  }
+
+  // ... (shouldRepaintはlistEqualsを使った現在のものを維持) ...
+}
+```
+
+### 修正のポイント
+
+1.  **全角対応 (`_calcTextWidth`)**:
+
+      * カーソルの `X` 座標を `cursorCol * charWidth` で計算するのをやめ、カーソル位置までの文字列を実際に走査して、全角なら+2、半角なら+1とカウントして座標を出すようにしました。これでカーソル位置が文字と合致します（課題1対応）。
+
+2.  **候補ウィンドウ (`setComposingRect`)**:
+
+      * `updateEditingValue` 内で `_inputConnection!.setComposingRect(...)` を呼び出すことで、OSのIMEに「今ここに書いているから、ここに候補を出して」と伝えます（課題2対応）。
+
+3.  **上書き描画**:
+
+      * `MemoPainter` 内で、既存のテキスト（`lines`）を描画した後、その上に `composingText` を描画するようにしました。
+      * `backgroundColor: Colors.white` を指定することで、下の文字が透けずに「上書き」されているように見えます（課題3対応）。
+      * 座標計算ベースで描画位置を決めているため、文字データが存在しない「虚空」であっても、その計算された座標に `composingText` が描画されます（課題4対応）。
