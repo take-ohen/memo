@@ -36,6 +36,8 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   double _lineHeight = 0.0; // 1行の高さ
   int _cursorRow = 0; // 初期のカーソル位置
   int _cursorCol = 0; // 初期のカーソル位置
+  int _preferredVisualX = 0; // 上下移動時に維持したい見た目の幅
+  bool _isOverwriteMode = false; // 上書きモードフラグ
   List<String> _lines = ['']; // エディタのテキストエリア
 
   //  グリッド表示のON/OFFを管理する変数を追加
@@ -127,11 +129,40 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
     setState(() {
       final Offset tapPosition = details.localPosition;
-      int colIndex = (tapPosition.dx / _charWidth).round();
-      int rowIndex = (tapPosition.dy / _lineHeight).floor();
+      // 1. クリックされた「見た目の位置」を計算
+      int clickedVisualX = (tapPosition.dx / _charWidth).round();
+      int clickedRow = (tapPosition.dy / _lineHeight).floor();
 
-      _cursorRow = max(0, rowIndex); // マイナスは防ぐ
-      _cursorCol = max(0, colIndex); // マイナスは防ぐ
+      // 行は 0 以上、かつ現在の行数より下なら空行として扱う（フリーカーソルなので制限しないが、データアクセス用に行数をチェック）
+      _cursorRow = max(0, clickedRow);
+
+      // 現在の行のテキストを取得
+      String currentLine = "";
+      if (_cursorRow < _lines.length) {
+        currentLine = _lines[_cursorRow];
+      }
+
+      // その行の「実際の見た目の幅」を計算
+      int lineVisualWidth = _calcTextWidth(currentLine);
+
+      // ★★★ ここが修正の核心 ★★★
+
+      // ケースA: 文字が存在する範囲内をクリックした場合
+      if (clickedVisualX <= lineVisualWidth) {
+        // 見た目の位置から、最適な文字インデックスを逆算する
+        _cursorCol = _getColFromVisualX(currentLine, clickedVisualX);
+      }
+      // ケースB: 文字がない「虚空（右側の空間）」をクリックした場合
+      else {
+        // 「行の文字数」 + 「足りない分のスペースの数（Visualの差分）」
+        // 全角文字が含まれていても、虚空は半角スペース(幅1)で埋めるため、差分をそのまま足せば良い
+        int gap = clickedVisualX - lineVisualWidth;
+        _cursorCol = currentLine.length + gap;
+      }
+
+      // 3. 上下移動用に「見た目の位置」を記憶更新
+      // クリックしたその場所を維持したいので、計算結果から再計算せず、クリック位置を採用
+      _preferredVisualX = clickedVisualX;
 
       // フォーカスを取得する（キーボード入力への準備）
       _focusNode.requestFocus();
@@ -289,6 +320,14 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
           _cursorRow--;
           _cursorCol = _lines[_cursorRow].length;
         }
+        // 移動後の位置の「見た目の幅」を記憶
+        String currentLine = _lines[_cursorRow];
+        String textUpToCursor = currentLine.substring(
+          0,
+          min(_cursorCol, currentLine.length),
+        );
+        _preferredVisualX = _calcTextWidth(textUpToCursor);
+
         return KeyEventResult.handled;
       case PhysicalKeyboardKey.arrowRight:
         if (isAlt) {
@@ -303,14 +342,31 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
             _cursorRow++;
             _cursorCol = 0;
           }
+          // 移動後の位置の見た目幅の記憶
+          String line = _lines[_cursorRow];
+          String textUpToCursor = line.substring(
+            0,
+            min(_cursorCol, line.length),
+          );
+          _preferredVisualX = _calcTextWidth(textUpToCursor);
         }
         return KeyEventResult.handled;
       case PhysicalKeyboardKey.arrowUp:
+        if (_cursorRow > 0) {
+          _cursorRow--;
+
+          _cursorCol = _getColFromVisualX(
+            _lines[_cursorRow],
+            _preferredVisualX,
+          );
+        }
+        /*
         // 上キー
         final int newRow = max(0, _cursorRow - 1);
         _cursorRow = newRow;
         // 新しい行の長さに合わせてカーソル位置を調整（行末を超えないように）
         _cursorCol = min(_lines[newRow].length, _cursorCol);
+      */
         return KeyEventResult.handled;
       case PhysicalKeyboardKey.arrowDown:
         if (isAlt) {
@@ -320,9 +376,17 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
           // [通常] データがある行までしか移動できない
           if (_cursorRow < _lines.length - 1) {
             _cursorRow++;
+
+            _cursorCol = _getColFromVisualX(
+              _lines[_cursorRow],
+              _preferredVisualX,
+            );
+            /*
             // 移動先の行の長さに合わせる（スナップ）
+
             int nextLineLen = _lines[_cursorRow].length;
             _cursorCol = min(_cursorCol, nextLineLen);
+            */
           }
         }
         return KeyEventResult.handled;
@@ -398,6 +462,40 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
       // padRight で足りない分を半角スペースで埋める
       _lines[_cursorRow] = _lines[_cursorRow].padRight(_cursorCol);
     }
+  }
+
+  // 全角・半角の文字幅計算ロジック
+  // 簡易的にASCII以外を全角として扱う。
+  int _calcTextWidth(String text) {
+    int width = 0;
+    for (int i = 0; i < text.runes.length; i++) {
+      // ASCII文字(0-127)は幅1、それ以外は幅2
+      width += (text.runes.elementAt(i) < 128) ? 1 : 2;
+    }
+    return width;
+  }
+
+  // 指定した「見た目の幅(targetVisualX)」に最も近い「文字数(col)」を探す
+  int _getColFromVisualX(String line, int targetVisualX) {
+    int currentVisualX = 0;
+    for (int i = 0; i < line.runes.length; i++) {
+      int charWidth = (line.runes.elementAt(i) < 128) ? 1 : 2;
+      // 次の文字を足すとターゲットを超える場合、
+      // どちらに近いかで判定（ここでは単純に超える手前で止めるか、超えたら止めるか）
+      // 一般的なエディタ挙動として「半分以上超えたら次」などあるが、
+      // ここではシンプルに「超える直前」または「超えた位置」の近い方を採用
+      if (currentVisualX + charWidth > targetVisualX) {
+        // より近い方を返す
+        if ((targetVisualX - currentVisualX) <
+            (currentVisualX + charWidth - targetVisualX)) {
+          return i;
+        } else {
+          return i + 1; // 次の文字も含める。
+        }
+      }
+      currentVisualX += charWidth;
+    }
+    return line.length; // 行末
   }
 
   // IMEに接続する関数
@@ -555,6 +653,54 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
         // IMEから送られてきた変換中の文字を保存して画面更新
         _composingText = value.text;
       });
+
+      // 変換候補ウィンドウの位置をOSに教える。
+      if (_inputConnection != null && _inputConnection!.attached) {
+        // 安全な幅・高さ (計算前なら仮の値を設定してでも送る)
+        // ここが0だとIMEはRectを無視するため必須
+        final double safeCharWidth = _charWidth > 0 ? _charWidth : 16.0;
+        final double safeLineHeight = _lineHeight > 0 ? _lineHeight : 24.0;
+
+        // グローバル座標へ変換
+        // CustomPaintウィジェットのRenderBoxを取得
+        final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
+
+        if (renderBox != null) {
+          // 現在のカーソル位置の計算
+          // 行のテキストを取得（範囲外アクセス防止)
+
+          final Matrix4 transform = renderBox.getTransformTo(null);
+          _inputConnection!.setEditableSizeAndTransform(
+            renderBox.size,
+            transform,
+          );
+
+          String currentLine = "";
+          if (_cursorRow < _lines.length) {
+            currentLine = _lines[_cursorRow];
+          }
+
+          // カーソルまでの文字列(空間埋め含む)
+          String textBeforeCursor = "";
+          if (_cursorCol <= currentLine.length) {
+            textBeforeCursor = currentLine.substring(0, _cursorCol);
+          } else {
+            // 虚空にある場合
+            textBeforeCursor =
+                currentLine + (' ' * (_cursorCol - currentLine.length));
+          }
+
+          // 見た目の幅からローカル座標計算
+          int visualX = _calcTextWidth(textBeforeCursor);
+          final double localPixelX = visualX * safeCharWidth;
+          final double localPixelY = _cursorRow * safeLineHeight;
+
+          // OSに矩形を通知 (変換候補ウィンドウ用)
+          _inputConnection!.setComposingRect(
+            Rect.fromLTWH(localPixelX, localPixelY, _charWidth, _lineHeight),
+          );
+        }
+      }
     }
   }
 
@@ -619,25 +765,125 @@ class MemoPainter extends CustomPainter {
     required this.composingText,
   });
 
+  // 文字幅計算ヘルパー (Stateと同じロジックが必要)
+  int _calcTextWidth(String text) {
+    int width = 0;
+    for (int i = 0; i < text.runes.length; i++) {
+      if (text.runes.elementAt(i) < 128) {
+        width += 1;
+      } else {
+        width += 2;
+      }
+    }
+    return width;
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
-    // カーソル描画のための設定
-    final cursorPaint = Paint()
-      ..color = Colors.black
-      ..strokeWidth = 2.0
-      ..strokeCap = StrokeCap.square;
-
     // 未確定文字用のスタイル
-    final composingStyle = TextStyle(
+    /*final composingStyle = TextStyle(
       color: Colors.black,
       fontSize: textStyle.fontSize, // テキストの文字の大きさを継承
       decoration: TextDecoration.underline, // 下線
       decorationStyle: TextDecorationStyle.solid,
       decorationColor: Colors.blue, // 青色
+    );*/
+
+    //double verticalOffset = 0.0; // Y 座標初期値
+
+    // --------------------------------------------------------
+    // 1. テキスト（確定済み）の描画
+    // --------------------------------------------------------
+    for (int i = 0; i < lines.length; i++) {
+      final String line = lines[i];
+
+      // 描画ロジックの変更:
+      // TextSpanでまとめて描画すると文字ごとの位置計算がPainter任せになり、
+      // グリッドとズレるため、1文字ずつ、あるいは全角/半角を意識して描画するのが理想ですが、
+      // 今回は「等幅フォント」を前提に、全角が半角2つ分の幅を持つとして計算します。
+      final textSpan = TextSpan(text: line, style: textStyle);
+      final textPainter = TextPainter(
+        text: textSpan,
+        textDirection: TextDirection.ltr,
+      );
+      textPainter.layout();
+      textPainter.paint(canvas, Offset(0, i * lineHeight));
+    }
+
+    // --------------------------------------------------------
+    // 2. カーソル位置のX座標計算 (全角対応)
+    // --------------------------------------------------------
+    double cursorPixelX = 0.0;
+
+    // カーソルがある行の文字列を取得
+    String currentLineText = "";
+    if (cursorRow < lines.length) {
+      currentLineText = lines[cursorRow];
+    }
+
+    // カーソル位置までの文字列を取得（虚空対応）
+    String textBeforeCursor = "";
+    if (cursorCol <= currentLineText.length) {
+      textBeforeCursor = currentLineText.substring(0, cursorCol);
+    } else {
+      // カーソルが行末より先にある場合、スペースで埋めたと仮定して計算
+      int spacesNeeded = cursorCol - currentLineText.length;
+      textBeforeCursor = currentLineText + (' ' * spacesNeeded);
+    }
+
+    // 表示上の幅（単位: 半角文字数）を計算
+    int visualCursorX = _calcTextWidth(textBeforeCursor);
+    cursorPixelX = visualCursorX * charWidth;
+
+    double cursorPixelY = cursorRow * lineHeight;
+
+    // --------------------------------------------------------
+    // 3. 未確定文字 (composingText) の描画
+    // --------------------------------------------------------
+    // 課題4対応: 虚空でもここに描画される
+    if (composingText.isNotEmpty) {
+      // 未確定文字用のスタイル
+      print('fontsize = ${textStyle.fontSize}');
+      final composingStyle = TextStyle(
+        color: Colors.black,
+        fontSize: textStyle.fontSize,
+        fontFamily: textStyle.fontFamily,
+        decoration: TextDecoration.underline, // 下線
+        decorationStyle: TextDecorationStyle.solid,
+        decorationColor: Colors.blue,
+        backgroundColor: Colors.white.withValues(
+          alpha: 0.8,
+        ), // 背景を白くして下の文字を隠す（上書きっぽく見せる）
+      );
+
+      final span = TextSpan(text: composingText, style: composingStyle);
+      final tp = TextPainter(text: span, textDirection: TextDirection.ltr);
+      tp.layout();
+
+      // カーソル位置に描画（既存の文字の上に被せる）
+      tp.paint(canvas, Offset(cursorPixelX, cursorPixelY));
+
+      // ※変換中は、カーソルを未確定文字の後ろに表示したい場合
+      // visualCursorX に composingText の幅を加算する
+      int composingWidth = _calcTextWidth(composingText);
+      cursorPixelX += composingWidth * charWidth;
+    }
+
+    // --------------------------------------------------------
+    // 4. カーソルの描画
+    // --------------------------------------------------------
+    final cursorPaint = Paint()
+      ..color = Colors.black
+      ..strokeWidth = 2.0
+      ..strokeCap = StrokeCap.square;
+
+    canvas.drawLine(
+      Offset(cursorPixelX, cursorPixelY),
+      Offset(cursorPixelX, cursorPixelY + lineHeight),
+      cursorPaint,
     );
 
-    double verticalOffset = 0.0; // Y 座標初期値
-
+    /*
     for (int i = 0; i < lines.length; i++) {
       final String line = lines[i];
 
@@ -704,19 +950,22 @@ class MemoPainter extends CustomPainter {
     final Offset endPoint = Offset(cursorX, cursorY + lineHeight);
 
     canvas.drawLine(startPoint, endPoint, cursorPaint);
-
+*/
+    // --------------------------------------------------------
+    // 5. グリッド線 (showGrid時)
+    // --------------------------------------------------------
     // showGridがtrueのときだけ線を描く
     if (showGrid) {
-      final paint = Paint()
+      final gridpaint = Paint()
         ..color = Colors.grey.withValues(alpha: 0.3)
         ..strokeWidth = 1.0;
 
       for (double x = 0; x < size.width; x += charWidth) {
-        canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
+        canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridpaint);
       }
 
       for (double y = 0; y < size.height; y += lineHeight) {
-        canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
+        canvas.drawLine(Offset(0, y), Offset(size.width, y), gridpaint);
       }
     }
   }

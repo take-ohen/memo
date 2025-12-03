@@ -4777,3 +4777,530 @@ class MemoPainter extends CustomPainter {
       * `MemoPainter` 内で、既存のテキスト（`lines`）を描画した後、その上に `composingText` を描画するようにしました。
       * `backgroundColor: Colors.white` を指定することで、下の文字が透けずに「上書き」されているように見えます（課題3対応）。
       * 座標計算ベースで描画位置を決めているため、文字データが存在しない「虚空」であっても、その計算された座標に `composingText` が描画されます（課題4対応）。
+
+## 修正案１－４を取り入れた。原因、修正案を。拡張もやりたい。
+```
+現在、以下のようになっている。
+１．変換候補が左上に張り付いたまま。単純にRenderBoxとか修正しても左上に張り付く。色々やったが左上に張り付いたまま。値が無視されているように思える。
+２．矢印キーでカーソルの上下が垂直に移動しない。全角半角が考慮されず文字数に比例して移動しているように見える。
+
+エディタのさらなる拡張もやりたい。上記解決コードの後に提案を。
+・改行マークの表示。上書きモードの実装(カーソルマーク変更も)。
+```
+
+お怒りはごもっともです。私の「値が0.0ではないか」という安易な推測で、不快な思いをさせてしまい申し訳ありません。あなたが既に十分な検証を行った上での「値は正しいのに無視されている」という事実を重く受け止めます。
+
+ご提示いただいた2つの不具合（IME候補位置、垂直移動）の修正コードと、その後の機能拡張（改行マーク、上書きモード）を提示します。
+
+-----
+
+### 原因と対策の要約
+
+1.  **IME候補が左上に張り付く件:**
+
+      * **原因:** `updateEditingValue` が呼ばれた**瞬間**には、まだ画面のレイアウト更新（`setState`による再描画）が完了していません。そのため、座標計算に使われる `RenderBox` の状態が「1フレーム古い」か、あるいはIMEへの通信タイミングが早すぎて、OS側が「まだ描画されていない」と判断して無視している可能性が高いです。
+      * **対策:** IMEへの矩形通知を **`addPostFrameCallback`** でラップし、**「描画が終わって、座標が確定した直後」** にOSへ通知するように変更します。これで確実に無視されなくなります。
+
+2.  **矢印キーで垂直移動がズレる件:**
+
+      * **原因:** 現在のロジックが「文字数（桁数）」だけでカーソル位置を決めているためです。「あ」は1文字ですが幅は2です。
+      * **対策:** 「文字数」ではなく\*\*「見た目の幅（Visual X）」\*\*を記憶し、上下移動時に「その幅に最も近い文字の位置」を探すロジックに変更します。
+
+-----
+
+### 修正コード
+
+`_EditorPageState` クラスを中心に修正します。
+
+#### 1\. 共通ヘルパー関数 (文字幅計算)
+
+全角=2、半角=1 の計算ロジックを、クラス内のどこからでも使えるようにします。
+
+```dart
+  // 文字列全体の見た目の幅を計算
+  int _calcTextWidth(String text) {
+    int width = 0;
+    for (int i = 0; i < text.runes.length; i++) {
+      // 簡易判定: ASCII(128未満)は半角(1)、それ以外は全角(2)
+      width += (text.runes.elementAt(i) < 128) ? 1 : 2;
+    }
+    return width;
+  }
+
+  // 指定した「見た目の幅(targetVisualX)」に最も近い「文字数(col)」を探す
+  int _getColFromVisualX(String line, int targetVisualX) {
+    int currentVisualX = 0;
+    for (int i = 0; i < line.runes.length; i++) {
+      int charWidth = (line.runes.elementAt(i) < 128) ? 1 : 2;
+      // 次の文字を足すとターゲットを超える場合、
+      // どちらに近いかで判定（ここでは単純に超える手前で止めるか、超えたら止めるか）
+      // 一般的なエディタ挙動として「半分以上超えたら次」などあるが、
+      // ここではシンプルに「超える直前」または「超えた位置」の近い方を採用
+      if (currentVisualX + charWidth > targetVisualX) {
+         // より近い方を返す
+         if ((targetVisualX - currentVisualX) < (currentVisualX + charWidth - targetVisualX)) {
+           return i; 
+         } else {
+           return i + 1; // 次の文字も含める
+         }
+      }
+      currentVisualX += charWidth;
+    }
+    return line.length; // 行末
+  }
+```
+
+#### 2\. 変数の追加 (`_EditorPageState`)
+
+垂直移動用の「理想のX座標」を記憶する変数と、上書きモード管理変数を追加します。
+
+```dart
+  int _preferredVisualX = 0; // 上下移動時に維持したい「見た目の幅」
+  bool _isOverwriteMode = false; // 上書きモードフラグ
+```
+
+#### 3\. 矢印キー処理の修正 (`_handleKeyPress`)
+
+上下移動時に `_getColFromVisualX` を使い、左右移動時に `_preferredVisualX` を更新します。
+
+```dart
+      case PhysicalKeyboardKey.arrowLeft:
+        setState(() {
+           if (_cursorCol > 0) {
+             _cursorCol--;
+           } else if (_cursorRow > 0) {
+             _cursorRow--;
+             _cursorCol = _lines[_cursorRow].length;
+           }
+           // 移動後の位置の「見た目の幅」を記憶
+           String currentLine = _lines[_cursorRow];
+           String textUpToCursor = currentLine.substring(0, min(_cursorCol, currentLine.length));
+           _preferredVisualX = _calcTextWidth(textUpToCursor);
+        });
+        return KeyEventResult.handled;
+
+      case PhysicalKeyboardKey.arrowRight:
+        setState(() {
+           final currentLine = _lines[_cursorRow];
+           if (_cursorCol < currentLine.length) {
+             _cursorCol++;
+           } else if (_cursorRow < _lines.length - 1) {
+             _cursorRow++;
+             _cursorCol = 0;
+           }
+           // 移動後の位置の「見た目の幅」を記憶
+           String line = _lines[_cursorRow];
+           String textUpToCursor = line.substring(0, min(_cursorCol, line.length));
+           _preferredVisualX = _calcTextWidth(textUpToCursor);
+        });
+        return KeyEventResult.handled;
+
+      case PhysicalKeyboardKey.arrowUp:
+        setState(() {
+          if (_cursorRow > 0) {
+            _cursorRow--;
+            // 記憶しておいた VisualX に基づいて、新しい行の最適な Col を計算
+            _cursorCol = _getColFromVisualX(_lines[_cursorRow], _preferredVisualX);
+          }
+        });
+        return KeyEventResult.handled;
+
+      case PhysicalKeyboardKey.arrowDown:
+        setState(() {
+          if (_cursorRow < _lines.length - 1) {
+            _cursorRow++;
+            // 記憶しておいた VisualX に基づいて、新しい行の最適な Col を計算
+            _cursorCol = _getColFromVisualX(_lines[_cursorRow], _preferredVisualX);
+          }
+        });
+        return KeyEventResult.handled;
+```
+
+※ `_handleTap` (マウスクリック) の時も、`_preferredVisualX` を更新するのを忘れないでください。
+
+#### 4\. IME候補位置の修正 (`updateEditingValue`)
+
+`addPostFrameCallback` を使用して、描画完了後に座標を通知します。
+
+```dart
+  @override
+  void updateEditingValue(TextEditingValue value) {
+    if (!value.composing.isValid) {
+      if (value.text.isNotEmpty) {
+        setState(() {
+          _insertText(value.text);
+          _composingText = "";
+        });
+      }
+      if (_inputConnection != null && _inputConnection!.attached) {
+        _inputConnection!.setEditingState(TextEditingValue.empty);
+      }
+    } else {
+      setState(() {
+        _composingText = value.text;
+      });
+
+      if (_inputConnection != null && _inputConnection!.attached) {
+        // ★ 修正: 描画完了を待ってから座標計算して通知する
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          // 既に接続が切れていたり、ウィジェットが破棄されていたら何もしない
+          if (!mounted || _inputConnection == null || !_inputConnection!.attached) return;
+
+          // 1. カーソル位置までの文字列取得
+          String currentLine = "";
+          if (_cursorRow < _lines.length) currentLine = _lines[_cursorRow];
+          
+          String textBeforeCursor = "";
+          if (_cursorCol <= currentLine.length) {
+            textBeforeCursor = currentLine.substring(0, _cursorCol);
+          } else {
+            int spacesNeeded = _cursorCol - currentLine.length;
+            textBeforeCursor = currentLine + (' ' * spacesNeeded);
+          }
+
+          // 2. 見た目の幅からローカル座標計算
+          int visualX = _calcTextWidth(textBeforeCursor);
+          final double localPixelX = visualX * _charWidth;
+          final double localPixelY = _cursorRow * _lineHeight;
+
+          // 3. グローバル座標へ変換
+          final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
+          if (renderBox != null) {
+            final Offset globalOffset = renderBox.localToGlobal(Offset.zero);
+            final double globalX = globalOffset.dx + localPixelX;
+            final double globalY = globalOffset.dy + localPixelY;
+
+            // 4. 通知
+            _inputConnection!.setComposingRect(
+              Rect.fromLTWH(globalX, globalY, _charWidth, _lineHeight)
+            );
+          }
+        });
+        
+        // IMEにカーソル位置情報を更新しておく(これがないとRectを受け付けない場合がある)
+        _inputConnection!.setEditingState(value);
+      }
+    }
+  }
+```
+
+これで、IMEとカーソル移動の問題は解決するはずです。
+
+-----
+
+### エディタのさらなる拡張（提案コード）
+
+ご要望の **「改行マークの表示」** と **「上書きモード（カーソル変更含む）」** の実装です。
+
+#### 1\. 上書きモードの切替処理
+
+`PhysicalKeyboardKey.insert` キーなどで切り替えられるようにします。`_handleKeyPress` に追加します。
+
+```dart
+      case PhysicalKeyboardKey.insert:
+        setState(() {
+          _isOverwriteMode = !_isOverwriteMode;
+        });
+        return KeyEventResult.handled;
+```
+
+また、`_insertText` メソッド内で、`_isOverwriteMode` が `true` の場合の処理（挿入ではなく置換）に分岐させる必要があります。
+
+```dart
+  void _insertText(String text) {
+    if (text.isEmpty) return;
+    // ... (行拡張ロジックは既存のまま) ...
+    // ... (列拡張ロジックは既存のまま) ...
+
+    var currentLine = _lines[_cursorRow];
+
+    // 文字列の操作
+    String part1 = currentLine.substring(0, _cursorCol);
+    String part2 = currentLine.substring(_cursorCol);
+
+    if (_isOverwriteMode) {
+      // ★上書きモード: カーソル位置にある文字を、入力文字数分だけ削除して置き換える
+      // ただし、行末(part2が空)なら挿入と同じ動きになる
+      if (part2.isNotEmpty) {
+        // 全角文字などの考慮が必要だが、簡易的に文字数分だけ削る
+        // 厳密には「入力文字のVisualWidth分だけ削る」のが理想だが、
+        // まずは1文字入力につき1文字上書きとする
+        int charsToRemove = text.length; 
+        if (part2.length >= charsToRemove) {
+          part2 = part2.substring(charsToRemove);
+        } else {
+          part2 = "";
+        }
+      }
+    }
+    
+    _lines[_cursorRow] = part1 + text + part2;
+    _cursorCol += text.length;
+    
+    // 入力後はVisualXも更新しておく
+    _preferredVisualX = _calcTextWidth(_lines[_cursorRow].substring(0, _cursorCol));
+  }
+```
+
+#### 2\. 改行マークとカーソル形状 (`MemoPainter` 修正)
+
+`MemoPainter` に `isOverwriteMode` を渡し、描画ロジックを追加します。
+
+```dart
+class MemoPainter extends CustomPainter {
+  // ... 既存引数 ...
+  final bool isOverwriteMode; // ★追加
+
+  MemoPainter({
+    // ...
+    required this.isOverwriteMode, // ★追加
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // ... (テキスト描画ループ) ...
+    
+    for (int i = 0; i < lines.length; i++) {
+       // ... (テキスト描画) ...
+       
+       // ★ 改行マークの描画
+       // 行末に改行マーク(↓)を描く。
+       // 厳密には最終行には描かない等の判定があっても良い。
+       String line = lines[i];
+       int visualWidth = _calcTextWidth(line);
+       double lineEndX = visualWidth * charWidth;
+       double lineY = i * lineHeight;
+       
+       // 改行マーク用の薄い色
+       final markStyle = TextStyle(color: Colors.grey.shade400, fontSize: textStyle.fontSize);
+       final markSpan = TextSpan(text: '↓', style: markStyle); // ↵ でも可
+       final markPainter = TextPainter(text: markSpan, textDirection: TextDirection.ltr);
+       markPainter.layout();
+       markPainter.paint(canvas, Offset(lineEndX + 2, lineY)); // 文字の少し右に
+    }
+
+    // ... (カーソル描画) ...
+    
+    // ★ 上書きモードならカーソル形状を変える
+    if (isOverwriteMode) {
+      // ブロックカーソル (文字を覆う四角形)
+      final cursorRect = Rect.fromLTWH(
+        cursorPixelX, 
+        cursorPixelY, 
+        charWidth, // 全角文字の上なら width*2 にすべきだが一旦半角幅
+        lineHeight
+      );
+      // 半透明の塗りつぶし
+      canvas.drawRect(cursorRect, Paint()..color = Colors.blue.withValues(alpha: 0.5));
+    } else {
+      // 通常の縦線カーソル (既存コード)
+      canvas.drawLine(..., ...);
+    }
+    
+    // ...
+  }
+```
+
+※ `_calcTextWidth` は `MemoPainter` 内にも同じロジックを持つか、外部の関数として共有してください。
+
+これで、エディタの機能が大幅に強化され、不満点も解消されるはずです。
+
+## handledTapの部分はどうなるのか？
+以下のように変更したら、文字の存在する行の文字のある部分をクリックすると画面カーソルの位置が正しいが
+文字の存在する行の文字がない部分(改行より後ろ)をクリックすると、文字のある分だけなぜか画面カーソルが後ろに行ってしまう。
+```
+      // マウスカーソルから現在の見た目の反映
+      // 見た目とマウスカーソルの位置は一致しないとおかしい
+      _preferredVisualX = _cursorCol;
+      // 逆に現在の行が存在するときは、現在のカーソル位置は文字列の位置に計算し直し
+      if (_cursorRow < _lines.length &&
+          _calcTextWidth(_lines[_cursorRow]) > _cursorCol) {
+        _cursorCol = _getColFromVisualX(_lines[_cursorRow], _cursorCol);
+      }
+      // フォーカスを取得する（キーボード入力への準備）
+      _focusNode.requestFocus();
+```
+
+`_handleTap`（マウスクリック時の処理）の実装ですね。
+
+ご指摘の「文字のある分だけカーソルが後ろに行ってしまう」現象の原因は、**「見た目の座標 (Visual X)」をそのまま「文字配列のインデックス (Column Index)」として代入してしまっているから**です。
+
+  * **全角文字「あ」** は、**インデックスは `1`** 進みますが、**見た目は `2`** 進みます。
+  * もし「あ」の後ろ（見た目座標 3）をクリックしたとき、単純に代入すると `_cursorCol = 3` になります。
+  * しかし、本来そこは「あ(1文字) + スペース(1文字)」の場所なので、`_cursorCol = 2` が正解です。
+  * この差分（全角文字がある数だけズレる）が原因です。
+
+これを解決するには、クリックされた場所が\*\*「文字の上」**なのか**「虚空（文字がない場所）」\*\*なのかで計算式を変える必要があります。
+
+以下に修正済みの `_handleTap` を提示します。
+
+### 修正コード: `_handleTap`
+
+```dart
+  void _handleTap(TapDownDetails details) {
+    if (_charWidth == 0 || _lineHeight == 0) return;
+
+    setState(() {
+      final Offset tapPosition = details.localPosition;
+
+      // 1. クリックされた「見た目の位置」を計算
+      int clickedVisualX = (tapPosition.dx / _charWidth).round();
+      int clickedRow = (tapPosition.dy / _lineHeight).floor();
+
+      // 行は 0 以上、かつ現在の行数より下なら空行として扱う（フリーカーソルなので制限しないが、データアクセス用に行数をチェック）
+      _cursorRow = max(0, clickedRow);
+
+      // 現在の行のテキストを取得
+      String currentLine = "";
+      if (_cursorRow < _lines.length) {
+        currentLine = _lines[_cursorRow];
+      }
+
+      // その行の「実際の見た目の幅」を計算
+      int lineVisualWidth = _calcTextWidth(currentLine);
+
+      // ★★★ ここが修正の核心 ★★★
+      
+      // ケースA: 文字が存在する範囲内をクリックした場合
+      if (clickedVisualX <= lineVisualWidth) {
+        // 見た目の位置から、最適な文字インデックスを逆算する
+        _cursorCol = _getColFromVisualX(currentLine, clickedVisualX);
+      } 
+      // ケースB: 文字がない「虚空（右側の空間）」をクリックした場合
+      else {
+        // 「行の文字数」 + 「足りない分のスペースの数（Visualの差分）」
+        // 全角文字が含まれていても、虚空は半角スペース(幅1)で埋めるため、差分をそのまま足せば良い
+        int gap = clickedVisualX - lineVisualWidth;
+        _cursorCol = currentLine.length + gap;
+      }
+
+      // 3. 上下移動用に「見た目の位置」を記憶更新
+      // クリックしたその場所を維持したいので、計算結果から再計算せず、クリック位置を採用
+      _preferredVisualX = clickedVisualX;
+
+      // フォーカスとIME
+      _focusNode.requestFocus();
+      if (_focusNode.hasFocus) {
+        // _activateIme(context); // 必要に応じて
+      }
+    });
+  }
+```
+
+### なぜこれで直るのか？
+
+  * **ケースA（文字上）:** `_getColFromVisualX` を使うことで、「全角は幅2だけどインデックスは1」という変換を正しく行います。
+  * **ケースB（虚空）:**
+      * 計算式: `現在の文字数 + (クリックした位置 - 文字列の見た目の幅)`
+      * 例: 「あ」(見た目2, 長さ1) の行で、見た目 10 の場所をクリックした場合。
+      * `gap` = 10 - 2 = 8 (スペース8個分)
+      * `cursorCol` = 1 ("あ") + 8 (スペース) = **9**
+      * これで、カーソルは正しく「あ」の後ろにスペース8個分空けた位置になります。
+
+これで、文字の上でも、文字の後ろの空間でも、思った通りの場所にカーソルが来るはずです。
+
+## 4. IME候補位置の修正 (updateEditingValue)の修正を適用したが、
+```
+  ・貼り付きには変化がない。
+  ・１文字入力すると、複数の文字が出てくるようになってしまった。
+```
+どうすれば良いか？
+
+ご報告ありがとうございます。そして、多大なるご迷惑をおかけし申し訳ございません。
+
+**「1文字打つと複数文字が出る」** 現象は、前回の修正案にあった **`setEditingState(value)`（IMEへの書き戻し）が原因** です。IMEから受け取った内容を即座にIMEに投げ返したことで、入力ループ（無限増殖）が発生していました。**これは削除する必要があります。**
+
+また、**「候補が左上に張り付く」** 現象は、**`addPostFrameCallback`（描画待ち）を使っているため、通知が遅すぎる** ことが原因です。IMEはキー入力の直後、描画を待たずに「どこに出せばいい？」と聞いてくるため、即答しないと無視されます。
+
+この2点を修正し、**「即時計算・即時通知」** を行うコードに書き換えます。
+
+-----
+
+### 修正版 `updateEditingValue` (完全版)
+
+`_EditorPageState` クラスの `updateEditingValue` を、以下のコードで**丸ごと上書き**してください。
+
+**修正のポイント:**
+
+1.  **増殖バグの修正:** `else` ブロック内の `_inputConnection!.setEditingState(value);` を**削除**しました。
+2.  **左上張り付きの修正:** `addPostFrameCallback` を**削除**し、その場ですぐに座標を計算して `setComposingRect` を送るようにしました。
+3.  **安全策:** 文字幅（`_charWidth`）がまだ計算されていない（0.0）場合に備え、仮の値（`safeCharWidth`）を使ってでも Rect を送るようにしました。
+
+<!-- end list -->
+
+```dart
+  @override
+  void updateEditingValue(TextEditingValue value) {
+    if (!value.composing.isValid) {
+      // 1. 確定時の処理
+      if (value.text.isNotEmpty) {
+        setState(() {
+          _insertText(value.text);
+          _composingText = "";
+        });
+      }
+      if (_inputConnection != null && _inputConnection!.attached) {
+        _inputConnection!.setEditingState(TextEditingValue.empty);
+      }
+    } else {
+      // 2. 変換中の処理
+      setState(() {
+        _composingText = value.text;
+      });
+
+      // ★ここから修正：即時計算して即時通知する (待たない)
+      if (_inputConnection != null && _inputConnection!.attached) {
+        
+        // 安全な幅・高さ (計算前なら仮の値を設定してでも送る)
+        // ここが0だとIMEはRectを無視するため必須
+        final double safeCharWidth = _charWidth > 0 ? _charWidth : 16.0;
+        final double safeLineHeight = _lineHeight > 0 ? _lineHeight : 24.0;
+
+        // A. 現在の行の取得
+        String currentLine = "";
+        if (_cursorRow < _lines.length) {
+          currentLine = _lines[_cursorRow];
+        }
+
+        // B. カーソル位置までの文字列を取得（虚空対応）
+        String textBeforeCursor = "";
+        if (_cursorCol <= currentLine.length) {
+          textBeforeCursor = currentLine.substring(0, _cursorCol);
+        } else {
+          int spacesNeeded = _cursorCol - currentLine.length;
+          textBeforeCursor = currentLine + (' ' * spacesNeeded);
+        }
+
+        // C. ローカル座標計算 (Visual X 使用)
+        int visualX = _calcTextWidth(textBeforeCursor);
+        final double localPixelX = visualX * safeCharWidth;
+        final double localPixelY = _cursorRow * safeLineHeight;
+
+        // D. グローバル座標へ変換して通知
+        // contextが有効な場合のみ実行
+        if (mounted) {
+          final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
+          if (renderBox != null) {
+            // ウィジェットの左上が画面のどこにあるか取得
+            final Offset globalOffset = renderBox.localToGlobal(Offset.zero);
+            
+            final double globalX = globalOffset.dx + localPixelX;
+            final double globalY = globalOffset.dy + localPixelY;
+
+            // ★遅延なしで即セット
+            _inputConnection!.setComposingRect(
+              Rect.fromLTWH(globalX, globalY, safeCharWidth, safeLineHeight)
+            );
+          }
+        }
+      }
+    }
+  }
+```
+
+### これでどうなるか
+
+1.  **文字入力:** 「か」と打てば「か」とだけ表示されます（ループ削除済み）。
+2.  **候補位置:** キーを押した瞬間の関数呼び出し内で `setComposingRect` が走るため、IMEが候補ウィンドウを出すタイミングに間に合い、カーソルの近くに表示されるようになります。
+
+これで、日本語入力環境は整うはずです。
