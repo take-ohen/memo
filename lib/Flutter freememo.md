@@ -5304,3 +5304,317 @@ class MemoPainter extends CustomPainter {
 2.  **候補位置:** キーを押した瞬間の関数呼び出し内で `setComposingRect` が走るため、IMEが候補ウィンドウを出すタイミングに間に合い、カーソルの近くに表示されるようになります。
 
 これで、日本語入力環境は整うはずです。
+
+## 貼り付きは変わらない。  出力ログを入れたときには_charWidth , _lineHeightに値が設定されていないことは無かった。他になにか見落としなどないのか？ 
+
+値が正常（0.0ではない）であるにも関わらず、位置が反映されないという事実、大変重く受け止めております。
+これまでの「グローバル座標を自分で計算して渡す」というアプローチが、Flutterの現在の仕様（特にデスクトップ版）と噛み合っていない可能性が極めて高いです。
+
+**見落としていた決定的な要素**があります。それは **「`setEditableSizeAndTransform` の呼び出し」** です。
+
+Flutter 3.x（特にデスクトップ）では、OSに「ここに入力欄があるよ」と伝えるために、単に矩形（`setComposingRect`）を送るだけでは不十分な場合があります。**「入力エリア全体のサイズ」と「画面に対する変形（行列/Matrix）」** をセットで通知しないと、OSは座標を正しく解釈できず、結果としてデフォルト位置（左上）に表示してしまいます。
+
+手動でグローバル座標を計算するのをやめ、**「ローカル座標」に戻し、代わりに「変形マトリックス」を通知する、というFlutter標準の流儀**に合わせた実装に変更します。
+
+### 修正コード：`updateEditingValue` (決定版)
+
+`_EditorPageState` の `updateEditingValue` を以下のコードに置き換えてください。
+
+**変更点:**
+
+1.  **手動の `localToGlobal` 計算を削除** しました。（これが誤差や不整合の原因になるため）
+2.  代わりに **`renderBox.getTransformTo(null)`** を使い、Flutterエンジンに座標変換を任せるようにしました。
+3.  **`setEditableSizeAndTransform`** を追加しました。これが「見落としていた必須ピース」です。
+
+<!-- end list -->
+
+```dart
+  @override
+  void updateEditingValue(TextEditingValue value) {
+    if (!value.composing.isValid) {
+      if (value.text.isNotEmpty) {
+        setState(() {
+          _insertText(value.text);
+          _composingText = "";
+        });
+      }
+      if (_inputConnection != null && _inputConnection!.attached) {
+        _inputConnection!.setEditingState(TextEditingValue.empty);
+      }
+    } else {
+      setState(() {
+        _composingText = value.text;
+      });
+
+      if (_inputConnection != null && _inputConnection!.attached && mounted) {
+        // 安全な幅・高さ
+        final double safeCharWidth = _charWidth > 0 ? _charWidth : 16.0;
+        final double safeLineHeight = _lineHeight > 0 ? _lineHeight : 24.0;
+
+        // 1. RenderBoxの取得
+        final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
+        
+        if (renderBox != null) {
+          // ★重要: エディタ自体のサイズと、画面に対する変形(位置)情報を通知
+          // これがないと、次の setComposingRect で渡すローカル座標が正しく解釈されません。
+          final Matrix4 transform = renderBox.getTransformTo(null);
+          _inputConnection!.setEditableSizeAndTransform(renderBox.size, transform);
+
+          // 2. ローカル座標計算 (Visual X 使用)
+          // ※ここでは「グローバル」に変換せず、「ローカル」のまま計算します。
+          String currentLine = "";
+          if (_cursorRow < _lines.length) {
+            currentLine = _lines[_cursorRow];
+          }
+
+          String textBeforeCursor = "";
+          if (_cursorCol <= currentLine.length) {
+            textBeforeCursor = currentLine.substring(0, _cursorCol);
+          } else {
+            int spacesNeeded = _cursorCol - currentLine.length;
+            textBeforeCursor = currentLine + (' ' * spacesNeeded);
+          }
+
+          // 見た目の幅に基づくX座標
+          int visualX = _calcTextWidth(textBeforeCursor);
+          final double localPixelX = visualX * safeCharWidth;
+          final double localPixelY = _cursorRow * safeLineHeight;
+
+          // 3. ローカル座標のRectを通知
+          // setEditableSizeAndTransform で渡した変形情報と組み合わさり、
+          // OS側で正しい画面座標に変換されます。
+          _inputConnection!.setComposingRect(
+            Rect.fromLTWH(localPixelX, localPixelY, safeCharWidth, safeLineHeight)
+          );
+        }
+      }
+    }
+  }
+```
+
+### なぜこれが正解なのか
+
+  * **`setEditableSizeAndTransform`**: 「私のエディタ（RenderBox）は、ウィンドウの中でこういう位置・角度・サイズで配置されています」という情報をOSに教えます。
+  * **`setComposingRect`**: 「そのエディタの中の `(x, y)` に文字を出して」と教えます。
+  * これまでのコードは「エディタがどこにあるか」をOSに教えずに、「画面の絶対座標はここだ」と `setComposingRect` だけで伝えようとしていましたが、Flutter/WindowsのIME処理において、その情報は変形マトリックスがないと正しくマッピングされず、左上に飛ばされていた可能性が高いです。
+
+これで、「貼り付き」が解消されることを確信しております。
+
+## 変換候補がカーソルに追従してくるようになったが、以下のような問題がまだある。
+```
+1)表示の位置が悪い。ｘ座標の位置は良いようだが、y座標は、入力位置の下に表示されず、
+  被さるように表示されてしまう。現在のフォントの大きさでいうと３文字ぶんくらい上にずれている。
+
+2) スクロールバーを触ると表示位置がずれる。
+
+3) 変換確定をしないまま、マウスで画面カーソルを移動させると変換候補が追従してこない。
+   メモ帳等は、画面カーソルに追従してくる。
+```
+
+ユーザー体験に関わる重要な改善点ですね。
+
+問題の原因を分析しました。
+
+1.  **表示位置が上にずれる（AppBar分のズレ）**
+
+      * `context.findRenderObject()` で取得していたのは、画面全体（`Scaffold`）の `RenderBox` でした。
+      * 一方で、計算している座標（`_cursorRow * height`）は、スクロール領域内（`CustomPaint`）のローカル座標です。
+      * この「座標の基準」が食い違っているため、AppBarの高さ分（約56px＝3行分）や、スクロールした分だけ位置がズレてしまいます。
+
+2.  **スクロールや移動で追従しない**
+
+      * IMEに「場所」を通知する処理が、文字入力時（`updateEditingValue`）にしか動いていないためです。
+      * クリックやスクロールでカーソルが動いた時にも、IMEに「場所が変わったよ」と教える必要があります。
+
+これらを解決する決定的な修正（**GlobalKeyを使った座標の正規化** と **通知ロジックの共通化**）を行います。
+
+-----
+
+### 修正ステップ
+
+#### 1\. `_EditorPageState` に `GlobalKey` を追加
+
+`CustomPaint`（描画エリアそのもの）の正確な位置とサイズを取得するための鍵を作ります。
+
+```dart
+class _EditorPageState extends State<EditorPage> with TextInputClient {
+  // ... 既存の変数 ...
+  
+  // ★追加: 描画エリア(CustomPaint)の正体をつかむためのキー
+  final GlobalKey _painterKey = GlobalKey();
+
+  // ...
+```
+
+#### 2\. `build` メソッドで `CustomPaint` にキーをセット
+
+これで、あとからこのキーを使って「このCustomPaintの座標」を特定できるようになります。
+
+```dart
+// buildメソッド内の CustomPaint 部分
+                        child: CustomPaint(
+                          key: _painterKey, // ★追加: これを忘れないでください
+                          painter: MemoPainter(
+                            // ... 既存の引数 ...
+                          ),
+                          size: Size.infinite, // または適切なサイズ
+                        ),
+```
+
+#### 3\. IME位置通知ロジックを独立させる (`_updateImeWindowPosition`)
+
+文字入力時だけでなく、クリックやスクロール時にも呼べるように、共通メソッドとして切り出します。
+ここで **`_painterKey`** を使うのが最大のポイントです。
+
+```dart
+  // ★追加: 現在のカーソル位置を計算して、IMEにウィンドウ位置を通知する共通関数
+  void _updateImeWindowPosition() {
+    // 接続がない、またはキーが紐づいていない場合は何もしない
+    if (_inputConnection == null || !_inputConnection!.attached || _painterKey.currentContext == null) {
+      return;
+    }
+
+    final RenderBox? renderBox = _painterKey.currentContext!.findRenderObject() as RenderBox?;
+    if (renderBox == null) return;
+
+    // 安全な幅・高さ
+    final double safeCharWidth = _charWidth > 0 ? _charWidth : 16.0;
+    final double safeLineHeight = _lineHeight > 0 ? _lineHeight : 24.0;
+
+    // 1. エディタ(CustomPaint)の変形情報を通知
+    // これにより、AppBarの高さやスクロール量(_painterKeyが持っている情報)が自動的に加味されます！
+    final Matrix4 transform = renderBox.getTransformTo(null);
+    _inputConnection!.setEditableSizeAndTransform(renderBox.size, transform);
+
+    // 2. ローカル座標計算 (CustomPaint左上からの相対位置)
+    String currentLine = "";
+    if (_cursorRow < _lines.length) {
+      currentLine = _lines[_cursorRow];
+    }
+
+    String textBeforeCursor = "";
+    if (_cursorCol <= currentLine.length) {
+      textBeforeCursor = currentLine.substring(0, _cursorCol);
+    } else {
+      int spacesNeeded = _cursorCol - currentLine.length;
+      textBeforeCursor = currentLine + (' ' * spacesNeeded);
+    }
+
+    int visualX = _calcTextWidth(textBeforeCursor);
+    final double localPixelX = visualX * safeCharWidth;
+    final double localPixelY = _cursorRow * safeLineHeight;
+
+    // 3. 通知 (ローカル座標のままでOK)
+    _inputConnection!.setComposingRect(
+      Rect.fromLTWH(localPixelX, localPixelY, safeCharWidth, safeLineHeight)
+    );
+  }
+```
+
+#### 4\. 各イベントで `_updateImeWindowPosition` を呼び出す
+
+このメソッドを、\*\*「カーソルが動く可能性がある場所」\*\*すべてで呼び出します。
+
+**A. `updateEditingValue` (文字入力時)**
+
+元のコードにあったロジックを削除し、この関数を呼ぶだけにします。
+
+```dart
+  @override
+  void updateEditingValue(TextEditingValue value) {
+    if (!value.composing.isValid) {
+      // ... (確定処理：既存のまま) ...
+    } else {
+      // 変換中
+      setState(() {
+        _composingText = value.text;
+      });
+      
+      // ★修正: 共通関数を呼ぶだけ
+      _updateImeWindowPosition();
+    }
+  }
+```
+
+**B. `_handleTap` (マウスクリック時)**
+
+クリックでカーソル移動した直後に呼び出します。
+
+```dart
+  void _handleTap(TapDownDetails details) {
+    // ... (既存の座標計算とsetState) ...
+
+    setState(() {
+      // ... カーソル位置更新 ...
+      
+      _focusNode.requestFocus();
+      
+      // ★追加: クリックで移動した先にIME窓を追従させる
+      // ※setStateの後で呼ぶことで、最新の座標が反映される
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+         _updateImeWindowPosition();
+      });
+    });
+  }
+```
+
+**C. `_handleKeyPress` (矢印キー移動時)**
+
+矢印キーで移動した場合も同様です。
+
+```dart
+  // _handleKeyPress 内の arrowUp, arrowDown, arrowLeft, arrowRight の処理の最後
+  // return KeyEventResult.handled; の直前に以下を追加
+  
+  // 例: arrowDownの場合
+      case PhysicalKeyboardKey.arrowDown:
+        setState(() {
+           // ... 移動ロジック ...
+        });
+        
+        // ★追加: 移動後にIME窓を更新
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+           _updateImeWindowPosition();
+        });
+        
+        return KeyEventResult.handled;
+```
+
+※ 面倒であれば、`_handleKeyPress` の最後の `setState`（あれば）の後や、`return` の直前に一度だけ書いてもOKですが、`handled` を返すルート全てに通るようにしてください。
+
+**D. スクロール時 (スクロール追従)**
+
+`build` メソッド内の `SingleChildScrollView` (垂直・水平両方) を `NotificationListener<ScrollNotification>` で囲むか、既存の `ScrollController` にリスナーを追加して呼び出します。
+
+最も簡単なのは、`initState` でリスナーを追加する方法です。
+
+```dart
+  @override
+  void initState() {
+    super.initState();
+    // ... 既存の処理 ...
+
+    // ★追加: スクロールするたびにIME位置を更新
+    _verticalScrollController.addListener(_updateImeWindowPosition);
+    _horizontalScrollController.addListener(_updateImeWindowPosition);
+  }
+  
+  // disposeでの削除はControllerのdisposeで自動解除されるため明示的に不要ですが、
+  // 丁寧にするなら removeListener してください。
+```
+
+-----
+
+### 解説：なぜこれで直るのか？
+
+1.  **位置ズレ（Y座標）の解消:**
+
+      * これまでは `Scaffold`（画面全体）を基準にしていましたが、`_painterKey` を使うことで `CustomPaint`（テキスト描画エリア）を基準にしました。
+      * `renderBox.getTransformTo(null)` は、「この描画エリアが、画面全体のどこにあり、**どれだけスクロールされてずれているか**」という情報を正確に持っています。
+      * AppBarの高さやスクロール量が自動的に計算に含まれるため、`localPixelY`（テキスト上の行位置）だけで正確に表示されるようになります。
+
+2.  **追従の実現:**
+
+      * `_updateImeWindowPosition` をクリックやスクロールのタイミングで呼ぶことで、OSに「カーソル（＝文字入力中の矩形）が移動した」とリアルタイムに伝わります。これにより、変換候補ウィンドウがカーソルに吸い付くように移動します。
+
+これで、市販のエディタ同様の自然なIME挙動になるはずです。

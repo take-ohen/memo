@@ -56,6 +56,9 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   // フォーカスノードを追加
   final FocusNode _focusNode = FocusNode();
 
+  // 描画エリア(CustomPaint)の正体をつかむためのキー
+  final GlobalKey _painterKey = GlobalKey();
+
   static const _textStyle = TextStyle(
     fontFamily: 'BIZ UDゴシック',
     fontSize: 16.0,
@@ -84,6 +87,10 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
         _activateIme(context);
       }
     });
+
+    // スクロールするたびにIME位置を更新
+    _verticalScrollController.addListener(_updateImeWindowPosition);
+    _horizontalScrollController.addListener(_updateImeWindowPosition);
 
     // ★★★ 調査用リスナーを追加 ★★★
     // スクロールが発生するたびに、どこから呼び出されたかを出力する
@@ -145,8 +152,6 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
       // その行の「実際の見た目の幅」を計算
       int lineVisualWidth = _calcTextWidth(currentLine);
 
-      // ★★★ ここが修正の核心 ★★★
-
       // ケースA: 文字が存在する範囲内をクリックした場合
       if (clickedVisualX <= lineVisualWidth) {
         // 見た目の位置から、最適な文字インデックスを逆算する
@@ -167,8 +172,13 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
       // フォーカスを取得する（キーボード入力への準備）
       _focusNode.requestFocus();
 
+      // クリックで移動した先にIME窓を追従させる
+      WidgetsBinding.instance.addPersistentFrameCallback((_) {
+        _updateImeWindowPosition();
+      });
+
       // IME接続を開始！
-      _activateIme(context);
+      // _activateIme(context);
     });
   }
 
@@ -217,6 +227,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
       currentLineLength = _lines[_cursorRow].length;
     }
     switch (physicalKey) {
+      // 改行
       case PhysicalKeyboardKey.enter:
         // Shiftキーと同時押しされた場合は、デフォルト動作
         // （改行なしの決定など）を避けるため、
@@ -240,6 +251,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
         _cursorCol = 0; // 新しい行の先頭（0列目）に移動
 
         return KeyEventResult.handled;
+      // バックスペース
       case PhysicalKeyboardKey.backspace:
         if (_cursorCol > 0) {
           // パターン 1: カーソルが行の途中にある場合
@@ -274,6 +286,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
           return KeyEventResult.handled;
         }
         return KeyEventResult.handled;
+      // Delete
       case PhysicalKeyboardKey.delete:
         // 現在の行が存在しない場合はなにもしない。
         if (_cursorRow >= _lines.length) return KeyEventResult.handled;
@@ -311,8 +324,16 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
             _lines.removeAt(_cursorRow + 1);
           }
         }
-
         return KeyEventResult.handled;
+
+      // INSキー・上書きモード
+      case PhysicalKeyboardKey.insert:
+        setState(() {
+          _isOverwriteMode = !_isOverwriteMode;
+        });
+        return KeyEventResult.handled;
+
+      //矢印キー
       case PhysicalKeyboardKey.arrowLeft:
         if (_cursorCol > 0) {
           _cursorCol--;
@@ -327,6 +348,11 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
           min(_cursorCol, currentLine.length),
         );
         _preferredVisualX = _calcTextWidth(textUpToCursor);
+
+        // 移動後にIME窓を更新
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _updateImeWindowPosition();
+        });
 
         return KeyEventResult.handled;
       case PhysicalKeyboardKey.arrowRight:
@@ -350,6 +376,11 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
           );
           _preferredVisualX = _calcTextWidth(textUpToCursor);
         }
+        // 移動後にIME窓を更新
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _updateImeWindowPosition();
+        });
+
         return KeyEventResult.handled;
       case PhysicalKeyboardKey.arrowUp:
         if (_cursorRow > 0) {
@@ -367,6 +398,12 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
         // 新しい行の長さに合わせてカーソル位置を調整（行末を超えないように）
         _cursorCol = min(_lines[newRow].length, _cursorCol);
       */
+
+        // 移動後にIME窓を更新
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _updateImeWindowPosition();
+        });
+
         return KeyEventResult.handled;
       case PhysicalKeyboardKey.arrowDown:
         if (isAlt) {
@@ -389,6 +426,12 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
             */
           }
         }
+
+        // 移動後にIME窓を更新
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _updateImeWindowPosition();
+        });
+
         return KeyEventResult.handled;
       default:
         if (character != null && character.isNotEmpty) {
@@ -523,6 +566,54 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     }
   }
 
+  // 現在のカーソル位置を計算して、IMEにウィンドウ位置を通知する共通関数
+  void _updateImeWindowPosition() {
+    // 接続がない、またはキーが紐づいていない場合は何もしない。
+    if (_inputConnection == null ||
+        !_inputConnection!.attached ||
+        _painterKey.currentContext == null) {
+      return;
+    }
+
+    final RenderBox? renderBox =
+        _painterKey.currentContext!.findRenderObject() as RenderBox?;
+    if (renderBox == null) return;
+
+    // 安全な幅・高さ
+    final double safeCharWidth = _charWidth > 0 ? _charWidth : 16.0;
+    final double safeLineHeight = _lineHeight > 0 ? _lineHeight : 24.0;
+
+    // 1. エディタ(CustomPaint)の変形情報を通知
+    // これにより、AppBarの高さやスクロール量
+    //(_painterKeyが持っている情報)が自動的に加味されます！
+
+    final Matrix4 transform = renderBox.getTransformTo(null);
+    _inputConnection!.setEditableSizeAndTransform(renderBox.size, transform);
+
+    // ローカル座標計算 (CustomPaint左上からの相対位置)
+    String currentLine = "";
+    if (_cursorRow < _lines.length) {
+      currentLine = _lines[_cursorRow];
+    }
+
+    String textBeforeCursor = "";
+    if (_cursorCol <= currentLine.length) {
+      textBeforeCursor = currentLine.substring(0, _cursorCol);
+    } else {
+      textBeforeCursor =
+          currentLine + (' ' * (_cursorCol - currentLine.length));
+    }
+
+    int visualX = _calcTextWidth(textBeforeCursor);
+    final double localPixelX = visualX * safeCharWidth;
+    final double localPixelY = _cursorRow * safeLineHeight;
+
+    // 通知 (ローカル座標のままでOK)
+    _inputConnection!.setComposingRect(
+      Rect.fromLTWH(localPixelX, localPixelY, safeCharWidth, safeLineHeight),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -591,6 +682,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                           minHeight: 2000,
                         ),
                         child: CustomPaint(
+                          key: _painterKey, // 描画エリアの取得のため
                           painter: MemoPainter(
                             lines: _lines,
                             charWidth: _charWidth,
@@ -602,6 +694,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                             textStyle: _textStyle,
                             composingText: _composingText, // Painterに渡す未確定文字
                           ),
+                          size: Size.infinite, // 適切なサイズ？
                           child: Container(),
                         ),
                       ),
@@ -654,53 +747,8 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
         _composingText = value.text;
       });
 
-      // 変換候補ウィンドウの位置をOSに教える。
-      if (_inputConnection != null && _inputConnection!.attached) {
-        // 安全な幅・高さ (計算前なら仮の値を設定してでも送る)
-        // ここが0だとIMEはRectを無視するため必須
-        final double safeCharWidth = _charWidth > 0 ? _charWidth : 16.0;
-        final double safeLineHeight = _lineHeight > 0 ? _lineHeight : 24.0;
-
-        // グローバル座標へ変換
-        // CustomPaintウィジェットのRenderBoxを取得
-        final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
-
-        if (renderBox != null) {
-          // 現在のカーソル位置の計算
-          // 行のテキストを取得（範囲外アクセス防止)
-
-          final Matrix4 transform = renderBox.getTransformTo(null);
-          _inputConnection!.setEditableSizeAndTransform(
-            renderBox.size,
-            transform,
-          );
-
-          String currentLine = "";
-          if (_cursorRow < _lines.length) {
-            currentLine = _lines[_cursorRow];
-          }
-
-          // カーソルまでの文字列(空間埋め含む)
-          String textBeforeCursor = "";
-          if (_cursorCol <= currentLine.length) {
-            textBeforeCursor = currentLine.substring(0, _cursorCol);
-          } else {
-            // 虚空にある場合
-            textBeforeCursor =
-                currentLine + (' ' * (_cursorCol - currentLine.length));
-          }
-
-          // 見た目の幅からローカル座標計算
-          int visualX = _calcTextWidth(textBeforeCursor);
-          final double localPixelX = visualX * safeCharWidth;
-          final double localPixelY = _cursorRow * safeLineHeight;
-
-          // OSに矩形を通知 (変換候補ウィンドウ用)
-          _inputConnection!.setComposingRect(
-            Rect.fromLTWH(localPixelX, localPixelY, _charWidth, _lineHeight),
-          );
-        }
-      }
+      //IME 通知関数の呼び出し
+      _updateImeWindowPosition();
     }
   }
 
@@ -780,17 +828,6 @@ class MemoPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // 未確定文字用のスタイル
-    /*final composingStyle = TextStyle(
-      color: Colors.black,
-      fontSize: textStyle.fontSize, // テキストの文字の大きさを継承
-      decoration: TextDecoration.underline, // 下線
-      decorationStyle: TextDecorationStyle.solid,
-      decorationColor: Colors.blue, // 青色
-    );*/
-
-    //double verticalOffset = 0.0; // Y 座標初期値
-
     // --------------------------------------------------------
     // 1. テキスト（確定済み）の描画
     // --------------------------------------------------------
@@ -883,74 +920,6 @@ class MemoPainter extends CustomPainter {
       cursorPaint,
     );
 
-    /*
-    for (int i = 0; i < lines.length; i++) {
-      final String line = lines[i];
-
-      // 描画用の TextSpan
-      TextSpan textSpan;
-
-      // カーソルがある行、かつ未確定文字がある場合のみ、文字を合成する
-      if (i == cursorRow && composingText.isNotEmpty) {
-        // カーソルが行末より右にある場合(フリーカーソルエリア)
-        print("変換中 フリーエリア");
-        if (cursorCol > line.length) {
-          int spacesNeeded = cursorCol - line.length;
-          String spacer = ' ' * spacesNeeded;
-
-          textSpan = TextSpan(
-            children: [
-              TextSpan(text: line + spacer, style: textStyle), //前半+space
-              TextSpan(text: composingText, style: composingStyle), //未確定文字
-            ],
-          );
-        }
-        // カーソルが行の途中にある場合
-        else {
-          print("変換中 文書途中");
-          String part1 = line.substring(0, cursorCol);
-          String part2 = line.substring(cursorCol);
-
-          textSpan = TextSpan(
-            children: [
-              TextSpan(text: part1, style: textStyle), // カーソルより前
-              TextSpan(text: composingText, style: composingStyle), //未確定文字
-              TextSpan(text: part2, style: textStyle),
-            ],
-          );
-        }
-      } else {
-        //`通常の行(そのまま描画)
-        print("変換中 変換なし");
-        textSpan = TextSpan(text: line, style: textStyle);
-      }
-
-      final textPainter = TextPainter(
-        text: textSpan,
-        textDirection: TextDirection.ltr,
-      );
-
-      // layoutの実行
-      textPainter.layout(minWidth: 0, maxWidth: size.width);
-      // テキストの描画
-      // (0, verticalOffset)の位置から開始
-      textPainter.paint(canvas, Offset(0, verticalOffset));
-
-      verticalOffset += lineHeight;
-    }
-
-    // カーソルの描画
-    //  charWidth * cursorCol でX座標を計算
-    final double cursorX = cursorCol * charWidth;
-    final double cursorY = cursorRow * lineHeight;
-
-    // カーソル描画の開始点と終了点を計算
-    final Offset startPoint = Offset(cursorX, cursorY);
-    // lineHeight を使用して終了Y座標を計算
-    final Offset endPoint = Offset(cursorX, cursorY + lineHeight);
-
-    canvas.drawLine(startPoint, endPoint, cursorPaint);
-*/
     // --------------------------------------------------------
     // 5. グリッド線 (showGrid時)
     // --------------------------------------------------------
