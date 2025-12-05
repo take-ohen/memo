@@ -383,21 +383,34 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
         return KeyEventResult.handled;
       case PhysicalKeyboardKey.arrowUp:
-        if (_cursorRow > 0) {
-          _cursorRow--;
-
-          _cursorCol = _getColFromVisualX(
-            _lines[_cursorRow],
-            _preferredVisualX,
-          );
+        if (isAlt) {
+          // 【Alt+上】完全フリー移動
+          // 0より上には行けないが、行データ有無に関係なく移動可能
+          if (_cursorRow > 0) {
+            _cursorRow--;
+          }
+        } else {
+          // 通常の上移動
+          if (_cursorRow > 0) {
+            _cursorRow--;
+          }
         }
-        /*
-        // 上キー
-        final int newRow = max(0, _cursorRow - 1);
-        _cursorRow = newRow;
-        // 新しい行の長さに合わせてカーソル位置を調整（行末を超えないように）
-        _cursorCol = min(_lines[newRow].length, _cursorCol);
-      */
+
+        // 列位置(_cursorCol)の決定
+        if (_cursorRow < _lines.length) {
+          String line = _lines[_cursorRow];
+          int lineWidth = _calcTextWidth(line);
+
+          if (isAlt && _preferredVisualX > lineWidth) {
+            int gap = _preferredVisualX - lineWidth;
+            _cursorCol = line.length + gap;
+          } else {
+            _cursorCol = _getColFromVisualX(line, _preferredVisualX);
+            // ★修正: 文字列よりも右側への配置を許可
+          }
+        } else {
+          _cursorCol = _preferredVisualX;
+        }
 
         // 移動後にIME窓を更新
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -407,31 +420,38 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
         return KeyEventResult.handled;
       case PhysicalKeyboardKey.arrowDown:
         if (isAlt) {
-          // [Alt] 虚空移動: 制限なしで下へ
+          // 【Alt+下】フリーカーソル移動（行制限なし）
           _cursorRow++;
+          // 虚空移動なので、列位置は現在のVisualXを維持（何もしない or VisualXから再計算）
+          // 行が存在すれば文字に合わせて吸着、存在しなければVisualXそのものをColとみなす
         } else {
-          // [通常] データがある行までしか移動できない
+          // 通常の下移動
           if (_cursorRow < _lines.length - 1) {
             _cursorRow++;
-
-            _cursorCol = _getColFromVisualX(
-              _lines[_cursorRow],
-              _preferredVisualX,
-            );
-            /*
-            // 移動先の行の長さに合わせる（スナップ）
-
-            int nextLineLen = _lines[_cursorRow].length;
-            _cursorCol = min(_cursorCol, nextLineLen);
-            */
           }
+        }
+        // --- 共通: 列位置(_cursorCol)の決定ロジック ---
+        // 行データが存在する場合: 文字列に合わせて配置
+        if (_cursorRow < _lines.length) {
+          String line = _lines[_cursorRow];
+          int lineWidth = _calcTextWidth(line);
+
+          if (isAlt && _preferredVisualX > lineWidth) {
+            int gap = _preferredVisualX - lineWidth;
+            _cursorCol = line.length + gap;
+          } else {
+            // 行の文字の中に収まる場合 -> 文字に合わせて吸着
+            _cursorCol = _getColFromVisualX(line, _preferredVisualX);
+          }
+        } else {
+          // 行データが存在しない(虚空)場合: VisualX をそのまま Col とする (半角スペース埋め想定)
+          _cursorCol = _preferredVisualX;
         }
 
         // 移動後にIME窓を更新
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _updateImeWindowPosition();
         });
-
         return KeyEventResult.handled;
       default:
         if (character != null && character.isNotEmpty) {
@@ -440,17 +460,9 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
           // 文字入力モードの最初で「虚空」を「実データ」に変換する
           _fillVirtualSpaceIfNeeded();
 
-          // 現在の行の文字列を取得
-          final String currentLine = _lines[_cursorRow];
+          // 現在文字をカーソル行に挿入する。
+          _insertText(character);
 
-          // 文字列をカーソルの位置で分割し、間に新しい文字を挿入
-          final String newLine =
-              currentLine.substring(0, _cursorCol) +
-              character +
-              currentLine.substring(_cursorCol);
-
-          _lines[_cursorRow] = newLine; // _lines の該当行を新しい文字列で更新
-          _cursorCol++; // カーソル位置（col）を1つ右へ移動
           return KeyEventResult.handled;
         }
         // 関係ないキー（Shift単体など）は無視して、システムに任せる
@@ -465,17 +477,19 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     // ---------------------------------------------------------
     // 行 (Row) の拡張: カーソル位置まで行が足りなければ増やす
     // ---------------------------------------------------------
-    while (_lines.length <= _cursorRow) {
-      _lines.add(""); // 空行を追加して埋める
+    if (_cursorRow >= _lines.length) {
+      int newLinesNeeded = _cursorRow - _lines.length + 1;
+      for (int i = 0; i < newLinesNeeded; i++) {
+        _lines.add("");
+      }
     }
 
     var currentLine = _lines[_cursorRow];
-
     // ---------------------------------------------------------
     // 列 (Col) の拡張: カーソル位置まで文字が足りなければスペースで埋める
     // --------------------------------------------------------
     if (_cursorCol > currentLine.length) {
-      final int spacesNeeded = _cursorCol - currentLine.length;
+      int spacesNeeded = _cursorCol - currentLine.length;
       // 必要な文だけ半角スペースを追加する。
       currentLine += ' ' * spacesNeeded;
     }
@@ -483,14 +497,59 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     // ---------------------------------------------------------
     // 文字の挿入
     // ---------------------------------------------------------
-    final part1 = currentLine.substring(0, _cursorCol);
-    final part2 = currentLine.substring(_cursorCol);
+    String part1 = currentLine.substring(0, _cursorCol);
+    String part2 = currentLine.substring(_cursorCol);
+
+    // 上書きモード対応
+    if (_isOverwriteMode && part2.isNotEmpty) {
+      // 入力されたテキストの「見た目の幅」を計算
+      int inputVisualWidth = _calcTextWidth(text);
+      int removeLength = 0; //削除する文字数
+      int currentVisualWidth = 0;
+
+      var iterator = part2.runes.iterator;
+      while (iterator.moveNext()) {
+        if (currentVisualWidth >= inputVisualWidth && removeLength > 0) {
+          break;
+        }
+
+        int rune = iterator.current;
+
+        // 半角=1, 全角=2
+        int charWidth = (rune < 128) ? 1 : 2; // 簡易幅判定
+        currentVisualWidth += charWidth;
+
+        // サロゲートペア(絵文字など)対応: 0xFFFFを超える文字は2単位、それ以外は1単位
+        removeLength += (rune > 0xFFFF) ? 2 : 1;
+      }
+
+      // 計算した文字数分だけ part2 を削る
+      if (removeLength > 0) {
+        if (part2.length >= removeLength) {
+          part2 = part2.substring(removeLength);
+        } else {
+          part2 = "";
+        }
+      }
+    }
 
     // 行を更新（カーソル位置に文字を挟む）
     _lines[_cursorRow] = part1 + text + part2;
-
     // カーソルを進める。
     _cursorCol += text.length;
+
+    // 入力後はVisuallXも更新しておく。
+    String newLine = _lines[_cursorRow];
+    // カーソル位置までの文字列で幅を計算（行末を超えていればその分も考慮される）
+    int safeEnd = min(_cursorCol, newLine.length);
+    _preferredVisualX = _calcTextWidth(newLine.substring(0, safeEnd));
+
+    // IME位置更新
+    if (mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _updateImeWindowPosition();
+      });
+    }
   }
 
   // カーソル位置までデータを埋める
@@ -688,6 +747,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                             charWidth: _charWidth,
                             charHeight: _charHeight,
                             showGrid: _showGrid, // Grid ON/OFFの状態をPainterに渡す
+                            isOverwriteMode: _isOverwriteMode,
                             cursorRow: _cursorRow, // カーソルの位置を渡す
                             cursorCol: _cursorCol,
                             lineHeight: _lineHeight,
@@ -796,6 +856,7 @@ class MemoPainter extends CustomPainter {
   final double charHeight;
   final double lineHeight;
   final bool showGrid;
+  final bool isOverwriteMode; // 上書きモード
   final int cursorRow;
   final int cursorCol;
   final TextStyle textStyle; // TextPainter に渡すスタイル
@@ -806,6 +867,7 @@ class MemoPainter extends CustomPainter {
     required this.charWidth,
     required this.charHeight,
     required this.showGrid,
+    required this.isOverwriteMode,
     required this.cursorRow,
     required this.cursorCol,
     required this.lineHeight,
@@ -845,6 +907,27 @@ class MemoPainter extends CustomPainter {
       );
       textPainter.layout();
       textPainter.paint(canvas, Offset(0, i * lineHeight));
+
+      // 改行マークの描画
+      // 行末に改行マーク ↵ を描く。
+      // 厳密には最終行に描かない判定が合っても良い。
+      // String line = lines[i];
+      int visualWidth = _calcTextWidth(line);
+      double lineEndX = visualWidth * charWidth;
+      double lineY = i * lineHeight;
+
+      //改行マーク用の薄い色
+      final markStyle = TextStyle(
+        color: Colors.grey.shade500,
+        fontSize: textStyle.fontSize,
+      );
+      final markSpan = TextSpan(text: '↵', style: markStyle);
+      final markPainter = TextPainter(
+        text: markSpan,
+        textDirection: TextDirection.ltr,
+      );
+      markPainter.layout();
+      markPainter.paint(canvas, Offset(lineEndX + 2, lineY)); // 少し右に描く
     }
 
     // --------------------------------------------------------
@@ -909,17 +992,32 @@ class MemoPainter extends CustomPainter {
     // --------------------------------------------------------
     // 4. カーソルの描画
     // --------------------------------------------------------
-    final cursorPaint = Paint()
-      ..color = Colors.black
-      ..strokeWidth = 2.0
-      ..strokeCap = StrokeCap.square;
+    // 上書きモードならカーソル形状を変える
+    if (isOverwriteMode) {
+      // ブロックカーソル(文字を覆う四角形)
+      final cursorRect = Rect.fromLTWH(
+        cursorPixelX,
+        cursorPixelY,
+        charWidth,
+        lineHeight,
+      );
+      canvas.drawRect(
+        cursorRect,
+        Paint()..color = Colors.blue.withValues(alpha: 0.5),
+      );
+    } else {
+      // 縦線カーソル
+      final cursorPaint = Paint()
+        ..color = Colors.black
+        ..strokeWidth = 2.0
+        ..strokeCap = StrokeCap.square;
 
-    canvas.drawLine(
-      Offset(cursorPixelX, cursorPixelY),
-      Offset(cursorPixelX, cursorPixelY + lineHeight),
-      cursorPaint,
-    );
-
+      canvas.drawLine(
+        Offset(cursorPixelX, cursorPixelY),
+        Offset(cursorPixelX, cursorPixelY + lineHeight),
+        cursorPaint,
+      );
+    }
     // --------------------------------------------------------
     // 5. グリッド線 (showGrid時)
     // --------------------------------------------------------
