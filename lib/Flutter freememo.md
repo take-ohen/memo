@@ -6863,3 +6863,894 @@ classDiagram
       * **Alt未押下時:** `_getColFromVisualX` を強制的に使うため、行末より右にいた場合、移動先の行の末尾にパチンと吸着します。
 
 ご確認をお願いいたします。
+
+## 以下、実施結果等
+``` 
+１) 提示済みの上書きモード(OverWriteモード)実装で半角が上書きされない問題。
+
+    調査の結果、英数字(半角)の際は、_insertTextが呼ばれず
+    直接書き込み処理を行っていたらから、どんな変更も受け付けなかった。
+    今回、直接書き込み処理を行っていた部分を_insertTextを使う処理に
+    変更して、今回の修正を入れて普通に上書きできた。
+
+    おそらく、過去のどの修正でも全角処理は、上書きができていたいので
+    過去の何度かの提案ロジックでも半角の上書き処理はうまく行っていた可能性が高い。
+
+    IMEの処理にはInsertTextを入れたとときに、Geminiが半角入力にinsertTextを入れる処理を
+    提案してくれなかったか、私がその反映を落とした可能性がある。今となっては不明。
+
+
+２） Alt＋矢印の動作(特に上下キー)
+     -> いまのところ問題がないように思うので、一旦fixed.
+
+ここまで、一旦機能追加は停止して、前に提案のあったmain.dartの分割(リファクタリング)を
+行いたい。以前のもらった提案は、以下のようになっていた。
+
+main.dart: アプリ起動(main), MyApp
+editor_page.dart: EditorPage, _EditorPageState (入力・状態管理)
+memo_painter.dart: MemoPainter (描画)
+text_utils.dart: _calcTextWidth などの便利関数
+
+**最新のmain-1.dart**を今回のファイルに添付した。
+
+分割の提示とやり方の概要・手順・注意などを提示してください。
+```
+
+上書きモードの解決、おめでとうございます！🎉
+原因が「半角文字の入力時に `_insertText` を通さず、直接配列を操作する古い処理が残っていたこと」だったとは……。これは非常に気づきにくい、しかし納得のいく原因です。見事なトラブルシューティングでした。また、Alt+矢印キーの挙動も安定しているとのことで何よりです。
+
+それでは、機能追加を一旦停止し、**「リファクタリング（ファイル分割）」** を行いましょう。
+`main-1.dart` は現在約600行ですが、機能が増えるにつれて管理が難しくなります。今のうちに綺麗にしておくのは素晴らしい判断です。
+
+以下の4つのファイルに分割します。
+
+1.  **`text_utils.dart`**: 共通関数（文字幅計算）
+2.  **`memo_painter.dart`**: 描画クラス
+3.  **`editor_page.dart`**: エディタのメインロジック
+4.  **`main.dart`**: アプリ起動部分
+
+-----
+
+### 分割の手順
+
+プロジェクトの `lib` フォルダの中に、以下の順序でファイルを作成し、コードをコピーしてください。
+※ `text_utils.dart` を最初に作ると、他のファイルのコンパイルエラーが減って作業しやすいです。
+
+#### 1\. `lib/text_utils.dart`
+
+文字幅計算ロジック（`_calcTextWidth`）は、これまで `State` と `Painter` の両方に重複して書かれていました。これをここに集約します。
+
+```dart
+import 'package:flutter/material.dart';
+
+/// テキスト操作に関する汎用的な関数をまとめるクラス
+class TextUtils {
+  /// 全角・半角の文字幅計算ロジック
+  /// 簡易的にASCII(0-127)を幅1、それ以外を幅2として計算する。
+  static int calcTextWidth(String text) {
+    int width = 0;
+    for (int i = 0; i < text.runes.length; i++) {
+      // ASCII文字(0-127)は幅1、それ以外は幅2
+      width += (text.runes.elementAt(i) < 128) ? 1 : 2;
+    }
+    return width;
+  }
+}
+```
+
+#### 2\. `lib/memo_painter.dart`
+
+`MemoPainter` クラスを移動します。
+**ポイント**: `_calcTextWidth` メソッドを削除し、代わりに `TextUtils.calcTextWidth` を使うように書き換えています。
+
+```dart
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'text_utils.dart'; // ★作成した便利関数をインポート
+
+class MemoPainter extends CustomPainter {
+  final List<String> lines;
+  final double charWidth;
+  final double charHeight;
+  final double lineHeight;
+  final bool showGrid;
+  final bool isOverwriteMode; // 上書きモード
+  final int cursorRow;
+  final int cursorCol;
+  final TextStyle textStyle; // TextPainter に渡すスタイル
+  final String composingText; // 未確定文字
+
+  MemoPainter({
+    required this.lines,
+    required this.charWidth,
+    required this.charHeight,
+    required this.showGrid,
+    required this.isOverwriteMode,
+    required this.cursorRow,
+    required this.cursorCol,
+    required this.lineHeight,
+    required this.textStyle,
+    required this.composingText,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // --------------------------------------------------------
+    // 1. テキスト（確定済み）の描画
+    // --------------------------------------------------------
+    for (int i = 0; i < lines.length; i++) {
+      final String line = lines[i];
+
+      final textSpan = TextSpan(text: line, style: textStyle);
+      final textPainter = TextPainter(
+        text: textSpan,
+        textDirection: TextDirection.ltr,
+      );
+      textPainter.layout();
+      textPainter.paint(canvas, Offset(0, i * lineHeight));
+
+      // 改行マークの描画
+      // ★共通化した関数を使用
+      int visualWidth = TextUtils.calcTextWidth(line);
+      double lineEndX = visualWidth * charWidth;
+      double lineY = i * lineHeight;
+
+      //改行マーク用の薄い色
+      final markStyle = TextStyle(
+        color: Colors.grey.shade500,
+        fontSize: textStyle.fontSize,
+      );
+      final markSpan = TextSpan(text: '↵', style: markStyle);
+      final markPainter = TextPainter(
+        text: markSpan,
+        textDirection: TextDirection.ltr,
+      );
+      markPainter.layout();
+      markPainter.paint(canvas, Offset(lineEndX + 2, lineY));
+    }
+
+    // --------------------------------------------------------
+    // 2. カーソル位置のX座標計算 (全角対応)
+    // --------------------------------------------------------
+    double cursorPixelX = 0.0;
+
+    String currentLineText = "";
+    if (cursorRow < lines.length) {
+      currentLineText = lines[cursorRow];
+    }
+
+    String textBeforeCursor = "";
+    if (cursorCol <= currentLineText.length) {
+      textBeforeCursor = currentLineText.substring(0, cursorCol);
+    } else {
+      int spacesNeeded = cursorCol - currentLineText.length;
+      textBeforeCursor = currentLineText + (' ' * spacesNeeded);
+    }
+
+    // ★共通化した関数を使用
+    int visualCursorX = TextUtils.calcTextWidth(textBeforeCursor);
+    cursorPixelX = visualCursorX * charWidth;
+
+    double cursorPixelY = cursorRow * lineHeight;
+
+    // --------------------------------------------------------
+    // 3. 未確定文字 (composingText) の描画
+    // --------------------------------------------------------
+    if (composingText.isNotEmpty) {
+      final composingStyle = TextStyle(
+        color: Colors.black,
+        fontSize: textStyle.fontSize,
+        fontFamily: textStyle.fontFamily,
+        decoration: TextDecoration.underline,
+        decorationStyle: TextDecorationStyle.solid,
+        decorationColor: Colors.blue,
+        backgroundColor: Colors.white.withValues(alpha: 0.8),
+      );
+
+      final span = TextSpan(text: composingText, style: composingStyle);
+      final tp = TextPainter(text: span, textDirection: TextDirection.ltr);
+      tp.layout();
+
+      tp.paint(canvas, Offset(cursorPixelX, cursorPixelY));
+
+      // 変換中カーソル位置調整用
+      // ★共通化した関数を使用
+      // int composingWidth = TextUtils.calcTextWidth(composingText);
+      // cursorPixelX += composingWidth * charWidth;
+    }
+
+    // --------------------------------------------------------
+    // 4. カーソルの描画
+    // --------------------------------------------------------
+    if (isOverwriteMode) {
+      final cursorRect = Rect.fromLTWH(
+        cursorPixelX,
+        cursorPixelY,
+        charWidth,
+        lineHeight,
+      );
+      canvas.drawRect(
+        cursorRect,
+        Paint()..color = Colors.blue.withValues(alpha: 0.5),
+      );
+    } else {
+      final cursorPaint = Paint()
+        ..color = Colors.black
+        ..strokeWidth = 2.0
+        ..strokeCap = StrokeCap.square;
+
+      canvas.drawLine(
+        Offset(cursorPixelX, cursorPixelY),
+        Offset(cursorPixelX, cursorPixelY + lineHeight),
+        cursorPaint,
+      );
+    }
+    // --------------------------------------------------------
+    // 5. グリッド線 (showGrid時)
+    // --------------------------------------------------------
+    if (showGrid) {
+      final gridpaint = Paint()
+        ..color = Colors.grey.withValues(alpha: 0.3)
+        ..strokeWidth = 1.0;
+
+      for (double x = 0; x < size.width; x += charWidth) {
+        canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridpaint);
+      }
+
+      for (double y = 0; y < size.height; y += lineHeight) {
+        canvas.drawLine(Offset(0, y), Offset(size.width, y), gridpaint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant MemoPainter oldDelegate) {
+    return listEquals(oldDelegate.lines, lines) ||
+        oldDelegate.charWidth != charWidth ||
+        oldDelegate.charHeight != charHeight ||
+        oldDelegate.showGrid != showGrid ||
+        oldDelegate.cursorRow != cursorRow ||
+        oldDelegate.cursorCol != cursorCol ||
+        oldDelegate.textStyle != textStyle ||
+        oldDelegate.composingText != composingText;
+  }
+}
+```
+
+#### 3\. `lib/editor_page.dart`
+
+一番巨大なロジック部分です。`EditorPage` クラスと `_EditorPageState` をここに置きます。
+ここでも `TextUtils.calcTextWidth` を使うように修正し、重複メソッドを削除しています。
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'dart:math';
+
+// 分割したファイルをインポート
+import 'memo_painter.dart';
+import 'text_utils.dart';
+
+class EditorPage extends StatefulWidget {
+  const EditorPage({super.key});
+
+  @override
+  State<EditorPage> createState() => _EditorPageState();
+}
+
+class _EditorPageState extends State<EditorPage> with TextInputClient {
+  double _charWidth = 0.0;
+  double _charHeight = 0.0;
+  double _lineHeight = 0.0;
+  int _cursorRow = 0;
+  int _cursorCol = 0;
+  int _preferredVisualX = 0;
+  bool _isOverwriteMode = false;
+  List<String> _lines = [''];
+
+  bool _showGrid = false;
+  TextInputConnection? _inputConnection;
+  String _composingText = "";
+
+  final ScrollController _horizontalScrollController = ScrollController();
+  final ScrollController _verticalScrollController = ScrollController();
+  final FocusNode _focusNode = FocusNode();
+  final GlobalKey _painterKey = GlobalKey();
+
+  static const _textStyle = TextStyle(
+    fontFamily: 'BIZ UDゴシック',
+    fontSize: 16.0,
+    color: Colors.black,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _calculateGlyphMetrics();
+    WidgetsBinding.instance;
+
+    _focusNode.addListener(_handleFocusChange);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _focusNode.requestFocus();
+      if (_focusNode.hasFocus) {
+        _activateIme(context);
+      }
+    });
+
+    _verticalScrollController.addListener(_updateImeWindowPosition);
+    _horizontalScrollController.addListener(_updateImeWindowPosition);
+  }
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    _horizontalScrollController.dispose();
+    _verticalScrollController.dispose();
+    super.dispose();
+  }
+
+  void _calculateGlyphMetrics() {
+    final painter = TextPainter(
+      text: const TextSpan(text: 'M', style: _textStyle),
+      textDirection: TextDirection.ltr,
+    );
+    painter.layout();
+
+    setState(() {
+      _charWidth = painter.width;
+      _charHeight = painter.height;
+      _lineHeight = _charHeight * 1.2;
+    });
+  }
+
+  void _handleTap(TapDownDetails details) {
+    if (_charWidth == 0 || _charHeight == 0) return;
+
+    setState(() {
+      final Offset tapPosition = details.localPosition;
+      int clickedVisualX = (tapPosition.dx / _charWidth).round();
+      int clickedRow = (tapPosition.dy / _lineHeight).floor();
+
+      _cursorRow = max(0, clickedRow);
+
+      String currentLine = "";
+      if (_cursorRow < _lines.length) {
+        currentLine = _lines[_cursorRow];
+      }
+
+      // ★共通関数使用
+      int lineVisualWidth = TextUtils.calcTextWidth(currentLine);
+
+      if (clickedVisualX <= lineVisualWidth) {
+        _cursorCol = _getColFromVisualX(currentLine, clickedVisualX);
+      } else {
+        int gap = clickedVisualX - lineVisualWidth;
+        _cursorCol = currentLine.length + gap;
+      }
+
+      _preferredVisualX = clickedVisualX;
+
+      _focusNode.requestFocus();
+
+      WidgetsBinding.instance.addPersistentFrameCallback((_) {
+        _updateImeWindowPosition();
+      });
+    });
+  }
+
+  void _handleFocusChange() {
+    if (_focusNode.hasFocus) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _activateIme(context);
+        }
+      });
+    } else {
+      _inputConnection?.close();
+      _inputConnection = null;
+    }
+  }
+
+  KeyEventResult _handleKeyPress(KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+
+    final PhysicalKeyboardKey physicalKey = event.physicalKey;
+    final String? character = event.character;
+    bool isAlt = HardwareKeyboard.instance.isAltPressed;
+
+    int currentLineLength = 0;
+    if (_cursorRow < _lines.length) {
+      currentLineLength = _lines[_cursorRow].length;
+    }
+    switch (physicalKey) {
+      case PhysicalKeyboardKey.enter:
+        final currentLine = _lines[_cursorRow];
+        final part1 = currentLine.substring(0, _cursorCol);
+        final part2 = currentLine.substring(_cursorCol);
+
+        _lines[_cursorRow] = part1;
+        _lines.insert(_cursorRow + 1, part2);
+
+        _cursorRow++;
+        _cursorCol = 0;
+        return KeyEventResult.handled;
+
+      case PhysicalKeyboardKey.backspace:
+        if (_cursorCol > 0) {
+          final currentLine = _lines[_cursorRow];
+          final part1 = currentLine.substring(0, _cursorCol - 1);
+          final part2 = currentLine.substring(_cursorCol);
+          _lines[_cursorRow] = part1 + part2;
+          _cursorCol--;
+        } else if (_cursorRow > 0) {
+          final lineToAppend = _lines[_cursorRow];
+          final prevLineLength = _lines[_cursorRow - 1].length;
+          _lines[_cursorRow - 1] += lineToAppend;
+          _lines.removeAt(_cursorRow);
+          _cursorRow--;
+          _cursorCol = prevLineLength;
+        } else {
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.handled;
+
+      case PhysicalKeyboardKey.delete:
+        if (_cursorRow >= _lines.length) return KeyEventResult.handled;
+
+        final currentLine = _lines[_cursorRow];
+
+        if (_cursorCol < currentLine.length) {
+          final part1 = currentLine.substring(0, _cursorCol);
+          final part2 = (_cursorCol + 1 < currentLine.length)
+              ? currentLine.substring(_cursorCol + 1)
+              : '';
+          _lines[_cursorRow] = part1 + part2;
+        } else if (_cursorCol == currentLine.length) {
+          if (_cursorRow < _lines.length - 1) {
+            final nextLine = _lines[_cursorRow + 1];
+            _lines[_cursorRow] += nextLine;
+            _lines.removeAt(_cursorRow + 1);
+          }
+        }
+        return KeyEventResult.handled;
+
+      case PhysicalKeyboardKey.insert:
+        setState(() {
+          _isOverwriteMode = !_isOverwriteMode;
+        });
+        return KeyEventResult.handled;
+
+      case PhysicalKeyboardKey.arrowLeft:
+        if (_cursorCol > 0) {
+          _cursorCol--;
+        } else if (_cursorRow > 0) {
+          _cursorRow--;
+          _cursorCol = _lines[_cursorRow].length;
+        }
+        String currentLine = _lines[_cursorRow];
+        String textUpToCursor = currentLine.substring(
+          0,
+          min(_cursorCol, currentLine.length),
+        );
+        // ★共通関数使用
+        _preferredVisualX = TextUtils.calcTextWidth(textUpToCursor);
+
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _updateImeWindowPosition();
+        });
+        return KeyEventResult.handled;
+
+      case PhysicalKeyboardKey.arrowRight:
+        if (isAlt) {
+          _cursorCol++;
+        } else {
+          if (_cursorCol < currentLineLength) {
+            _cursorCol++;
+          } else if (_cursorRow < _lines.length - 1) {
+            _cursorRow++;
+            _cursorCol = 0;
+          }
+          String line = _lines[_cursorRow];
+          String textUpToCursor = line.substring(
+            0,
+            min(_cursorCol, line.length),
+          );
+          // ★共通関数使用
+          _preferredVisualX = TextUtils.calcTextWidth(textUpToCursor);
+        }
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _updateImeWindowPosition();
+        });
+        return KeyEventResult.handled;
+
+      case PhysicalKeyboardKey.arrowUp:
+        if (isAlt) {
+          if (_cursorRow > 0) {
+            _cursorRow--;
+          }
+        } else {
+          if (_cursorRow > 0) {
+            _cursorRow--;
+          }
+        }
+
+        if (_cursorRow < _lines.length) {
+          String line = _lines[_cursorRow];
+          // ★共通関数使用
+          int lineWidth = TextUtils.calcTextWidth(line);
+
+          if (isAlt && _preferredVisualX > lineWidth) {
+            int gap = _preferredVisualX - lineWidth;
+            _cursorCol = line.length + gap;
+          } else {
+            _cursorCol = _getColFromVisualX(line, _preferredVisualX);
+          }
+        } else {
+          _cursorCol = _preferredVisualX;
+        }
+
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _updateImeWindowPosition();
+        });
+        return KeyEventResult.handled;
+
+      case PhysicalKeyboardKey.arrowDown:
+        if (isAlt) {
+          _cursorRow++;
+        } else {
+          if (_cursorRow < _lines.length - 1) {
+            _cursorRow++;
+          }
+        }
+
+        if (_cursorRow < _lines.length) {
+          String line = _lines[_cursorRow];
+          // ★共通関数使用
+          int lineWidth = TextUtils.calcTextWidth(line);
+
+          if (isAlt && _preferredVisualX > lineWidth) {
+            int gap = _preferredVisualX - lineWidth;
+            _cursorCol = line.length + gap;
+          } else {
+            _cursorCol = _getColFromVisualX(line, _preferredVisualX);
+          }
+        } else {
+          _cursorCol = _preferredVisualX;
+        }
+
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _updateImeWindowPosition();
+        });
+        return KeyEventResult.handled;
+
+      default:
+        if (character != null && character.isNotEmpty) {
+          _fillVirtualSpaceIfNeeded();
+          _insertText(character);
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+    }
+  }
+
+  void _insertText(String text) {
+    if (text.isEmpty) return;
+
+    if (_cursorRow >= _lines.length) {
+      int newLinesNeeded = _cursorRow - _lines.length + 1;
+      for (int i = 0; i < newLinesNeeded; i++) {
+        _lines.add("");
+      }
+    }
+
+    var currentLine = _lines[_cursorRow];
+
+    if (_cursorCol > currentLine.length) {
+      int spacesNeeded = _cursorCol - currentLine.length;
+      currentLine += ' ' * spacesNeeded;
+    }
+
+    String part1 = currentLine.substring(0, _cursorCol);
+    String part2 = currentLine.substring(_cursorCol);
+
+    if (_isOverwriteMode && part2.isNotEmpty) {
+      // ★共通関数使用
+      int inputVisualWidth = TextUtils.calcTextWidth(text);
+      int removeLength = 0;
+      int currentVisualWidth = 0;
+
+      var iterator = part2.runes.iterator;
+      while (iterator.moveNext()) {
+        if (currentVisualWidth >= inputVisualWidth && removeLength > 0) {
+          break;
+        }
+
+        int rune = iterator.current;
+        int charWidth = (rune < 128) ? 1 : 2;
+        currentVisualWidth += charWidth;
+        removeLength += (rune > 0xFFFF) ? 2 : 1;
+      }
+
+      if (removeLength > 0) {
+        if (part2.length >= removeLength) {
+          part2 = part2.substring(removeLength);
+        } else {
+          part2 = "";
+        }
+      }
+    }
+
+    _lines[_cursorRow] = part1 + text + part2;
+    _cursorCol += text.length;
+
+    String newLine = _lines[_cursorRow];
+    int safeEnd = min(_cursorCol, newLine.length);
+    // ★共通関数使用
+    _preferredVisualX = TextUtils.calcTextWidth(newLine.substring(0, safeEnd));
+
+    if (mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _updateImeWindowPosition();
+      });
+    }
+  }
+
+  void _fillVirtualSpaceIfNeeded() {
+    while (_lines.length <= _cursorRow) {
+      _lines.add("");
+    }
+    if (_cursorCol > _lines[_cursorRow].length) {
+      _lines[_cursorRow] = _lines[_cursorRow].padRight(_cursorCol);
+    }
+  }
+
+  // ★重複していた _calcTextWidth を削除し、共通関数の TextUtils.calcTextWidth を使用
+
+  int _getColFromVisualX(String line, int targetVisualX) {
+    int currentVisualX = 0;
+    for (int i = 0; i < line.runes.length; i++) {
+      int charWidth = (line.runes.elementAt(i) < 128) ? 1 : 2;
+      if (currentVisualX + charWidth > targetVisualX) {
+        if ((targetVisualX - currentVisualX) <
+            (currentVisualX + charWidth - targetVisualX)) {
+          return i;
+        } else {
+          return i + 1;
+        }
+      }
+      currentVisualX += charWidth;
+    }
+    return line.length;
+  }
+
+  void _activateIme(BuildContext context) {
+    if (_inputConnection == null || !_inputConnection!.attached) {
+      final viewId = View.of(context).viewId;
+      print("IME接続試行 View ID: $viewId");
+
+      final config = TextInputConfiguration(
+        inputType: TextInputType.multiline,
+        inputAction: TextInputAction.newline,
+        viewId: viewId,
+        readOnly: false,
+      );
+
+      _inputConnection = TextInput.attach(this, config);
+      _inputConnection!.show();
+      print("IME接続開始！");
+    }
+  }
+
+  void _updateImeWindowPosition() {
+    if (_inputConnection == null ||
+        !_inputConnection!.attached ||
+        _painterKey.currentContext == null) {
+      return;
+    }
+
+    final RenderBox? renderBox =
+        _painterKey.currentContext!.findRenderObject() as RenderBox?;
+    if (renderBox == null) return;
+
+    final double safeCharWidth = _charWidth > 0 ? _charWidth : 16.0;
+    final double safeLineHeight = _lineHeight > 0 ? _lineHeight : 24.0;
+
+    final Matrix4 transform = renderBox.getTransformTo(null);
+    _inputConnection!.setEditableSizeAndTransform(renderBox.size, transform);
+
+    String currentLine = "";
+    if (_cursorRow < _lines.length) {
+      currentLine = _lines[_cursorRow];
+    }
+
+    String textBeforeCursor = "";
+    if (_cursorCol <= currentLine.length) {
+      textBeforeCursor = currentLine.substring(0, _cursorCol);
+    } else {
+      textBeforeCursor =
+          currentLine + (' ' * (_cursorCol - currentLine.length));
+    }
+
+    // ★共通関数使用
+    int visualX = TextUtils.calcTextWidth(textBeforeCursor);
+    final double localPixelX = visualX * safeCharWidth;
+    final double localPixelY = _cursorRow * safeLineHeight;
+
+    _inputConnection!.setComposingRect(
+      Rect.fromLTWH(localPixelX, localPixelY, safeCharWidth, safeLineHeight),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Free-form Memo'),
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        actions: [
+          Row(
+            children: [
+              const Text('Grid'),
+              Switch(
+                value: _showGrid,
+                onChanged: (value) {
+                  setState(() {
+                    _showGrid = value;
+                  });
+                },
+              ),
+            ],
+          ),
+        ],
+      ),
+      body: Scrollbar(
+        controller: _verticalScrollController,
+        thumbVisibility: true,
+        trackVisibility: true,
+        child: Scrollbar(
+          controller: _horizontalScrollController,
+          thumbVisibility: true,
+          trackVisibility: true,
+          notificationPredicate: (notif) => notif.depth == 1,
+          child: SingleChildScrollView(
+            controller: _verticalScrollController,
+            scrollDirection: Axis.vertical,
+            child: Focus(
+              focusNode: _focusNode,
+              onKeyEvent: (FocusNode node, KeyEvent event) {
+                final result = _handleKeyPress(event);
+                if (result == KeyEventResult.handled) {
+                  setState(() {});
+                }
+                return result;
+              },
+              child: SingleChildScrollView(
+                controller: _horizontalScrollController,
+                scrollDirection: Axis.horizontal,
+                child: GestureDetector(
+                  onTapDown: _handleTap,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      minWidth: 2000,
+                      minHeight: 2000,
+                    ),
+                    child: CustomPaint(
+                      key: _painterKey,
+                      painter: MemoPainter(
+                        lines: _lines,
+                        charWidth: _charWidth,
+                        charHeight: _charHeight,
+                        showGrid: _showGrid,
+                        isOverwriteMode: _isOverwriteMode,
+                        cursorRow: _cursorRow,
+                        cursorCol: _cursorCol,
+                        lineHeight: _lineHeight,
+                        textStyle: _textStyle,
+                        composingText: _composingText,
+                      ),
+                      size: Size.infinite,
+                      child: Container(),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // IME必須メソッド
+  @override
+  TextEditingValue get currentTextEditingValue => TextEditingValue.empty;
+
+  @override
+  void updateEditingValue(TextEditingValue value) {
+    print("IMEからの入力: text=${value.text}, composing=${value.composing}");
+    if (!value.composing.isValid) {
+      if (value.text.isNotEmpty) {
+        setState(() {
+          _insertText(value.text);
+          _composingText = "";
+        });
+      }
+      if (_inputConnection != null && _inputConnection!.attached) {
+        _inputConnection!.setEditingState(TextEditingValue.empty);
+      }
+    } else {
+      setState(() {
+        _composingText = value.text;
+      });
+      _updateImeWindowPosition();
+    }
+  }
+
+  @override
+  void performAction(TextInputAction action) {
+    print("IMEアクション: $action");
+  }
+
+  @override
+  void updateFloatingCursor(RawFloatingCursorPoint point) {}
+  @override
+  void showAutocorrectionPromptRect(int start, int end) {}
+  @override
+  void connectionClosed() {
+    print("IME接続が切れました");
+    _inputConnection = null;
+  }
+  @override
+  void performPrivateCommand(String action, Map<String, dynamic> data) {}
+  @override
+  void insertContent(KeyboardInsertedContent content) {}
+  @override
+  void showToolbar() {}
+  @override
+  AutofillScope? get currentAutofillScope => null;
+}
+```
+
+#### 4\. `lib/main.dart`
+
+最後に `main.dart` を上書きします。
+非常にシンプルになります。`EditorPage` をインポートするだけです。
+
+```dart
+import 'package:flutter/material.dart';
+// ★分割したファイルをインポート
+import 'editor_page.dart';
+
+void main() {
+  runApp(const MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Free-form Memo',
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blueGrey),
+        useMaterial3: true,
+      ),
+      home: const EditorPage(),
+    );
+  }
+}
+```
+
+-----
+
+### 作業確認
+
+1.  上記4つのファイルを作成・更新しましたか？
+2.  `flutter run` (または F5) でアプリを起動してください。
+3.  起動後、**「上書きモードの動作」「Alt+矢印の動作」「文字入力」** が以前と全く同じように動くことを確認してください。
+
+もしインポートエラー等が出た場合は、ファイル名やパスが合っているか確認してください。これが完了すれば、今後の機能追加が非常に楽になります。
