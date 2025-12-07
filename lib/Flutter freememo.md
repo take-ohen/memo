@@ -7754,3 +7754,993 @@ class MyApp extends StatelessWidget {
 3.  起動後、**「上書きモードの動作」「Alt+矢印の動作」「文字入力」** が以前と全く同じように動くことを確認してください。
 
 もしインポートエラー等が出た場合は、ファイル名やパスが合っているか確認してください。これが完了すれば、今後の機能追加が非常に楽になります。
+
+## 実施結果
+```
+1.ファイル分割実施
+  Warningが１つだけ。
+2.3.最終実装のカーソル移動、上書きは問題なく動作した。
+
+次は・・・？
+
+ 課題など、現状思いつき。
+   A) テストコードの追加。そろそろやりたい。
+   B) カーソル点滅
+   C) コピー＆ペースト 通常選択、矩形選択
+   D) UNDO＆REDO
+   E) ファイル入出力
+
+どれからいくのか？ A）もそろそろ取り組みたい。BとCも取り組みたい。Cはこのアプリには重要。
+こう思っている。
+```
+
+リファクタリング完了、お疲れ様でした！
+Warningが1つだけなら、おそらく `unused import`（使っていないインポート文）か `const` の付け忘れ程度ですので、気になるようでしたらエディタの波線にカーソルを合わせて修正（Quick Fix）してしまってください。
+
+さて、次のステップですね。
+
+あなたの **「Aもそろそろやりたい」「Cはこのアプリにとって重要」** という感覚、**完全に正しい**です。特にこの「フリーフォームメモ」において、矩形選択（Box Selection）ができるかできないかは、ただのメモ帳か高機能エディタかの分かれ道になります。
+
+私のおすすめする順序は **【 A → C 】** です。
+
+1.  **A) テストコード (Quick)**
+
+      * せっかく `text_utils.dart` にロジックを切り出したので、**「文字幅計算」というこのアプリの心臓部** だけでもテストで固めておきましょう。これが狂うと、この後の「選択範囲の計算」も全て狂います。
+      * 所要時間は短いです。
+
+2.  **C) コピー＆ペースト (Major)**
+
+      * ここが最大の山場です。
+      * 実装は **「①範囲選択の描画」→「②クリップボードとのやり取り」** の2段階になります。
+
+まずは、**A) テストコードの追加** からサクッと片付けましょう。
+Flutterのプロジェクトには最初から `test` フォルダがあるはずです。そこにテストファイルを作成します。
+
+-----
+
+### A) テストコードの追加実装
+
+`text_utils.dart` が正しく動いているか（特に全角・半角の計算や、クリック位置からの逆算）を保証するテストを書きます。
+
+**手順:**
+
+1.  プロジェクトのルートにある `test` フォルダを開きます。
+2.  最初からある `widget_test.dart` は一旦無視して（削除してもOK）、新しく **`text_utils_test.dart`** というファイルを作成します。
+3.  以下のコードを貼り付けます。
+
+#### `test/text_utils_test.dart`
+
+```dart
+import 'package:flutter_test/flutter_test.dart';
+// プロジェクト名に合わせてインポートパスを修正してください
+// 例: import 'package:flutter_freememo/text_utils.dart';
+// わからない場合は、lib/text_utils.dart の中身が見えるように相対パスなどで調整します
+// ここでは簡易的に相対パスのイメージで書きますが、通常は package:アプリ名/... です
+import 'package:your_app_name/text_utils.dart'; 
+
+void main() {
+  group('TextUtils Logic Tests', () {
+    
+    // 1. 文字幅計算のテスト
+    test('calcTextWidth should calculate correct width', () {
+      // 半角のみ
+      expect(TextUtils.calcTextWidth('abc'), 3);
+      // 全角のみ
+      expect(TextUtils.calcTextWidth('あいう'), 6);
+      // 混在
+      expect(TextUtils.calcTextWidth('aあbい'), 6); // 1+2+1+2 = 6
+      // 空文字
+      expect(TextUtils.calcTextWidth(''), 0);
+    });
+
+    // 2. 座標からカーソル位置(col)を逆算するロジックのテスト
+    // ※ 現在このロジックは EditorPage内に _getColFromVisualX として存在していますが、
+    //    テスト可能なように TextUtils に移動させることを推奨します。
+    //    もし移動済みなら以下のテストが有効になります。
+    /*
+    test('getColFromVisualX should return correct index', () {
+      const line = 'aあb'; // 幅: 1, 2, 1 => 累積: 1, 3, 4
+      
+      // 'a'の真ん中あたり -> 0 ('a'の前) or 1 ('a'の後)?
+      // ロジック依存ですが、今回は「近い方」または「超えたら次」
+      
+      // 0.5 (aの前半) -> index 0
+      // 1.5 (あ の前半) -> index 1
+      // 2.5 (あ の後半) -> index 1 or 2 (ロジックによる)
+    });
+    */
+  });
+}
+```
+
+**※重要: `package:your_app_name/` の部分**
+`pubspec.yaml` の `name:` に書かれている名前（例: `flutter_freememo`）を使ってください。
+例: `import 'package:flutter_freememo/text_utils.dart';`
+
+#### 実行方法
+
+VSCode等のエディタであれば、`main()` の横に **「Run」** や **「Debug」** というボタンが出るはずです。それを押すだけです。
+またはターミナルで:
+
+```bash
+flutter test test/text_utils_test.dart
+```
+
+-----
+
+### 次のステップ: C) 範囲選択とコピー
+
+テストが通って安心できたら、いよいよ本丸の **C) 選択機能** に入ります。
+
+このアプリの選択機能は、普通のエディタとは違い、**2つのモード**が必要になる可能性があります。
+
+1.  **通常選択 (Stream Selection):** 行をまたいで流れるように選択（普通のメモ帳）。
+2.  **矩形選択 (Box Selection):** 始点と終点で囲まれた「長方形」を選択。
+
+「フリーフォームメモ」としては、**矩形選択**こそが真骨頂です。
+（Excelのセル範囲選択に近いイメージです）
+
+**次回の手順案:**
+
+1.  **選択状態の管理変数を追加**
+      * `_selectionOriginRow`, `_selectionOriginCol` （選択開始位置）を作成。
+      * Shiftキー + 矢印キー、またはドラッグ操作で範囲を広げる処理。
+2.  **描画 (`MemoPainter`) の更新**
+      * 選択範囲の背景色を薄い青などで塗る処理を追加。
+3.  **コピー/切り取り/貼り付けの実装**
+      * 矩形範囲の文字をどうやってクリップボードに入れるか（改行で繋ぐなど）のロジック実装。
+
+まずは **A) テストの実行** を試してみてください。インポートのパスが通るかどうかが最初の関門です。
+それが終わったら、**「矩形選択（Box）と通常選択、どっちをメインにしますか？」** と教えてください。（両方実装も可能ですが、まずは矩形からやるのがこのアプリらしいと思います）
+
+## 1.テストは実施できた。どのようにテストを組み立てるのか、コードの内容をどう見るのか教えていほしい。2.選択は、まずはご推奨の矩形選択でコードの提示をお願いします。
+
+テストの実施成功、素晴らしいです！
+警告（Warning）が1つなら無視しても動作しますが、コードが綺麗になっていくのは気持ちが良いものです。
+
+それでは、ご要望通り **「1. テストの読み方・組み立て方」** の解説と、**「2. 矩形選択（Box Selection）の実装」** に進みます。
+
+-----
+
+## 1\. テストコードの読み方・組み立て方
+
+テストコードは **「この入力（Input）を与えたら、この結果（Output）が返ってくるはずだ」** という期待（Expectation）を書き連ねたものです。
+
+### 基本構文の解剖
+
+前回の `text_utils_test.dart` を例に解説します。
+
+```dart
+// group: 関連するテストをまとめる「フォルダ」のようなもの
+group('TextUtils Logic Tests', () {
+
+  // test: 1つの確認項目。「〇〇ができること」というタイトルをつける
+  test('calcTextWidth should calculate correct width', () {
+    
+    // expect( 実際の値,  期待する値 );
+    // 「実際の値」と「期待する値」が一致すれば合格(Green)、違えば不合格(Red)
+    expect(TextUtils.calcTextWidth('abc'), 3); 
+  });
+
+});
+```
+
+### テストをどう組み立てるか？（戦略）
+
+私はいつも以下の **3段階** でテストを考えます。
+
+1.  **Happy Path（正常系）:**
+      * 「普通こう使うよね」というケース。
+      * 例: `'abc'`(幅3), `'あいう'`(幅6)
+2.  **Edge Cases（境界値・異常系）:**
+      * バグが起きやすい「端っこ」や「空っぽ」のケース。
+      * 例: `''` (空文字), `null` (もし引数がnullableなら), 記号のみ, 絵文字
+3.  **Bug Reproduction（バグ再現・回帰テスト）:**
+      * **重要:** 一度直したバグが復活しないように書くテスト。
+      * 例: 「半角文字の上書きで挿入になってしまう問題」があったなら、そのロジック修正後に「半角上書きで文字数が増えないこと」を確認するテストを書きます。
+
+-----
+
+## 2\. 矩形選択 (Box Selection) の実装
+
+それでは、本丸の **「矩形選択」** を実装しましょう。
+このアプリの特徴である「フリーフォーム」と相性抜群の、**四角く切り取るような選択**です。
+
+### 作業の流れ
+
+1.  **`text_utils.dart`**: `_getColFromVisualX` をテスト可能なように移動（リファクタリング）。
+2.  **`editor_page.dart`**: Shiftキー + 矢印キー で「選択範囲」を管理するロジック追加。
+3.  **`memo_painter.dart`**: 選択範囲を「青い四角」で描画する処理を追加。
+
+今回は **Shift + 矢印キー** での選択を実装します。（マウスドラッグは次のステップにします）
+
+-----
+
+### Step 1: `lib/text_utils.dart` の更新
+
+`EditorPage` にあった `_getColFromVisualX` をここに移動します。これでテストしやすくなります。
+
+```dart
+import 'package:flutter/material.dart';
+
+class TextUtils {
+  /// 全角・半角の文字幅計算ロジック
+  static int calcTextWidth(String text) {
+    int width = 0;
+    for (int i = 0; i < text.runes.length; i++) {
+      width += (text.runes.elementAt(i) < 128) ? 1 : 2;
+    }
+    return width;
+  }
+
+  /// ★移動: 見た目の幅(visualX)から文字数(col)を逆算する
+  static int getColFromVisualX(String line, int targetVisualX) {
+    int currentVisualX = 0;
+    for (int i = 0; i < line.runes.length; i++) {
+      int charWidth = (line.runes.elementAt(i) < 128) ? 1 : 2;
+      
+      if (currentVisualX + charWidth > targetVisualX) {
+        // 近い方を判定
+        if ((targetVisualX - currentVisualX) <
+            (currentVisualX + charWidth - targetVisualX)) {
+          return i;
+        } else {
+          return i + 1; 
+        }
+      }
+      currentVisualX += charWidth;
+    }
+    return line.length;
+  }
+}
+```
+
+-----
+
+### Step 2: `lib/editor_page.dart` の更新
+
+選択の「開始地点（アンカー）」を覚える変数を追加し、矢印キーの処理に「Shiftが押されていたら選択モード」という分岐を加えます。
+
+1.  `_EditorPageState` の変数定義に追加
+2.  `_handleKeyPress` を修正
+3.  `_handleTap` を修正（タップしたら選択解除）
+4.  不要になった `_getColFromVisualX` を削除
+
+#### `lib/editor_page.dart` (修正箇所のみ)
+
+```dart
+// ... (前略)
+class _EditorPageState extends State<EditorPage> with TextInputClient {
+  // ... (既存の変数) ...
+  
+  // ★追加: 選択範囲の開始位置 (nullなら選択していない状態)
+  int? _selectionOriginRow;
+  int? _selectionOriginCol;
+
+  // ... (中略) ...
+
+  // ★修正: タップされたら選択解除
+  void _handleTap(TapDownDetails details) {
+    if (_charWidth == 0 || _charHeight == 0) return;
+
+    setState(() {
+      // 選択解除（タップ時はリセット）
+      _selectionOriginRow = null;
+      _selectionOriginCol = null;
+
+      final Offset tapPosition = details.localPosition;
+      // ... (中略: 座標計算ロジック) ...
+
+      // ★修正: TextUtilsのメソッドを使う
+      int lineVisualWidth = TextUtils.calcTextWidth(currentLine);
+
+      if (clickedVisualX <= lineVisualWidth) {
+        // ★修正: TextUtilsのメソッドを使う
+        _cursorCol = TextUtils.getColFromVisualX(currentLine, clickedVisualX);
+      } else {
+        // ... (中略) ...
+      }
+      
+      // ... (後略) ...
+    });
+  }
+
+  // ★修正: キー操作
+  KeyEventResult _handleKeyPress(KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+
+    final PhysicalKeyboardKey physicalKey = event.physicalKey;
+    final String? character = event.character;
+    bool isAlt = HardwareKeyboard.instance.isAltPressed;
+    // ★追加: Shiftキー判定
+    bool isShift = HardwareKeyboard.instance.isShiftPressed;
+
+    // Shiftが押された瞬間、まだ選択中でなければ「現在のカーソル」を開始位置にする
+    if (isShift) {
+       if (_selectionOriginRow == null) {
+         setState(() {
+           _selectionOriginRow = _cursorRow;
+           _selectionOriginCol = _cursorCol;
+         });
+       }
+    } else {
+       // Shiftが押されていなければ選択解除 (矢印キー以外で解除したい場合もあるのでここでリセットするかは要件次第だが、一旦移動系はリセット前提)
+       // ただし、文字入力時などは別途考える必要あり。今回は矢印移動で解説。
+    }
+
+    // ★ヘルパー関数: カーソル移動処理の前後に呼ぶ
+    void handleSelectionOnMove() {
+      if (isShift) {
+        // 選択開始していなければセット(念のため)
+        _selectionOriginRow ??= _cursorRow;
+        _selectionOriginCol ??= _cursorCol;
+      } else {
+        // Shiftなし移動なら選択解除
+        _selectionOriginRow = null;
+        _selectionOriginCol = null;
+      }
+    }
+
+    // ... (中略) ...
+    
+    switch (physicalKey) {
+      // ... (Enter, Backspace, Delete, Insert は一旦そのまま) ...
+
+      case PhysicalKeyboardKey.arrowLeft:
+        setState(() { // setStateで囲む
+          handleSelectionOnMove(); // ★選択状態更新
+          if (_cursorCol > 0) {
+            _cursorCol--;
+          } else if (_cursorRow > 0) {
+            _cursorRow--;
+            _cursorCol = _lines[_cursorRow].length;
+          }
+          // ... (VisualX更新などの既存ロジック) ...
+          String currentLine = _lines[_cursorRow];
+          String textUpToCursor = currentLine.substring(0, min(_cursorCol, currentLine.length));
+          _preferredVisualX = TextUtils.calcTextWidth(textUpToCursor);
+        }); // setState end
+        
+        WidgetsBinding.instance.addPostFrameCallback((_) => _updateImeWindowPosition());
+        return KeyEventResult.handled;
+
+      case PhysicalKeyboardKey.arrowRight:
+        setState(() {
+          handleSelectionOnMove(); // ★選択状態更新
+          if (isAlt) {
+            _cursorCol++;
+          } else {
+            // ... (通常移動ロジック) ...
+            if (_cursorCol < currentLineLength) {
+               _cursorCol++;
+            } else if (_cursorRow < _lines.length - 1) {
+               _cursorRow++;
+               _cursorCol = 0;
+            }
+          }
+           // ... (VisualX更新) ...
+           String line = _lines[_cursorRow];
+           String textUpToCursor = line.substring(0, min(_cursorCol, line.length));
+           _preferredVisualX = TextUtils.calcTextWidth(textUpToCursor);
+        });
+        WidgetsBinding.instance.addPostFrameCallback((_) => _updateImeWindowPosition());
+        return KeyEventResult.handled;
+
+      case PhysicalKeyboardKey.arrowUp:
+        setState(() {
+          handleSelectionOnMove(); // ★選択状態更新
+          // ... (移動ロジック) ...
+          if (isAlt) {
+            if (_cursorRow > 0) _cursorRow--;
+          } else {
+            if (_cursorRow > 0) _cursorRow--;
+          }
+
+          // 列位置決定 (TextUtils使用に書き換え)
+          if (_cursorRow < _lines.length) {
+            String line = _lines[_cursorRow];
+            int lineWidth = TextUtils.calcTextWidth(line);
+            
+            if (isAlt && _preferredVisualX > lineWidth) {
+               int gap = _preferredVisualX - lineWidth;
+               _cursorCol = line.length + gap;
+            } else {
+               // ★修正: TextUtils使用
+               _cursorCol = TextUtils.getColFromVisualX(line, _preferredVisualX);
+            }
+          } else {
+            _cursorCol = _preferredVisualX;
+          }
+        });
+        WidgetsBinding.instance.addPostFrameCallback((_) => _updateImeWindowPosition());
+        return KeyEventResult.handled;
+
+      case PhysicalKeyboardKey.arrowDown:
+        setState(() {
+          handleSelectionOnMove(); // ★選択状態更新
+          // ... (移動ロジック) ...
+          if (isAlt) {
+             _cursorRow++;
+          } else {
+             if (_cursorRow < _lines.length - 1) _cursorRow++;
+          }
+
+          // 列位置決定 (TextUtils使用に書き換え)
+           if (_cursorRow < _lines.length) {
+            String line = _lines[_cursorRow];
+            int lineWidth = TextUtils.calcTextWidth(line);
+            
+            if (isAlt && _preferredVisualX > lineWidth) {
+               int gap = _preferredVisualX - lineWidth;
+               _cursorCol = line.length + gap;
+            } else {
+               // ★修正: TextUtils使用
+               _cursorCol = TextUtils.getColFromVisualX(line, _preferredVisualX);
+            }
+          } else {
+            _cursorCol = _preferredVisualX;
+          }
+        });
+        WidgetsBinding.instance.addPostFrameCallback((_) => _updateImeWindowPosition());
+        return KeyEventResult.handled;
+
+      // ... (default などの処理) ...
+    }
+    // ...
+  }
+  
+  // ★重要: 古い _getColFromVisualX メソッドは削除してください
+  
+  // ... (buildメソッド内の MemoPainter 呼び出し修正) ...
+  /*
+    MemoPainter(
+      // ... 他の引数 ...
+      // ★追加: 選択範囲の情報を渡す
+      selectionOriginRow: _selectionOriginRow,
+      selectionOriginCol: _selectionOriginCol,
+    ),
+  */
+```
+
+-----
+
+### Step 3: `lib/memo_painter.dart` の更新
+
+ここが視覚的なハイライトを描画する部分です。
+**矩形選択**なので、開始行〜終了行のループの中で、開始列〜終了列の範囲を四角く塗ります。
+
+```dart
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'dart:math'; // min, maxを使うため
+import 'text_utils.dart'; 
+
+class MemoPainter extends CustomPainter {
+  // ... (既存のフィールド) ...
+  
+  // ★追加: 選択開始位置
+  final int? selectionOriginRow;
+  final int? selectionOriginCol;
+
+  MemoPainter({
+    required this.lines,
+    // ...
+    required this.cursorRow,
+    required this.cursorCol,
+    // ...
+    // ★追加
+    required this.selectionOriginRow,
+    required this.selectionOriginCol,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // --------------------------------------------------------
+    // 0. 選択範囲の背景描画 (テキストより先に描く)
+    // --------------------------------------------------------
+    if (selectionOriginRow != null && selectionOriginCol != null) {
+      final paintSelection = Paint()..color = Colors.blue.withOpacity(0.3);
+
+      // 矩形の範囲を計算
+      // 行: 開始行と現在のカーソル行の小さい方〜大きい方
+      int startRow = min(selectionOriginRow!, cursorRow);
+      int endRow = max(selectionOriginRow!, cursorRow);
+      
+      // 列: 開始列と現在のカーソル列の小さい方〜大きい方 (矩形なので全行共通)
+      int startCol = min(selectionOriginCol!, cursorCol);
+      int endCol = max(selectionOriginCol!, cursorCol);
+
+      for (int i = startRow; i <= endRow; i++) {
+        // 行が存在しない(虚空)場合はスキップ、あるいは虚空も塗るなら処理続行
+        // ここでは「虚空も塗る」仕様にします（フリーフォームらしいので）
+        
+        String lineText = "";
+        if (i < lines.length) {
+          lineText = lines[i];
+        }
+
+        // 塗る範囲のX座標を計算
+        // startColまでの文字幅
+        String textBeforeStart = "";
+        if (startCol <= lineText.length) {
+          textBeforeStart = lineText.substring(0, startCol);
+        } else {
+          textBeforeStart = lineText + (' ' * (startCol - lineText.length));
+        }
+        double startX = TextUtils.calcTextWidth(textBeforeStart) * charWidth;
+
+        // endColまでの文字幅
+        String textBeforeEnd = "";
+        if (endCol <= lineText.length) {
+          textBeforeEnd = lineText.substring(0, endCol);
+        } else {
+          textBeforeEnd = lineText + (' ' * (endCol - lineText.length));
+        }
+        double endX = TextUtils.calcTextWidth(textBeforeEnd) * charWidth;
+
+        // 矩形描画
+        // 上下位置: 行の上端から下端まで
+        double top = i * lineHeight;
+        double bottom = top + lineHeight;
+
+        canvas.drawRect(
+          Rect.fromLTRB(startX, top, endX, bottom),
+          paintSelection,
+        );
+      }
+    }
+
+    // --------------------------------------------------------
+    // 1. テキスト（確定済み）の描画
+    // ... (以下変更なし) ...
+```
+
+-----
+
+### 次のアクション
+
+1.  上記3つのファイルの修正を適用してください。
+      * `text_utils.dart` にメソッド移動。
+      * `editor_page.dart` にShiftキー判定と変数追加。
+      * `memo_painter.dart` に矩形描画ロジック追加。
+2.  実行して、**「Shiftキーを押しながら矢印キー」** を動かしてみてください。
+      * 青い四角形が、Excelの範囲選択のように広がるはずです。
+
+これが確認できたら、次は「その選択した範囲をコピーしてクリップボードに入れる（または切り取る）」実装に進みましょう。
+
+## 矩形選択
+```
+問題
+範囲が半角、全角が混じっていると 矩形ではなくなる。全角半角が大きさに関わらず１文字単位で計算されている。
+
+質問
+見た目の座標は、全角２、半角１で計算された座標？
+通常Col,Rowは、全角半角ともに１で計算された座標？
+```
+
+ご質問ありがとうございます。その通りです。現状のロジックは「文字数（Col）」を基準にしているため、全角（幅広）が含まれると選択範囲の幅がガタガタになってしまいます。
+
+まずはご質問への回答から整理します。
+
+### 質問への回答
+
+**Q1. 見た目の座標は、全角２、半角１で計算された座標？**
+**A. はい、そうです。**
+`TextUtils.calcTextWidth` や `_calcTextWidth` で計算している `visualX` は、半角=1, 全角=2 として計算した「見た目の幅」です。
+
+**Q2. 通常Col,Rowは、全角半角ともに１で計算された座標？**
+**A. はい、そうです。**
+`_cursorCol` や `_selectionOriginCol` は、文字のインデックス（何文字目か）を指しているため、半角だろうと全角だろうと「1文字は1」として扱われます。
+
+-----
+
+### 原因と対策
+
+**原因:**
+前回のコードは「**開始文字数(Col)** から **終了文字数(Col)** まで」を塗るロジックでした。
+
+  * 1行目が「abcde...」の場合、3文字目〜5文字目は幅 **2** (半角2文字分)
+  * 2行目が「あいうえお...」の場合、3文字目〜5文字目は幅 **4** (全角2文字分)
+    これにより、行ごとに青い四角の幅が変わってしまっていました。
+
+**対策:**
+矩形選択（Box Selection）を実現するには、「文字数(Col)」ではなく、**「見た目のX座標(VisualX)」で固定して描画**する必要があります。
+
+`MemoPainter` を修正して、「選択開始地点の**見た目のX**」と「現在のカーソルの**見た目のX**」を計算し、その座標を使ってまっすぐな四角形を描くように変更します。
+
+### 修正コード: `lib/memo_painter.dart`
+
+`MemoPainter` の `paint` メソッド内の「0. 選択範囲の背景描画」部分を、以下のように\*\*「VisualX基準」\*\*に書き換えてください。
+
+```dart
+  @override
+  void paint(Canvas canvas, Size size) {
+    // --------------------------------------------------------
+    // 0. 選択範囲の背景描画 (矩形選択: VisualX基準)
+    // --------------------------------------------------------
+    if (selectionOriginRow != null && selectionOriginCol != null) {
+      final paintSelection = Paint()..color = Colors.blue.withOpacity(0.3);
+
+      // 1. 行の範囲を決定
+      int startRow = min(selectionOriginRow!, cursorRow);
+      int endRow = max(selectionOriginRow!, cursorRow);
+
+      // 2. 「見た目のX座標 (VisualX)」を計算して基準にする
+      //   これにより、行の中身に関わらず、垂直に真っ直ぐな矩形を描く
+      
+      // 開始地点の VisualX を計算
+      String originLine = "";
+      if (selectionOriginRow! < lines.length) {
+        originLine = lines[selectionOriginRow!];
+      }
+      String originText = "";
+      if (selectionOriginCol! <= originLine.length) {
+        originText = originLine.substring(0, selectionOriginCol!);
+      } else {
+        originText = originLine + (' ' * (selectionOriginCol! - originLine.length));
+      }
+      double originVisualX = TextUtils.calcTextWidth(originText) * charWidth;
+
+      // 現在カーソルの VisualX を計算
+      String cursorLine = "";
+      if (cursorRow < lines.length) {
+        cursorLine = lines[cursorRow];
+      }
+      String cursorText = "";
+      if (cursorCol <= cursorLine.length) {
+        cursorText = cursorLine.substring(0, cursorCol);
+      } else {
+        cursorText = cursorLine + (' ' * (cursorCol - cursorLine.length));
+      }
+      double cursorVisualX = TextUtils.calcTextWidth(cursorText) * charWidth;
+
+      // 矩形の左端(Left)と右端(Right)を決定
+      double rectLeft = min(originVisualX, cursorVisualX);
+      double rectRight = max(originVisualX, cursorVisualX);
+
+      // 3. 行ごとに矩形を描画
+      for (int i = startRow; i <= endRow; i++) {
+        double top = i * lineHeight;
+        double bottom = top + lineHeight;
+
+        // VisualXを直接指定して描画するので、行の中身（全角半角）に影響されない
+        canvas.drawRect(
+          Rect.fromLTRB(rectLeft, top, rectRight, bottom),
+          paintSelection,
+        );
+      }
+    }
+
+    // ... (以下、テキスト描画などは変更なし) ...
+```
+
+### 解説
+
+修正前は `for` ループの中で `lines[i]` （その行の文字列）を使って幅を計算していましたが、今回の修正ではループの**外**で「開始点」と「終了点」の **VisualX（ピクセル位置）** を確定させています。
+
+そして、`canvas.drawRect` にはその固定された `rectLeft`, `rectRight` を渡しているため、どの行にどんな文字が入っていようと、**必ず垂直に揃った綺麗な長方形** が描画されます。
+
+これで、全角・半角が混在していても、Excelの範囲選択のように綺麗な四角形になるはずです。ご確認ください。
+
+## 選択はほぼうまく行った感じ。半角と全角ｊ次はペーストするためのバッファへの保存？ 
+
+矩形選択の描画がうまくいって良かったです！
+はい、次は\*\*「選択範囲のテキストをクリップボード（バッファ）に保存する処理（コピー）」\*\*の実装になります。
+
+矩形選択のコピーは、通常のコピーと少しロジックが異なります。
+**「選択された行それぞれに対して、指定された見た目の幅（VisualX）の部分だけを切り抜いて、改行でつなげる」** という処理が必要です。
+
+### 実装ステップ
+
+1.  **`editor_page.dart`** に `_copySelection` メソッドを追加します。
+2.  **`editor_page.dart`** の `_handleKeyPress` で `Ctrl+C` (または Cmd+C) を検知して呼び出します。
+
+-----
+
+### 1\. `_EditorPageState` にコピー処理を追加
+
+`lib/editor_page.dart` の `_EditorPageState` クラス内に、以下のメソッドを追加してください。
+
+**ポイント:**
+
+  * Painterで行ったのと同様に、まず「選択範囲の左端(VisualX)」と「右端(VisualX)」を計算します。
+  * 各行について、その VisualX に対応する文字インデックス（`startCol`, `endCol`）を `TextUtils` を使って割り出し、`substring` で切り抜きます。
+
+<!-- end list -->
+
+```dart
+  // ★追加: 選択範囲をコピーする
+  void _copySelection() async {
+    // 選択されていない場合は何もしない
+    if (_selectionOriginRow == null || _selectionOriginCol == null) return;
+
+    // 1. 範囲の特定 (行)
+    int startRow = min(_selectionOriginRow!, _cursorRow);
+    int endRow = max(_selectionOriginRow!, _cursorRow);
+
+    // 2. 範囲の特定 (見た目のX座標: VisualX)
+    //    Painterと同じロジックで「矩形の左端」と「矩形の右端」を算出します
+    
+    // 開始地点のVisualX
+    String originLine = "";
+    if (_selectionOriginRow! < _lines.length) {
+      originLine = _lines[_selectionOriginRow!];
+    }
+    String originText = "";
+    if (_selectionOriginCol! <= originLine.length) {
+      originText = originLine.substring(0, _selectionOriginCol!);
+    } else {
+      originText = originLine + (' ' * (_selectionOriginCol! - originLine.length));
+    }
+    // ★共通関数
+    int originVisualX = TextUtils.calcTextWidth(originText);
+
+    // カーソル地点のVisualX
+    String cursorLine = "";
+    if (_cursorRow < _lines.length) {
+      cursorLine = _lines[_cursorRow];
+    }
+    String cursorText = "";
+    if (_cursorCol <= cursorLine.length) {
+      cursorText = cursorLine.substring(0, _cursorCol);
+    } else {
+      cursorText = cursorLine + (' ' * (_cursorCol - cursorLine.length));
+    }
+    // ★共通関数
+    int cursorVisualX = TextUtils.calcTextWidth(cursorText);
+
+    int minVisualX = min(originVisualX, cursorVisualX);
+    int maxVisualX = max(originVisualX, cursorVisualX);
+
+    // 3. 各行からテキストを抽出して結合
+    StringBuffer buffer = StringBuffer();
+
+    for (int i = startRow; i <= endRow; i++) {
+      String line = "";
+      if (i < _lines.length) {
+        line = _lines[i];
+      }
+
+      // VisualX から 文字列のインデックス(col) に変換
+      // ★共通関数
+      int startCol = TextUtils.getColFromVisualX(line, minVisualX);
+      int endCol = TextUtils.getColFromVisualX(line, maxVisualX);
+
+      // 安全策: インデックスの逆転防止
+      if (startCol > endCol) {
+        int temp = startCol;
+        startCol = endCol;
+        endCol = temp;
+      }
+
+      // 文字列切り出し
+      // endColが行の長さを超えないようにガード
+      String extracted = "";
+      if (startCol < line.length) {
+        int safeEnd = min(endCol, line.length);
+        extracted = line.substring(startCol, safeEnd);
+      }
+      
+      // 必要であれば、矩形として形を保つために右側をスペースで埋める処理をここに入れることも可能ですが、
+      // まずは「ある文字だけコピー」します。
+
+      buffer.writeln(extracted);
+    }
+
+    // 4. クリップボードにセット
+    // 最後の改行を削除するかはお好みですが、通常はそのままセットします
+    await Clipboard.setData(ClipboardData(text: buffer.toString()));
+    
+    print("Copied to clipboard:\n${buffer.toString()}");
+  }
+```
+
+-----
+
+### 2\. `_handleKeyPress` にショートカットキーを追加
+
+`lib/editor_page.dart` の `_handleKeyPress` メソッドの冒頭に、ショートカットキーの判定を追加します。
+
+```dart
+  KeyEventResult _handleKeyPress(KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+
+    final PhysicalKeyboardKey physicalKey = event.physicalKey;
+    final String? character = event.character;
+    bool isAlt = HardwareKeyboard.instance.isAltPressed;
+    bool isShift = HardwareKeyboard.instance.isShiftPressed;
+    
+    // ★追加: Controlキー (Macの場合はCommandキーも考慮する場合はMeta)
+    bool isControl = HardwareKeyboard.instance.isControlPressed || 
+                     HardwareKeyboard.instance.isMetaPressed; // Mac command
+
+    // ★追加: ショートカットキー処理 (Ctrl+C)
+    if (isControl && physicalKey == PhysicalKeyboardKey.keyC) {
+      _copySelection();
+      return KeyEventResult.handled;
+    }
+
+    // ... (以下、Shift判定などの既存コード) ...
+```
+
+-----
+
+### 確認手順
+
+1.  コードを適用し、アプリを実行します。
+2.  **Shift + 矢印キー** で矩形範囲を選択します（青い四角が表示される状態）。
+3.  **Ctrl + C** (Macなら Cmd + C) を押します。
+4.  他のテキストエディタ（メモ帳など）を開き、貼り付けてみてください。
+      * 選択した四角い範囲の文字だけが、縦に並んで貼り付けられれば成功です！
+
+これができたら、次はいよいよ最難関の\*\*「矩形ペースト（貼り付け）」\*\*ですね。
+まずはコピーが正しく動くか確認をお願いします。
+
+## 選択範囲で正常に貼り付けられました。
+
+コピーが外部アプリへの貼り付けで正常に動作したとのこと、安心いたしました！
+これにより「矩形選択→テキストデータ化」の流れは完成です。
+
+次は、その逆である **「ペースト（貼り付け）」** の実装です。
+このアプリの特性（フリーフォーム）に合わせて、通常のテキストエディタのような「挿入して改行」ではなく、**「カーソル位置を左上として、そのまま四角く埋め込む（矩形ペースト）」** 処理を実装します。
+
+これにより、Excelでコピーした表などを、そのままの形で貼り付けることができるようになります。
+
+### 実装ステップ
+
+1.  **`_pasteText` メソッドの追加**: クリップボードからデータを取得し、行ごとに現在のX座標（VisualX）に合わせて挿入するロジック。
+2.  **`_handleKeyPress` の更新**: `Ctrl+V` で上記を呼び出す処理。
+
+-----
+
+### 1\. `lib/editor_page.dart` に `_pasteText` を追加
+
+`_EditorPageState` クラス内に以下のメソッドを追加してください。
+
+**ポイント:**
+
+  * クリップボードのテキストを改行で分割します。
+  * **「現在のカーソルの見た目の位置（VisualX）」** を基準に、各行に対して文字を挿入します。これにより、行頭がガタガタにならず、綺麗に縦に揃って貼り付きます。
+
+<!-- end list -->
+
+```dart
+  // ★追加: クリップボードから貼り付け (矩形貼り付け仕様)
+  Future<void> _pasteText() async {
+    // 1. クリップボードからテキスト取得
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    if (data == null || data.text == null || data.text!.isEmpty) return;
+
+    final String pasteContent = data.text!;
+    
+    // 改行コードを統一して分割
+    // Windows(\r\n), Mac/Linux(\n) 両対応
+    final List<String> pasteLines = pasteContent.replaceAll('\r\n', '\n').split('\n');
+
+    // 2. 貼り付け基準位置の計算
+    int startRow = _cursorRow;
+    
+    // カーソル位置の「見た目のX座標」を基準にする (これが矩形ペーストの肝)
+    // カーソルが行末より右(虚空)にある場合も考慮して計算済みであることが望ましい
+    // _preferredVisualX は矢印移動時に更新されていますが、
+    // クリック直後などは _calcTextWidth で再確認したほうが安全です。
+    String currentLine = "";
+    if (_cursorRow < _lines.length) {
+      currentLine = _lines[_cursorRow];
+    }
+    String textBeforeCursor = "";
+    if (_cursorCol <= currentLine.length) {
+      textBeforeCursor = currentLine.substring(0, _cursorCol);
+    } else {
+      textBeforeCursor = currentLine + (' ' * (_cursorCol - currentLine.length));
+    }
+    // ★共通関数
+    int targetVisualX = TextUtils.calcTextWidth(textBeforeCursor);
+
+    // 3. 行ごとに挿入処理
+    for (int i = 0; i < pasteLines.length; i++) {
+      int targetRow = startRow + i;
+      String textToInsert = pasteLines[i];
+
+      // 行が足りなければ増やす
+      if (targetRow >= _lines.length) {
+        // 足りない分だけ空行追加
+        int newLinesNeeded = targetRow - _lines.length + 1;
+        for (int k = 0; k < newLinesNeeded; k++) {
+          _lines.add("");
+        }
+      }
+
+      String line = _lines[targetRow];
+      
+      // 挿入位置(Col)を VisualX から逆算
+      // ★共通関数
+      int insertCol = TextUtils.getColFromVisualX(line, targetVisualX);
+
+      // 挿入位置が行の長さを超えている場合、スペースで埋める
+      if (insertCol > line.length) {
+        int spacesNeeded = insertCol - line.length;
+        line += ' ' * spacesNeeded;
+        insertCol = line.length; // 末尾に更新
+      } 
+      // 逆に、文字の途中(全角の真ん中など)に落ちる場合、getColFromVisualXがいい感じに丸めてくれます
+
+      // 文字列の挿入結合
+      String part1 = line.substring(0, insertCol);
+      String part2 = line.substring(insertCol);
+      
+      _lines[targetRow] = part1 + textToInsert + part2;
+    }
+
+    // 4. カーソル位置の更新
+    // 貼り付けたブロックの「右下」または「貼り付け開始位置」など好みがありますが、
+    // ここでは「貼り付けた最終行の、貼り付けた文字列の後ろ」に移動させます。
+    setState(() {
+       _cursorRow = startRow + pasteLines.length - 1;
+       // 最終行の挿入位置 + 文字数 だと単純計算できない(全角混じりなど)ので、
+       // シンプルに「VisualX + 貼り付けた最終行の幅」としたいところですが、
+       // ひとまず「貼り付けたブロックの右端」へ移動するロジックにします。
+       
+       String lastPastedLine = pasteLines.last;
+       int pastedVisualWidth = TextUtils.calcTextWidth(lastPastedLine);
+       
+       // 新しいVisualX = 基準VisualX + 貼り付けた幅
+       _preferredVisualX = targetVisualX + pastedVisualWidth;
+       
+       // そのVisualXに対応するColを計算してカーソルを置く
+       String currentLine = _lines[_cursorRow];
+       _cursorCol = TextUtils.getColFromVisualX(currentLine, _preferredVisualX);
+       
+       // 選択範囲は解除
+       _selectionOriginRow = null;
+       _selectionOriginCol = null;
+    });
+    
+    // IME窓更新
+    if (mounted) {
+       WidgetsBinding.instance.addPostFrameCallback((_) {
+         _updateImeWindowPosition();
+       });
+    }
+  }
+```
+
+-----
+
+### 2\. `_handleKeyPress` に `Ctrl+V` を追加
+
+`Ctrl+C` の下に `Ctrl+V` の処理を追加します。
+
+```dart
+    // ... (Ctrl+C の処理の後) ...
+
+    // ★追加: ショートカットキー処理 (Ctrl+V) ペースト
+    if (isControl && physicalKey == PhysicalKeyboardKey.keyV) {
+      _pasteText();
+      return KeyEventResult.handled;
+    }
+
+    // ... (以下、Shift判定など) ...
+```
+
+-----
+
+### 確認手順
+
+1.  **通常コピー:** メモ帳などで「あいう」をコピーして、アプリ上で `Ctrl+V` してみてください。カーソル位置に挿入されますか？
+2.  **複数行コピー:**
+    メモ帳などで以下の3行をコピーしてください。
+    ```
+    AAA
+    BBB
+    CCC
+    ```
+3.  **矩形ペースト:** アプリの適当な行の、適当な位置（例えば画面中央あたり）にカーソルを置いて `Ctrl+V` してください。
+      * 3行が**縦に揃って**挿入されれば成功です！
+      * （通常のテキストエディタだと、改行されてガタガタになりますが、このアプリではブロックとして入るはずです）
+
+これで「コピー（矩形）」と「ペースト（矩形）」が揃いました。エディタとしての利便性が一気に向上したはずです。

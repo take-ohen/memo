@@ -27,6 +27,10 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   TextInputConnection? _inputConnection;
   String _composingText = "";
 
+  // 矩形選択の範囲の開始位置
+  int? _selectionOriginRow;
+  int? _selectionOriginCol;
+
   final ScrollController _horizontalScrollController = ScrollController();
   final ScrollController _verticalScrollController = ScrollController();
   final FocusNode _focusNode = FocusNode();
@@ -83,6 +87,10 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     if (_charWidth == 0 || _charHeight == 0) return;
 
     setState(() {
+      // 選択解除(タップ時はリセット)
+      _selectionOriginRow = null;
+      _selectionOriginCol = null;
+
       final Offset tapPosition = details.localPosition;
       int clickedVisualX = (tapPosition.dx / _charWidth).round();
       int clickedRow = (tapPosition.dy / _lineHeight).floor();
@@ -98,7 +106,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
       int lineVisualWidth = TextUtils.calcTextWidth(currentLine);
 
       if (clickedVisualX <= lineVisualWidth) {
-        _cursorCol = _getColFromVisualX(currentLine, clickedVisualX);
+        _cursorCol = TextUtils.getColFromVisualX(currentLine, clickedVisualX);
       } else {
         int gap = clickedVisualX - lineVisualWidth;
         _cursorCol = currentLine.length + gap;
@@ -135,6 +143,40 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     final PhysicalKeyboardKey physicalKey = event.physicalKey;
     final String? character = event.character;
     bool isAlt = HardwareKeyboard.instance.isAltPressed;
+    bool isShift = HardwareKeyboard.instance.isShiftPressed;
+    bool isControl =
+        HardwareKeyboard.instance.isControlPressed ||
+        HardwareKeyboard.instance.isMetaPressed; // for  Mac
+
+    if (isControl && physicalKey == PhysicalKeyboardKey.keyC) {
+      _copySelection();
+      return KeyEventResult.handled;
+    }
+
+    //
+    if (isShift) {
+      if (_selectionOriginRow == null) {
+        setState(() {
+          _selectionOriginRow = _cursorRow;
+          _selectionOriginCol = _cursorCol;
+        });
+      }
+    } else {
+      // Shiftが押されていなければ選択解除 (矢印キー以外で解除したい場合もあるので
+      // ここでリセットするかは要件次第だが、一旦移動系はリセット前提)
+      // ただし、文字入力時などは別途考える必要あり。今回は矢印移動で解説。
+    }
+
+    // ヘルパー関数 カーソル移動処理の前後に呼ぶ
+    void handleSelectionOnMove() {
+      if (isShift) {
+        _selectionOriginRow ??= _cursorRow;
+        _selectionOriginCol ??= _cursorCol;
+      } else {
+        _selectionOriginRow = null;
+        _selectionOriginCol = null;
+      }
+    }
 
     int currentLineLength = 0;
     if (_cursorRow < _lines.length) {
@@ -199,6 +241,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
         return KeyEventResult.handled;
 
       case PhysicalKeyboardKey.arrowLeft:
+        handleSelectionOnMove(); // 選択状態更新
         if (_cursorCol > 0) {
           _cursorCol--;
         } else if (_cursorRow > 0) {
@@ -210,7 +253,6 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
           0,
           min(_cursorCol, currentLine.length),
         );
-        // ★共通関数使用
         _preferredVisualX = TextUtils.calcTextWidth(textUpToCursor);
 
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -219,6 +261,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
         return KeyEventResult.handled;
 
       case PhysicalKeyboardKey.arrowRight:
+        handleSelectionOnMove(); // 選択状態更新
         if (isAlt) {
           _cursorCol++;
         } else {
@@ -233,7 +276,6 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
             0,
             min(_cursorCol, line.length),
           );
-          // ★共通関数使用
           _preferredVisualX = TextUtils.calcTextWidth(textUpToCursor);
         }
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -242,6 +284,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
         return KeyEventResult.handled;
 
       case PhysicalKeyboardKey.arrowUp:
+        handleSelectionOnMove();
         if (isAlt) {
           if (_cursorRow > 0) {
             _cursorRow--;
@@ -254,14 +297,13 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
         if (_cursorRow < _lines.length) {
           String line = _lines[_cursorRow];
-          // ★共通関数使用
           int lineWidth = TextUtils.calcTextWidth(line);
 
           if (isAlt && _preferredVisualX > lineWidth) {
             int gap = _preferredVisualX - lineWidth;
             _cursorCol = line.length + gap;
           } else {
-            _cursorCol = _getColFromVisualX(line, _preferredVisualX);
+            _cursorCol = TextUtils.getColFromVisualX(line, _preferredVisualX);
           }
         } else {
           _cursorCol = _preferredVisualX;
@@ -273,6 +315,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
         return KeyEventResult.handled;
 
       case PhysicalKeyboardKey.arrowDown:
+        handleSelectionOnMove();
         if (isAlt) {
           _cursorRow++;
         } else {
@@ -283,14 +326,13 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
         if (_cursorRow < _lines.length) {
           String line = _lines[_cursorRow];
-          // ★共通関数使用
           int lineWidth = TextUtils.calcTextWidth(line);
 
           if (isAlt && _preferredVisualX > lineWidth) {
             int gap = _preferredVisualX - lineWidth;
             _cursorCol = line.length + gap;
           } else {
-            _cursorCol = _getColFromVisualX(line, _preferredVisualX);
+            _cursorCol = TextUtils.getColFromVisualX(line, _preferredVisualX);
           }
         } else {
           _cursorCol = _preferredVisualX;
@@ -382,23 +424,85 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     }
   }
 
-  // ★重複していた _calcTextWidth を削除し、共通関数の TextUtils.calcTextWidth を使用
+  // 選択範囲をコピーする。
+  void _copySelection() async {
+    // 選択されていない場合何もしない。
+    if (_selectionOriginRow == null || _selectionOriginCol == null) return;
 
-  int _getColFromVisualX(String line, int targetVisualX) {
-    int currentVisualX = 0;
-    for (int i = 0; i < line.runes.length; i++) {
-      int charWidth = (line.runes.elementAt(i) < 128) ? 1 : 2;
-      if (currentVisualX + charWidth > targetVisualX) {
-        if ((targetVisualX - currentVisualX) <
-            (currentVisualX + charWidth - targetVisualX)) {
-          return i;
-        } else {
-          return i + 1;
-        }
-      }
-      currentVisualX += charWidth;
+    // 範囲の特定（行）
+    int startRow = min(_selectionOriginRow!, _cursorRow);
+    int endRow = max(_selectionOriginRow!, _cursorRow);
+
+    // 範囲の特定( 見た目のX座標: VisualX )
+    // Painterと同じロジックで「矩形の左端」と「矩形の右端」を算出する
+
+    // 開始地点のVisualX
+    String originLine = "";
+    if (_selectionOriginRow! < _lines.length) {
+      originLine = _lines[_selectionOriginRow!];
     }
-    return line.length;
+    String originText = "";
+    if (_selectionOriginCol! <= originLine.length) {
+      originText = originLine.substring(0, _selectionOriginCol!);
+    } else {
+      originText =
+          originLine + (' ' * (_selectionOriginCol! - originLine.length));
+    }
+    // 共通関数
+    int originVisualX = TextUtils.calcTextWidth(originText);
+
+    // カーソル地点のVisualX
+    String cursorLine = "";
+    if (_cursorRow < _lines.length) {
+      cursorLine = _lines[_cursorRow];
+    }
+    String cursorText = "";
+    if (_cursorCol <= cursorLine.length) {
+      cursorText = cursorLine.substring(0, _cursorCol);
+    } else {
+      cursorText = cursorLine + (' ' * (_cursorCol - cursorLine.length));
+    }
+    // 共通関数
+    int cursorVisualX = TextUtils.calcTextWidth(cursorText);
+
+    int minVisualX = min(originVisualX, cursorVisualX);
+    int maxVisualX = max(originVisualX, cursorVisualX);
+
+    // 各行からテキストを抽出して結合
+    StringBuffer buffer = StringBuffer();
+
+    for (int i = startRow; i <= endRow; i++) {
+      String line = "";
+      if (i < _lines.length) {
+        line = _lines[i];
+      }
+      // VisualX から 文字列のインデックス(col) に変換
+      // ★共通関数
+      int startCol = TextUtils.getColFromVisualX(line, minVisualX);
+      int endCol = TextUtils.getColFromVisualX(line, maxVisualX);
+
+      if (startCol > endCol) {
+        int temp = startCol;
+        startCol = endCol;
+        endCol = temp;
+      }
+
+      // 文字列切り出し
+      // endColが行の長さを超えないようにガード
+      String extracted = "";
+      if (startCol < line.length) {
+        int safeEnd = min(endCol, line.length);
+        extracted = line.substring(startCol, safeEnd);
+      }
+
+      // 必要であれば、矩形として形を保つために右側をスペースで埋める処理をここに入れることも可能ですが、
+      // まずは「ある文字だけコピー」します。
+
+      buffer.writeln(extracted);
+    }
+    await Clipboard.setData(ClipboardData(text: buffer.toString()));
+
+    print("Copied to clipboard:\n${buffer.toString()}");
   }
 
   void _activateIme(BuildContext context) {
@@ -525,6 +629,8 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                         lineHeight: _lineHeight,
                         textStyle: _textStyle,
                         composingText: _composingText,
+                        selectionOriginRow: _selectionOriginRow,
+                        selectionOriginCol: _selectionOriginCol,
                       ),
                       size: Size.infinite,
                       child: Container(),

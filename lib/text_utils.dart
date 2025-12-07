@@ -12,4 +12,23 @@ class TextUtils {
     }
     return width;
   }
+
+  /// 見た目の幅(visualX)から文字数(col)を逆算する
+  static int getColFromVisualX(String line, int targetVisualX) {
+    int currentVisualX = 0;
+    for (int i = 0; i < line.runes.length; i++) {
+      int charWidth = (line.runes.elementAt(i) < 128) ? 1 : 2;
+
+      if (currentVisualX + charWidth > targetVisualX) {
+        if ((targetVisualX - currentVisualX) <
+            (currentVisualX + charWidth - targetVisualX)) {
+          return i;
+        } else {
+          return i + 1;
+        }
+      }
+      currentVisualX += charWidth;
+    }
+    return line.length;
+  }
 }
