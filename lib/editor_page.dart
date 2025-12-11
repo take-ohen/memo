@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:math';
@@ -21,6 +23,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   int _cursorCol = 0;
   int _preferredVisualX = 0;
   bool _isOverwriteMode = false;
+  //  bool _isInsertMode = true;
   List<String> _lines = [''];
 
   bool _showGrid = false;
@@ -148,8 +151,28 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
         HardwareKeyboard.instance.isControlPressed ||
         HardwareKeyboard.instance.isMetaPressed; // for  Mac
 
+    // Insertキー(モード切替)
+    //    if (physicalKey == PhysicalKeyboardKey.insert) {
+    //    _isInsertMode = !_isInsertMode;
+    //      return KeyEventResult.handled;
+    //    }
+
+    // Ctrl + C
     if (isControl && physicalKey == PhysicalKeyboardKey.keyC) {
+      // 選択範囲があればコピー（矩形選択されていれば矩形コピーになるロジックは既存のまま）
       _copySelection();
+      return KeyEventResult.handled;
+    }
+
+    // Ctrl + V + ...
+    if (isControl && physicalKey == PhysicalKeyboardKey.keyV) {
+      if (isAlt) {
+        // Ctrl + Alt + V 矩形貼り付け
+        _pasteRectangular();
+      } else {
+        // Ctrl + V 通常貼り付け
+        _pasteNormal();
+      }
       return KeyEventResult.handled;
     }
 
@@ -477,7 +500,6 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
         line = _lines[i];
       }
       // VisualX から 文字列のインデックス(col) に変換
-      // ★共通関数
       int startCol = TextUtils.getColFromVisualX(line, minVisualX);
       int endCol = TextUtils.getColFromVisualX(line, maxVisualX);
 
@@ -503,6 +525,240 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     await Clipboard.setData(ClipboardData(text: buffer.toString()));
 
     print("Copied to clipboard:\n${buffer.toString()}");
+  }
+
+  // 矩形貼り付け (Ctrl + Alt + V)
+  Future<void> _pasteRectangular() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    if (data == null || data.text == null || data.text!.isEmpty) return;
+
+    // 行ごとに分割 (改行コードの除去)
+    final List<String> pasteLines = const LineSplitter().convert(data.text!);
+    if (pasteLines.isEmpty) return;
+
+    int startRow = _cursorRow;
+
+    // 基準となるVisualXを計算
+    // 現在行をcurrentLineに入れる。なければ空
+    String currentLine = "";
+    if (_cursorRow < _lines.length) {
+      currentLine = _lines[_cursorRow];
+    }
+
+    // カーソル位置までのテキスト幅を計算
+    // 行末より右(虚空)にいる場合も考慮してスペース埋め想定で計算
+    String textBefore = ""; // カーソル位置までのテキスト
+    if (_cursorCol <= currentLine.length) {
+      textBefore = currentLine.substring(0, _cursorCol);
+    } else {
+      textBefore = currentLine + (' ' * (_cursorCol - currentLine.length));
+    }
+    int targetVisualX = TextUtils.calcTextWidth(textBefore);
+
+    setState(() {
+      // 貼り付けを1行ずつ処理
+      for (int i = 0; i < pasteLines.length; i++) {
+        int targetRow = startRow + i;
+        String textToPaste = pasteLines[i].replaceAll(
+          RegExp(r'[\r\n]'),
+          '',
+        ); // ゴミ除去
+        int pasteWidth = TextUtils.calcTextWidth(textToPaste);
+
+        // 行が足りない場合の処理
+        if (targetRow >= _lines.length) {
+          int needed = targetRow - _lines.length + 1;
+          for (int k = 0; k < needed; k++) _lines.add(""); // 足りない部分に改行を入れる。
+        }
+
+        // 貼り付け前に、必ず targetVisualX までスペースで埋める
+        // これを行わないと、短い行の「末尾」に張り付いてしまい、垂直にならない
+        int currentLineWidth = TextUtils.calcTextWidth(_lines[targetRow]);
+        if (currentLineWidth < targetVisualX) {
+          // 足りない幅の分だけスペースを追加 (半角1文字=幅1前提)
+          int spacesNeeded = targetVisualX - currentLineWidth;
+          _lines[targetRow] += ' ' * spacesNeeded;
+        }
+
+        String line = _lines[targetRow]; // 挿入している行
+
+        // ターゲット位置までスペースで埋める (虚空対策)
+        int insertIndex = TextUtils.getColFromVisualX(line, targetVisualX);
+
+        // 安全策: indexが行長を超えないようにガード
+        if (insertIndex > line.length) insertIndex = line.length;
+
+        // 分岐: 挿入と上書きをモードで振り分けて処理
+        if (!_isOverwriteMode) {
+          // --- 挿入モード (Insert) ---
+          // 既存の文字を右へずらす
+          String part1 = line.substring(0, insertIndex);
+          String part2 = line.substring(insertIndex);
+          _lines[targetRow] = part1 + textToPaste + part2;
+        } else {
+          // --- 上書きモード (Overwrite) ---
+          // 貼り付ける幅(VisualWidth)の分だけ、既存文字を消す
+          int endVisualX = targetVisualX + pasteWidth;
+          int endIndex = TextUtils.getColFromVisualX(line, endVisualX);
+
+          // 上書き範囲が行末を超えている場合ガード
+          if (endIndex > line.length) endIndex = line.length;
+
+          String part1 = line.substring(0, insertIndex);
+          // part2は「上書きされて消える範囲」の後ろから開始
+          String part2 = line.substring(endIndex);
+
+          // ※上書きで微妙な隙間（全角半角のズレ）が発生する場合、
+          // part2の手前にスペースパディングが必要なケースもありますが、
+          // まずは単純置換で実装します。
+
+          _lines[targetRow] = part1 + textToPaste + part2;
+        }
+      }
+      // カーソル移動: 貼り付けたブロックの右下に移動
+      _cursorRow = startRow + pasteLines.length - 1;
+
+      // 最終行の貼り付け後の位置へ
+      String lastPasted = pasteLines.last.replaceAll(RegExp(r'[\r\n]'), '');
+      int lastWidth = TextUtils.calcTextWidth(lastPasted);
+      _preferredVisualX = targetVisualX + lastWidth;
+
+      // Col再計算
+      if (_cursorRow < _lines.length) {
+        _cursorCol = TextUtils.getColFromVisualX(
+          _lines[_cursorRow],
+          _preferredVisualX,
+        );
+      }
+
+      // 選択解除
+      _selectionOriginRow = null;
+      _selectionOriginCol = null;
+    });
+
+    // IME窓 更新
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _updateImeWindowPosition(),
+    );
+  }
+
+  // 通常貼り付け (Ctrl + V)
+  Future<void> _pasteNormal() async {
+    // クリップボードからテキスト取得
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    if (data == null || data.text == null) return;
+
+    // 改行コード統一
+    String text = data.text!.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+    List<String> parts = text.split('\n');
+
+    setState(() {
+      // 1. カーソル位置まで埋める (虚空対策)
+      if (_cursorRow >= _lines.length) {
+        int needed = _cursorRow - _lines.length + 1;
+        for (int k = 0; k < needed; k++) _lines.add("");
+      }
+      String line = _lines[_cursorRow];
+      if (_cursorCol > line.length) {
+        line += ' ' * (_cursorCol - line.length);
+        _lines[_cursorRow] = line;
+        _cursorCol = line.length;
+      }
+
+      String prefix = line.substring(0, _cursorCol);
+
+      // モード分岐
+      if (!_isOverwriteMode) {
+        // --- [挿入モード] ---
+        String suffix = line.substring(_cursorCol);
+
+        if (parts.length == 1) {
+          // 単一行貼り付け
+          _lines[_cursorRow] = prefix + parts[0] + suffix;
+          _cursorCol += parts[0].length;
+          /*  _preferredVisualX = TextUtils.calcTextWidth(
+            _lines[_cursorRow].substring(0, _cursorCol),
+            );
+        */
+        } else {
+          // 複数行貼り付け (行分割発生)
+          _lines[_cursorRow] = prefix + parts.first;
+          for (int i = 1; i < parts.length - 1; i++) {
+            _lines.insert(_cursorRow + i, parts[i]);
+          }
+          _lines.insert(_cursorRow + parts.length - 1, parts.last + suffix);
+
+          // カーソル更新
+          _cursorRow += parts.length - 1;
+          _cursorCol = parts.last.length; // suffixの前
+        }
+      } else {
+        // --- [上書きモード] --- (修正箇所)
+        // ★修正ポイント: 文字数ではなく「見た目の幅」で上書き範囲を決める
+
+        // 1. 貼り付けるテキスト(1行目)の見た目の幅を計算
+        String firstPartToPaste = parts.first;
+        int pasteVisualWidth = TextUtils.calcTextWidth(firstPartToPaste);
+
+        // 2. 現在のカーソル位置(VisualX)を取得
+        int currentVisualX = TextUtils.calcTextWidth(prefix);
+
+        // 3. 上書き終了位置(VisualX)を計算
+        int targetEndVisualX = currentVisualX + pasteVisualWidth;
+
+        // 4. そのVisualXに対応する既存行のインデックス(Col)を逆算
+        //    これにより「全角(幅2)を貼れば、半角(幅1)が2文字消える」動作になる
+        int overwriteEndCol = TextUtils.getColFromVisualX(
+          line,
+          targetEndVisualX,
+        );
+
+        // 5. 残すべき後ろの文字(suffix)を取得
+        String suffix = "";
+        if (overwriteEndCol < line.length) {
+          suffix = line.substring(overwriteEndCol);
+        }
+        // ※ overwriteEndColが行末を超えている場合、suffixは空文字(全部上書き)
+
+        if (parts.length == 1) {
+          // [単一行] prefix + 貼り付け文字 + 残ったsuffix
+          _lines[_cursorRow] = prefix + firstPartToPaste + suffix;
+          _cursorCol += firstPartToPaste.length;
+        } else {
+          // [複数行]
+          // 1行目: prefix + 貼り付け1行目 (suffixはここではつかない)
+          _lines[_cursorRow] = prefix + firstPartToPaste;
+
+          // 中間行: そのまま挿入
+          for (int i = 1; i < parts.length - 1; i++) {
+            _lines.insert(_cursorRow + i, parts[i]);
+          }
+
+          // ★修正ポイント: 最終行に、計算しておいた suffix を結合する
+          // これにより「カーソル以降の文字が全て消える」バグが解消される
+          _lines.insert(_cursorRow + parts.length - 1, parts.last + suffix);
+
+          _cursorRow += parts.length - 1;
+          _cursorCol = parts.last.length;
+        } // if (parts.length)
+      } // if (!_isOverwriteMode
+
+      // VisualX更新
+      if (_cursorRow < _lines.length) {
+        String currentLine = _lines[_cursorRow];
+        if (_cursorCol > currentLine.length) _cursorCol = currentLine.length;
+        _preferredVisualX = TextUtils.calcTextWidth(
+          currentLine.substring(0, _cursorCol),
+        );
+      }
+
+      _selectionOriginRow = null;
+      _selectionOriginCol = null;
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _updateImeWindowPosition(),
+    );
   }
 
   void _activateIme(BuildContext context) {
