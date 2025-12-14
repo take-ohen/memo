@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:math';
+import 'dart:async';
 
 // 分割したファイルをインポート
 import 'memo_painter.dart';
@@ -19,20 +20,28 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   double _charWidth = 0.0;
   double _charHeight = 0.0;
   double _lineHeight = 0.0;
-  int _cursorRow = 0;
-  int _cursorCol = 0;
-  int _preferredVisualX = 0;
-  bool _isOverwriteMode = false;
-  //  bool _isInsertMode = true;
+  int _cursorRow = 0; // 現在のlines上でのカーソル位置
+  int _cursorCol = 0; // 現在のlines上でのカーソル位置(全半角区別なし)
+  int _preferredVisualX = 0; // 見た目(全半角区別あり)の現在のカーソル位置(col)
+  bool _isOverwriteMode = false; // 上書きモード フラグ
+  bool _isDragging = false; // マウスドラッグ開始時のフラグ管理
   List<String> _lines = [''];
 
   bool _showGrid = false;
   TextInputConnection? _inputConnection;
   String _composingText = "";
 
+  // カーソル点滅処理
+  Timer? _cursorBlinkTimer;
+  bool _showCursor = true; // カーソル表示フラグ
+
   // 矩形選択の範囲の開始位置
   int? _selectionOriginRow;
   int? _selectionOriginCol;
+
+  // 操作履歴スタック
+  List<HistoryEntry> _undoStack = [];
+  List<HistoryEntry> _redoStack = [];
 
   final ScrollController _horizontalScrollController = ScrollController();
   final ScrollController _verticalScrollController = ScrollController();
@@ -53,6 +62,8 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
     _focusNode.addListener(_handleFocusChange);
 
+    _startCursorTimer(); // カーソル点滅用
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _focusNode.requestFocus();
       if (_focusNode.hasFocus) {
@@ -69,6 +80,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     _focusNode.dispose();
     _horizontalScrollController.dispose();
     _verticalScrollController.dispose();
+    _cursorBlinkTimer?.cancel(); // カーソル点滅用
     super.dispose();
   }
 
@@ -86,17 +98,13 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     });
   }
 
-  void _handleTap(TapDownDetails details) {
+  //  void _handleTap(TapDownDetails details) {
+  void _handleTap(Offset localPosition) {
     if (_charWidth == 0 || _charHeight == 0) return;
 
     setState(() {
-      // 選択解除(タップ時はリセット)
-      _selectionOriginRow = null;
-      _selectionOriginCol = null;
-
-      final Offset tapPosition = details.localPosition;
-      int clickedVisualX = (tapPosition.dx / _charWidth).round();
-      int clickedRow = (tapPosition.dy / _lineHeight).floor();
+      int clickedVisualX = (localPosition.dx / _charWidth).round();
+      int clickedRow = (localPosition.dy / _lineHeight).floor();
 
       _cursorRow = max(0, clickedRow);
 
@@ -125,6 +133,17 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     });
   }
 
+  // ヘルパー関数 カーソル移動処理の前後に呼ぶ
+  void _handleSelectionOnMove(bool isShift) {
+    if (isShift) {
+      _selectionOriginRow ??= _cursorRow;
+      _selectionOriginCol ??= _cursorCol;
+    } else {
+      _selectionOriginRow = null;
+      _selectionOriginCol = null;
+    }
+  }
+
   void _handleFocusChange() {
     if (_focusNode.hasFocus) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -138,6 +157,93 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     }
   }
 
+  // カーソル点滅用のタイマー
+  void _startCursorTimer() {
+    _cursorBlinkTimer?.cancel();
+    _cursorBlinkTimer = Timer.periodic(const Duration(milliseconds: 500), (
+      timer,
+    ) {
+      setState(() {
+        _showCursor = !_showCursor;
+      });
+    });
+  }
+
+  // キー・マウス操作があったときにカーソルを点灯状態にする
+  void _resetCursorBlink() {
+    _cursorBlinkTimer?.cancel();
+    setState(() {
+      _showCursor = true;
+    });
+    _startCursorTimer();
+  }
+
+  // --- 履歴保存メソッド (変更直前に呼ぶ) ---
+  void _saveHistory() {
+    // 現在の状態をディープコピーして保存
+    // List<String>のコピーを作成することが重要
+    final entry = HistoryEntry(List.from(_lines), _cursorRow, _cursorCol);
+
+    _undoStack.add(entry);
+
+    // スタック数制限（任意：例 100回）
+    if (_undoStack.length > 100) {
+      _undoStack.removeAt(0);
+    }
+
+    // 新しい操作をしたらRedoスタックはクリア
+    _redoStack.clear();
+  }
+
+  // --- UNDO (Ctrl+Z) ---
+  void _undo() {
+    if (_undoStack.isEmpty) return;
+
+    // 現在の状態をRedoスタックへ退避
+    _redoStack.add(HistoryEntry(List.from(_lines), _cursorRow, _cursorCol));
+
+    // Undoスタックから復元
+    final entry = _undoStack.removeLast();
+    setState(() {
+      _lines = List.from(entry.lines); // リストを再生成
+      _cursorRow = entry.cursorRow;
+      _cursorCol = entry.cursorCol;
+      // VisualXなども更新が必要ならここで
+      if (_cursorRow < _lines.length) {
+        String line = _lines[_cursorRow];
+        if (_cursorCol > line.length) _cursorCol = line.length;
+        _preferredVisualX = TextUtils.calcTextWidth(
+          line.substring(0, _cursorCol),
+        );
+      }
+    });
+  }
+
+  // --- REDO (Ctrl+Y) ---
+  void _redo() {
+    if (_redoStack.isEmpty) return;
+
+    // 現在の状態をUndoスタックへ退避
+    _undoStack.add(HistoryEntry(List.from(_lines), _cursorRow, _cursorCol));
+
+    // Redoスタックから復元
+    final entry = _redoStack.removeLast();
+    setState(() {
+      _lines = List.from(entry.lines);
+      _cursorRow = entry.cursorRow;
+      _cursorCol = entry.cursorCol;
+      // VisualX更新
+      if (_cursorRow < _lines.length) {
+        String line = _lines[_cursorRow];
+        if (_cursorCol > line.length) _cursorCol = line.length;
+        _preferredVisualX = TextUtils.calcTextWidth(
+          line.substring(0, _cursorCol),
+        );
+      }
+    });
+  }
+
+  // キー処理
   KeyEventResult _handleKeyPress(KeyEvent event) {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
@@ -151,29 +257,38 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
         HardwareKeyboard.instance.isControlPressed ||
         HardwareKeyboard.instance.isMetaPressed; // for  Mac
 
-    // Insertキー(モード切替)
-    //    if (physicalKey == PhysicalKeyboardKey.insert) {
-    //    _isInsertMode = !_isInsertMode;
-    //      return KeyEventResult.handled;
-    //    }
-
-    // Ctrl + C
-    if (isControl && physicalKey == PhysicalKeyboardKey.keyC) {
-      // 選択範囲があればコピー（矩形選択されていれば矩形コピーになるロジックは既存のまま）
-      _copySelection();
-      return KeyEventResult.handled;
-    }
-
-    // Ctrl + V + ...
-    if (isControl && physicalKey == PhysicalKeyboardKey.keyV) {
-      if (isAlt) {
-        // Ctrl + Alt + V 矩形貼り付け
-        _pasteRectangular();
-      } else {
-        // Ctrl + V 通常貼り付け
-        _pasteNormal();
+    // ctrl/cmd キーの処理
+    if (isControl) {
+      // Copy (Ctrl + C)
+      if (physicalKey == PhysicalKeyboardKey.keyC) {
+        // 選択範囲があればコピー（矩形選択されていれば矩形コピーになるロジックは既存のまま）
+        _copySelection();
+        return KeyEventResult.handled;
       }
-      return KeyEventResult.handled;
+
+      // UNDO (Ctrl + Z)
+      if (physicalKey == PhysicalKeyboardKey.keyZ) {
+        _undo();
+        return KeyEventResult.handled;
+      }
+
+      // REDO (Ctrl + Y)
+      if (physicalKey == PhysicalKeyboardKey.keyY) {
+        _redo();
+        return KeyEventResult.handled;
+      }
+
+      // 貼り付け(Ctrl + ? + V)
+      if (physicalKey == PhysicalKeyboardKey.keyV) {
+        if (isAlt) {
+          // Ctrl + Alt + V 矩形貼り付け
+          _pasteRectangular();
+        } else {
+          // Ctrl + V 通常貼り付け
+          _pasteNormal();
+        }
+        return KeyEventResult.handled;
+      }
     }
 
     //
@@ -190,23 +305,13 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
       // ただし、文字入力時などは別途考える必要あり。今回は矢印移動で解説。
     }
 
-    // ヘルパー関数 カーソル移動処理の前後に呼ぶ
-    void handleSelectionOnMove() {
-      if (isShift) {
-        _selectionOriginRow ??= _cursorRow;
-        _selectionOriginCol ??= _cursorCol;
-      } else {
-        _selectionOriginRow = null;
-        _selectionOriginCol = null;
-      }
-    }
-
     int currentLineLength = 0;
     if (_cursorRow < _lines.length) {
       currentLineLength = _lines[_cursorRow].length;
     }
     switch (physicalKey) {
       case PhysicalKeyboardKey.enter:
+        _saveHistory(); // UNDO用 状態保存
         final currentLine = _lines[_cursorRow];
         final part1 = currentLine.substring(0, _cursorCol);
         final part2 = currentLine.substring(_cursorCol);
@@ -219,6 +324,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
         return KeyEventResult.handled;
 
       case PhysicalKeyboardKey.backspace:
+        _saveHistory(); // UNDO用 状態保存
         if (_cursorCol > 0) {
           final currentLine = _lines[_cursorRow];
           final part1 = currentLine.substring(0, _cursorCol - 1);
@@ -238,6 +344,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
         return KeyEventResult.handled;
 
       case PhysicalKeyboardKey.delete:
+        _saveHistory(); // UNDO用 状態保存
         if (_cursorRow >= _lines.length) return KeyEventResult.handled;
 
         final currentLine = _lines[_cursorRow];
@@ -264,60 +371,95 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
         return KeyEventResult.handled;
 
       case PhysicalKeyboardKey.arrowLeft:
-        handleSelectionOnMove(); // 選択状態更新
-        if (_cursorCol > 0) {
-          _cursorCol--;
-        } else if (_cursorRow > 0) {
-          _cursorRow--;
-          _cursorCol = _lines[_cursorRow].length;
+        _handleSelectionOnMove(isShift); // 選択状態更新
+
+        // カーソルの移動
+        if (isAlt) {
+          // Alt 押下  行またぎをせず、単純に左へ
+          if (_cursorCol > 0) {
+            // 現在カーソルが行頭でない場合、カーソル位置を減らす。
+            _cursorCol--;
+          }
+        } else {
+          // 通常の移動
+          if (_cursorCol > 0) {
+            // カーソルが1行目でなければ、
+            _cursorCol--; // 1行カーソルを上に上げる。
+          } else if (_cursorRow > 0) {
+            _cursorRow--;
+            _cursorCol = _lines[_cursorRow].length; //その行の最後の文字にする。
+          }
         }
+
+        // 見た目のカーソル位置の更新
         String currentLine = _lines[_cursorRow];
-        String textUpToCursor = currentLine.substring(
-          0,
-          min(_cursorCol, currentLine.length),
-        );
+
+        // 虚空(Alt)に対応するため、テキスト取得範囲を調整
+        String textUpToCursor;
+        if (_cursorCol <= currentLine.length) {
+          textUpToCursor = currentLine.substring(0, _cursorCol);
+        } else {
+          // 虚空部分はスペースとみなして計算
+          textUpToCursor =
+              currentLine + (" " * (_cursorCol - currentLine.length));
+        }
+
         _preferredVisualX = TextUtils.calcTextWidth(textUpToCursor);
 
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _updateImeWindowPosition();
         });
+
         return KeyEventResult.handled;
 
       case PhysicalKeyboardKey.arrowRight:
-        handleSelectionOnMove(); // 選択状態更新
+        // 選択状態更新
+        _handleSelectionOnMove(isShift);
+
+        String currentLine = _lines[_cursorRow];
+
+        // カーソルの移動
         if (isAlt) {
+          // Alt 押下 折り返さず無限に右へ
           _cursorCol++;
         } else {
-          if (_cursorCol < currentLineLength) {
+          // Alt なし 行末で次へ折り返し
+          if (_cursorCol < currentLine.length) {
             _cursorCol++;
           } else if (_cursorRow < _lines.length - 1) {
             _cursorRow++;
             _cursorCol = 0;
           }
+        }
+
+        // 見た目のカーソル位置の更新
+        if (_cursorRow < _lines.length) {
           String line = _lines[_cursorRow];
-          String textUpToCursor = line.substring(
-            0,
-            min(_cursorCol, line.length),
-          );
+          String textUpToCursor;
+          if (_cursorCol <= line.length) {
+            textUpToCursor = line.substring(0, _cursorCol);
+          } else {
+            // 虚空部分はスペースとみなして計算
+            textUpToCursor = line + (" " * (_cursorCol - line.length));
+          }
           _preferredVisualX = TextUtils.calcTextWidth(textUpToCursor);
         }
+
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _updateImeWindowPosition();
         });
         return KeyEventResult.handled;
 
       case PhysicalKeyboardKey.arrowUp:
-        handleSelectionOnMove();
-        if (isAlt) {
-          if (_cursorRow > 0) {
-            _cursorRow--;
-          }
-        } else {
-          if (_cursorRow > 0) {
-            _cursorRow--;
-          }
+        // 選択状態更新
+        _handleSelectionOnMove(isShift);
+
+        // 行の移動
+        if (_cursorRow > 0) {
+          _cursorRow--;
         }
 
+        // 列の計算
         if (_cursorRow < _lines.length) {
           String line = _lines[_cursorRow];
           int lineWidth = TextUtils.calcTextWidth(line);
@@ -328,25 +470,25 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
           } else {
             _cursorCol = TextUtils.getColFromVisualX(line, _preferredVisualX);
           }
-        } else {
-          _cursorCol = _preferredVisualX;
         }
 
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _updateImeWindowPosition();
         });
+
         return KeyEventResult.handled;
 
       case PhysicalKeyboardKey.arrowDown:
-        handleSelectionOnMove();
-        if (isAlt) {
+        // 選択状態更新
+        _handleSelectionOnMove(isShift);
+
+        // 行の移動
+        // Atlが押されているときは、制限無く移動する。
+        if (_cursorRow < _lines.length - 1 || isAlt) {
           _cursorRow++;
-        } else {
-          if (_cursorRow < _lines.length - 1) {
-            _cursorRow++;
-          }
         }
 
+        // 列の計算  upと同様
         if (_cursorRow < _lines.length) {
           String line = _lines[_cursorRow];
           int lineWidth = TextUtils.calcTextWidth(line);
@@ -357,17 +499,17 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
           } else {
             _cursorCol = TextUtils.getColFromVisualX(line, _preferredVisualX);
           }
-        } else {
-          _cursorCol = _preferredVisualX;
         }
 
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _updateImeWindowPosition();
         });
+
         return KeyEventResult.handled;
 
       default:
         if (character != null && character.isNotEmpty) {
+          _saveHistory(); // UNDO用 状態保存
           _fillVirtualSpaceIfNeeded();
           _insertText(character);
           return KeyEventResult.handled;
@@ -532,6 +674,8 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     if (data == null || data.text == null || data.text!.isEmpty) return;
 
+    _saveHistory(); // UNDO用 状態保存
+
     // 行ごとに分割 (改行コードの除去)
     final List<String> pasteLines = const LineSplitter().convert(data.text!);
     if (pasteLines.isEmpty) return;
@@ -647,6 +791,8 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     // クリップボードからテキスト取得
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     if (data == null || data.text == null) return;
+
+    _saveHistory(); // UNDO用 状態保存
 
     // 改行コード統一
     String text = data.text!.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
@@ -858,6 +1004,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
               onKeyEvent: (FocusNode node, KeyEvent event) {
                 final result = _handleKeyPress(event);
                 if (result == KeyEventResult.handled) {
+                  // _handleKeyPressの描画はここて一手に引き受ける。
                   setState(() {});
                 }
                 return result;
@@ -866,7 +1013,36 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                 controller: _horizontalScrollController,
                 scrollDirection: Axis.horizontal,
                 child: GestureDetector(
-                  onTapDown: _handleTap,
+                  // タップダウン； カーソル移動＆選択解除
+                  onTapDown: (details) {
+                    _resetCursorBlink();
+                    _handleTap(details.localPosition);
+                    setState(() {
+                      _selectionOriginRow = null;
+                      _selectionOriginCol = null;
+                    });
+                  },
+                  //ドラッグ開始 (選択範囲の始点を記録)
+                  onPanStart: (details) {
+                    _isDragging = true;
+                    _resetCursorBlink();
+                    _handleTap(details.localPosition);
+
+                    setState(() {
+                      // ドラッグ開始点を記録
+                      _selectionOriginRow = _cursorRow;
+                      _selectionOriginCol = _cursorCol;
+                    });
+                  },
+                  // ドラッグ中(カーソル位置を更新=選択範囲の最終位置が変わる)
+                  onPanUpdate: (details) {
+                    _resetCursorBlink();
+                    _handleTap(details.localPosition);
+                    setState(() {});
+                  },
+                  onPanEnd: (details) {
+                    _isDragging = false;
+                  },
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(
                       minWidth: 2000,
@@ -887,9 +1063,13 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                         composingText: _composingText,
                         selectionOriginRow: _selectionOriginRow,
                         selectionOriginCol: _selectionOriginCol,
+                        showCursor: _showCursor,
                       ),
                       size: Size.infinite,
-                      child: Container(),
+                      child: Container(
+                        // 画面全体のタッチ判定を有効にするため、透明または白の色を指定
+                        color: Colors.transparent,
+                      ),
                     ),
                   ),
                 ),
@@ -949,4 +1129,13 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   void showToolbar() {}
   @override
   AutofillScope? get currentAutofillScope => null;
+}
+
+// 操作履歴管理クラス
+class HistoryEntry {
+  final List<String> lines;
+  final int cursorRow;
+  final int cursorCol;
+
+  HistoryEntry(this.lines, this.cursorRow, this.cursorCol);
 }
