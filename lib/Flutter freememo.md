@@ -12231,5 +12231,1812 @@ tester.binding.defaultBinaryMessenger を使用して、システムへのクリ
 
 注: 現状の実装では、コピー処理が常に「矩形コピー」として動作する可能性があるため、その挙動も含めて確認します。
 
-この方針でテストコードを作成してもよろしいでしょうか？#
+この方針でテストコードを作成してもよろしいでしょうか？
 
+## それで。
+
+合意いただいた方針に基づき、「クリップボードをモック化（偽装）」 して、コピー＆ペーストおよび矩形貼り付けの動作を検証するテストコードを作成します。
+
+🛠️ 実装内容
+test/editor_logic_test.dart に新しいテストケース Copy, Paste, and Rectangular Paste Logic を追加します。
+
+テストのシナリオ:
+
+準備: クリップボードの動作をテストコード内で乗っ取ります（モック化）。
+コピー検証:
+テキスト "abcde", "fghij" を入力。
+Shiftキーを使って範囲選択を行い、Ctrl + C を実行。
+クリップボード変数に期待通りのデータ（矩形範囲のテキスト）が入ったか確認します。
+通常貼り付け検証:
+Ctrl + V を実行し、テキストが挿入されるか確認します。
+矩形貼り付け検証:
+クリップボードに "1\n2" をセット。
+Ctrl + Alt + V を実行し、複数行の同じ列位置に文字が挿入されるか（矩形貼り付けされたか）を確認し
+
+追加ロジック
+```
+    expect(state.debugCursorRow, 0, reason: "Alt+Left: 前の行に戻るはず(行跨ぎ)");
+    expect(state.debugCursorCol, 3, reason: "Alt+Left: 前の行の末尾へ");
+  });
+
+  testWidgets('Copy, Paste, and Rectangular Paste Logic', (WidgetTester tester) async {
+    // 1. クリップボードのモック化 (システムへのアクセスをインターセプト)
+    final List<MethodCall> log = <MethodCall>[];
+    String? mockClipboardData;
+
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (MethodCall methodCall) async {
+        log.add(methodCall);
+        if (methodCall.method == 'Clipboard.setData') {
+          // コピー: データを変数に保存
+          final Map<String, dynamic> args =
+              methodCall.arguments as Map<String, dynamic>;
+          mockClipboardData = args['text'] as String?;
+          return null;
+        } else if (methodCall.method == 'Clipboard.getData') {
+          // 貼り付け: 変数からデータを返す
+          return {'text': mockClipboardData};
+        }
+        return null;
+      },
+    );
+
+    // 2. アプリ起動
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1.0;
+    await tester.pumpWidget(const MaterialApp(home: EditorPage()));
+    await tester.pumpAndSettle();
+
+    final state = tester.state(find.byType(EditorPage)) as dynamic;
+
+    // 3. テキスト入力
+    // Row 0: "abcde"
+    // Row 1: "fghij"
+    await tester.tapAt(tester.getTopLeft(find.byType(EditorPage)));
+    await tester.pump();
+
+    // "abcde" + Enter + "fghij"
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyB);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyE);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyG);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyH);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyI);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyJ);
+    await tester.pump();
+
+    // --- Test: 範囲選択とコピー (Ctrl + C) ---
+    // カーソルを (0, 1) 'b' の前へ移動
+    await tester.tapAt(tester.getTopLeft(find.byType(EditorPage))); // (0,0)
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight); // (0,1)
+    await tester.pump();
+
+    // Shift + Down で (1, 1) へ範囲選択
+    // 始点(0,1)～終点(1,1)。現在の実装では矩形範囲としてコピーされるはず。
+    // 0行目の 'b' (index 1) と 1行目の 'g' (index 1) が対象。
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shift);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shift);
+    await tester.pump();
+
+    // コピー実行 (Ctrl + C)
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.control);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.control);
+    await tester.pump();
+
+    // 検証: クリップボードに "b" と "g" が含まれているか
+    expect(mockClipboardData, contains("b"));
+    expect(mockClipboardData, contains("g"));
+
+    // --- Test: 矩形貼り付け (Ctrl + Alt + V) ---
+    // 準備: クリップボードに "1\n2" をセット
+    mockClipboardData = "1\n2";
+
+    // カーソルを (0, 4) 'e' の前へ移動
+    await tester.tapAt(tester.getTopLeft(find.byType(EditorPage)));
+    for (int i = 0; i < 4; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    }
+    await tester.pump();
+
+    // 矩形貼り付け実行 (Ctrl + Alt + V)
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.control);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.alt);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.alt);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.control);
+    await tester.pump();
+
+    // 検証: カーソル位置が貼り付け後の右下 (1, 5) にあるか
+    // 0行目: "abcd" + "1" + "e" -> "abcd1e" (5文字目の後ろ)
+    // 1行目: "fghi" + "2" + "j" -> "fghi2j" (5文字目の後ろ)
+    expect(state.debugCursorRow, 1, reason: "矩形貼り付け後: 最終行へ");
+    expect(state.debugCursorCol, 5, reason: "矩形貼り付け後: 貼り付けた文字の後ろへ");
+
+    // モック解除
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      null,
+    );
+  });
+}
+```
+
+## エラーになっている。
+```
+合意いただいた方針に基づき、「クリップボードをモック化（偽装）」 して、コピー＆ペーストおよび矩形貼り付けの動作を検証するテストコードを作成します。
+
+🛠️ 実装内容
+test/editor_logic_test.dart に新しいテストケース Copy, Paste, and Rectangular Paste Logic を追加します。
+
+テストのシナリオ:
+
+準備: クリップボードの動作をテストコード内で乗っ取ります（モック化）。
+コピー検証:
+テキスト "abcde", "fghij" を入力。
+Shiftキーを使って範囲選択を行い、Ctrl + C を実行。
+クリップボード変数に期待通りのデータ（矩形範囲のテキスト）が入ったか確認します。
+通常貼り付け検証:
+Ctrl + V を実行し、テキストが挿入されるか確認します。
+矩形貼り付け検証:
+クリップボードに "1\n2" をセット。
+Ctrl + Alt + V を実行し、複数行の同じ列位置に文字が挿入されるか（矩形貼り付けされたか）を確認し
+```
+
+## エラーの原因と修正方法を説明します。
+
+🔍 原因：選択範囲の「幅」がゼロになっている
+エラーの原因は、現在のコピー処理 (_copySelection) が「矩形選択（四角形）」として実装されている ことにあります。
+
+操作: (0, 1) から Shift + Down で (1, 1) を選択しました。
+範囲: 始点のX座標（VisualX）は 1、終点のX座標も 1 です。
+結果: 幅が 0 の矩形 となり、文字が1つも含まれない範囲（隙間）を選択している状態になります。そのため、コピー結果が空文字（+改行）だけになり、テストが失敗しました。
+💡 修正方針
+テストコード側で、選択範囲に「幅」を持たせる操作 を追加します。 Shift + Down の後に、Shift + Right を追加して、1文字分右へ範囲を広げます。これにより、幅のある矩形として "b" と "g" が正しく選択されます。
+
+💻 修正コード
+test/editor_logic_test.dart の Copy, Paste... テストケース内を修正します。
+
+editor_logic_test.dart
+-0
++1
+    // 0行目の 'b' (index 1) と 1行目の 'g' (index 1) が対象。
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shift);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight); // 幅を持たせるために右へ1つ広げる
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shift);
+    await tester.pump();
+
+📘 解説
+arrowRight の追加: これにより、カーソル位置が (1, 1) から (1, 2) に移動します。
+選択範囲の変化:
+始点X: 1 ('b'の左端)
+終点X: 2 ('b'の右端 / 'g'の右端)
+幅: 1文字分
+これにより、矩形選択ロジックでも正しく "b" と "g" が抽出され、テストがパスするようになります。
+
+## エラーの原因と修正方法を説明します。
+
+🔍 原因：選択範囲の「幅」がゼロになっている
+エラーの原因は、現在のコピー処理 (_copySelection) が「矩形選択（四角形）」として実装されている ことにあります。
+
+操作: (0, 1) から Shift + Down で (1, 1) を選択しました。
+範囲: 始点のX座標（VisualX）は 1、終点のX座標も 1 です。
+結果: 幅が 0 の矩形 となり、文字が1つも含まれない範囲（隙間）を選択している状態になります。そのため、コピー結果が空文字（+改行）だけになり、テストが失敗しました。
+💡 修正方針
+テストコード側で、選択範囲に「幅」を持たせる操作 を追加します。 Shift + Down の後に、Shift + Right を追加して、1文字分右へ範囲を広げます。これにより、幅のある矩形として "b" と "g" が正しく選択されます。
+
+💻 修正コード
+test/editor_logic_test.dart の Copy, Paste... テストケース内を修正します。
+
+editor_logic_test.dart
+-0
++1
+    // 0行目の 'b' (index 1) と 1行目の 'g' (index 1) が対象。
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shift);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight); // 幅を持たせるために右へ1つ広げる
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shift);
+    await tester.pump();
+
+📘 解説
+arrowRight の追加: これにより、カーソル位置が (1, 1) から (1, 2) に移動します。
+選択範囲の変化:
+始点X: 1 ('b'の左端)
+終点X: 2 ('b'の右端 / 'g'の右端)
+幅: 1文字分
+これにより、矩形選択ロジックでも正しく "b" と "g" が抽出され、テストがパスするようになります。
+
+## エラーに変化はない。
+
+## 原因：tapAt が効かず、カーソルが移動していない
+
+ログの共有ありがとうございます。原因が完全に特定できました。
+
+🔍 原因：tapAt が効かず、カーソルが移動していない
+ログの内容を確認します。
+
+text
+DEBUG TEST: After Selection - Row=1, Col=5
+DEBUG: Origin=(1, 5), Cursor=(1, 5)
+現状: カーソル位置が (1, 5) になっています。これはテキスト入力直後の位置（"fghij" の後ろ）です。
+問題点: テストコードで tester.tapAt(...) を実行して (0, 0) に戻そうとしましたが、これが機能していません。その結果、カーソルが行末に残ったまま範囲選択操作が行われ、「同じ位置から同じ位置への選択（範囲なし）」 となり、空文字しかコピーされませんでした。
+💡 修正方針
+不安定な tapAt を使用するのをやめ、キー連打（上・左）によって物理的にカーソルを (0, 0) に戻す 方法に変更します。これにより、確実に意図した位置からテストを開始できます。
+
+💻 修正コード
+test/editor_logic_test.dart の Copy, Paste... テストケース内の2箇所（コピー前と貼り付け前）を修正します。
+
+editor_logic_test.dart
+-2
++10
+
+    // --- Test: 範囲選択とコピー (Ctrl + C) ---
+    // カーソルを (0, 1) 'b' の前へ移動
+    await tester.tapAt(tester.getTopLeft(find.byType(EditorPage))); // (0,0)
+    // tapAtは不安定なので、キー連打で確実に(0,0)に戻す
+    for (int i = 0; i < 10; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    }
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight); // (0,1)
+    await tester.pump();
+
+    mockClipboardData = "1\n2";
+
+    // カーソルを (0, 4) 'e' の前へ移動
+    await tester.tapAt(tester.getTopLeft(find.byType(EditorPage)));
+    // ここもキー連打で確実にリセット
+    for (int i = 0; i < 10; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    }
+    for (int i = 0; i < 4; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    }
+📘 解説
+arrowUp と arrowLeft の連打: これにより、カーソルがどこにあっても強制的にファイルの先頭 (0, 0) に戻されます。
+確実性: 画面サイズやタップ位置の微妙なズレに影響されないため、テストが非常に安定します。
+この修正で、カーソルが正しく (0, 1) に移動し、そこから範囲選択が行われるため、"b" と "g" が正しくコピーされるはずです。
+
+## ログの共有ありがとうございます。原因が完全に特定できました。
+
+🔍 原因：tapAt が効かず、カーソルが移動していない
+ログの内容を確認します。
+
+text
+DEBUG TEST: After Selection - Row=1, Col=5
+DEBUG: Origin=(1, 5), Cursor=(1, 5)
+現状: カーソル位置が (1, 5) になっています。これはテキスト入力直後の位置（"fghij" の後ろ）です。
+問題点: テストコードで tester.tapAt(...) を実行して (0, 0) に戻そうとしましたが、これが機能していません。その結果、カーソルが行末に残ったまま範囲選択操作が行われ、「同じ位置から同じ位置への選択（範囲なし）」 となり、空文字しかコピーされませんでした。
+💡 修正方針
+不安定な tapAt を使用するのをやめ、キー連打（上・左）によって物理的にカーソルを (0, 0) に戻す 方法に変更します。これにより、確実に意図した位置からテストを開始できます。
+
+💻 修正コード
+test/editor_logic_test.dart の Copy, Paste... テストケース内の2箇所（コピー前と貼り付け前）を修正します。
+
+editor_logic_test.dart
+-2
++10
+
+    // --- Test: 範囲選択とコピー (Ctrl + C) ---
+    // カーソルを (0, 1) 'b' の前へ移動
+    await tester.tapAt(tester.getTopLeft(find.byType(EditorPage))); // (0,0)
+    // tapAtは不安定なので、キー連打で確実に(0,0)に戻す
+    for (int i = 0; i < 10; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    }
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight); // (0,1)
+    await tester.pump();
+
+    mockClipboardData = "1\n2";
+
+    // カーソルを (0, 4) 'e' の前へ移動
+    await tester.tapAt(tester.getTopLeft(find.byType(EditorPage)));
+    // ここもキー連打で確実にリセット
+    for (int i = 0; i < 10; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    }
+    for (int i = 0; i < 4; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    }
+📘 解説
+arrowUp と arrowLeft の連打: これにより、カーソルがどこにあっても強制的にファイルの先頭 (0, 0) に戻されます。
+確実性: 画面サイズやタップ位置の微妙なズレに影響されないため、テストが非常に安定します。
+この修正で、カーソルが正しく (0, 1) に移動し、そこから範囲選択が行われるため、"b" と "g" が正しくコピーされるはずです。
+
+## tapAtダメだな。全部tapAtだ。なぜだ？
+
+apAt が不安定な理由と、今後の対策について説明します。
+
+💥 なぜ tapAt はダメなのか？
+結論から言うと、「見た目（描画）」に依存しているから です。
+
+座標のズレ:
+
+tapAt は画面上のピクセル座標をタップします。
+テスト環境では、フォントの描画サイズや画面のレイアウト計算が、実機と微妙に異なる場合があります。
+「左上 (0,0)」をタップしたつもりでも、わずかなパディングや計算誤差で「文字のない隙間」や「画面外」と判定され、無視されることがあります。
+タイミングの問題:
+
+tapAt が成功するには、ウィジェットが完全に描画され、ヒットテスト（当たり判定）の準備ができている必要があります。
+非同期処理 (pump) のタイミングによっては、準備完了前にタップしてしまい、空振りすることがあります。
+対してキー操作は:
+
+ロジック直結です。見た目がどうであれ、フォーカスさえあれば「左キーが押された」という信号は確実にプログラム内部 (_handleKeyPress) に届きます。
+ロジックのテスト（Logic Test）においては、キー操作の方が圧倒的に信頼性が高いです。
+🚀 修正方針の提案
+ご指摘の通り、現在のテストコードにはまだ tapAt が多く残っており、これらが将来的なエラーの火種になります。
+
+方針: テストコード内のすべての tapAt を削除し、「キー連打によるカーソルリセット（左上への強制移動）」に置き換えます。
+
+具体的には、以下の処理を行うヘルパー関数のような処理を各テストの冒頭やリセット地点に適用します。
+
+dart
+// カーソルを確実に (0,0) に戻す「儀式」
+for (int i = 0; i < 10; i++) {
+  await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+  await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+}
+await tester.pump();
+この方針で、test/editor_logic_test.dart に残っている全ての tapAt を修正してもよろしいでしょうか？
+
+    // 2. テキスト入力: "abc" (改行) "de"
+    // Row 0: "abc" (3文字)
+    // Row 1: "de"  (2文字)
+    // tapAtは不安定なので、キー連打で確実に(0,0)に戻す
+    for (int i = 0; i < 10; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    }
+    await tester.pump();
+
+    // キーイベントで確実に入力を行う (enterTextだと改行が反映されない場合があるため)
+    // "abc"
+    final state = tester.state(find.byType(EditorPage)) as dynamic;
+
+    // 2. テキスト入力 "abc" (改行) "de"
+    // tapAtは不安定なので、キー連打で確実に(0,0)に戻す
+    for (int i = 0; i < 10; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    }
+    await tester.pump();
+
+    // "abc"
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    // 3. テキスト入力
+    // Row 0: "abcde"
+    // Row 1: "fghij"
+    // tapAtは不安定なので、キー連打で確実に(0,0)に戻す
+    for (int i = 0; i < 10; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    }
+    await tester.pump();
+
+    // "abcde" + Enter + "fghij"
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+
+## テストが通った。選択部分には色々問題がある。
+
+テストの通過、おめでとうございます！これで基礎となるカーソル移動や入力、そしてクリップボード連携の土台が固まりました。
+
+「選択部分の問題」についてですが、現状のコードを確認すると、「見た目の描画」と「実際のコピー処理」で不整合（ねじれ） が発生していると考えられます。
+
+### 🔍 現状の課題分析
+描画 (MemoPainter):
+デフォルトで isRectangularSelection が false のため、「通常選択（行またぎ）」 として描画されています。
+コピー処理 (_copySelection):
+実装が minVisualX / maxVisualX を使用した 「矩形選択（四角形切り出し）」 のロジックになっています。
+結果: 画面上では「行をまたいで文章を選択している」ように見えるのに、コピーして貼り付けると「四角く切り取られたテキスト（矩形）」になってしまう、という状態です。
+
+### 💡 修正方針：通常選択と矩形選択の実装
+この問題を解決するために、以下のステップで実装を進めたいと思います。
+
+ - 選択モードの管理:
+EditorPage に bool _isRectangularSelection フラグを追加します。
+選択開始時（Shift+矢印、またはドラッグ開始）に、Alt キーが押されていれば矩形選択、そうでなければ通常選択 と判定するようにします。
+
+ - コピー処理の分岐:
+_copySelection 内でフラグを確認し、処理を分岐させます。
+通常選択の場合: 開始位置から終了位置まで、改行を含めて素直にテキストを繋げるロジック（ストリーム選択）を実装します。
+矩形選択の場合: 既存のロジック（VisualX基準）を使用します。
+
+ - 描画への反映:
+MemoPainter に _isRectangularSelection を正しく渡し、見た目も切り替わるようにします。
+
+この方針で、「通常選択と矩形選択を正しく使い分ける機能」 を実装してもよろしいでしょうか？
+
+## そんな感じで。
+
+承知いたしました。 合意いただいた方針に基づき、「通常選択（ストリーム選択）」と「矩形選択」を Alt キーの状態によって使い分ける機能 を実装します。
+
+🛠️ 実装内容
+lib/editor_page.dart を修正し、以下の機能を組み込みます。
+
+選択モードの管理:
+_isRectangularSelection フラグを追加し、選択開始時（Shiftキー移動やドラッグ開始時）の Alt キー状態でモードを決定します。
+コピー処理の分岐:
+_copySelection メソッド内でフラグを確認し、通常選択なら行をまたいで文字を繋げ、矩形選択なら四角く切り取るように処理を分けます。
+描画への反映:
+MemoPainter にフラグを渡し、見た目も「通常の青い選択範囲」と「矩形の選択範囲」で切り替わるようにします。
+💻 修正コード
+lib/editor_page.dart に以下の変更を適用してください。
+
+```
+editor_page.dart
+-72
++115
+  // 矩形選択の範囲の開始位置
+  int? _selectionOriginRow;
+  int? _selectionOriginCol;
+  bool _isRectangularSelection = false; // 矩形選択モードフラグ
+
+  // 操作履歴スタック
+  List<HistoryEntry> _undoStack = [];
+  }
+
+  // ヘルパー関数 カーソル移動処理の前後に呼ぶ
+  void _handleSelectionOnMove(bool isShift) {
+  void _handleSelectionOnMove(bool isShift, bool isAlt) {
+    if (isShift) {
+      _selectionOriginRow ??= _cursorRow;
+      _selectionOriginCol ??= _cursorCol;
+      _isRectangularSelection = isAlt; // Altキーの状態に合わせてモード切替
+    } else {
+      _selectionOriginRow = null;
+      _selectionOriginCol = null;
+      if (_selectionOriginRow == null) {
+        setState(() {
+          _selectionOriginRow = _cursorRow;
+          _selectionOriginCol = _cursorCol;
+          _isRectangularSelection = isAlt;
+        });
+      } else {
+        // 選択中もAltの状態を反映させる（動的な切り替え）
+        if (_isRectangularSelection != isAlt) {
+          setState(() {
+            _isRectangularSelection = isAlt;
+          });
+        }
+      }
+    } else {
+      // Shiftが押されていなければ選択解除 (矢印キー以外で解除したい場合もあるので
+        return KeyEventResult.handled;
+
+      case PhysicalKeyboardKey.arrowLeft:
+        _handleSelectionOnMove(isShift); // 選択状態更新
+        _handleSelectionOnMove(isShift, isAlt); // 選択状態更新
+
+        // カーソルの移動
+        // Altの有無に関わらず、行頭なら前の行に戻る(行跨ぎ)
+
+      case PhysicalKeyboardKey.arrowRight:
+        // 選択状態更新
+        _handleSelectionOnMove(isShift);
+        _handleSelectionOnMove(isShift, isAlt);
+
+        String currentLine = _lines[_cursorRow];
+
+
+      case PhysicalKeyboardKey.arrowUp:
+        // 選択状態更新
+        _handleSelectionOnMove(isShift);
+        _handleSelectionOnMove(isShift, isAlt);
+
+        // 行の移動
+        if (_cursorRow > 0) {
+
+      case PhysicalKeyboardKey.arrowDown:
+        // 選択状態更新
+        _handleSelectionOnMove(isShift);
+        _handleSelectionOnMove(isShift, isAlt);
+
+        // 行の移動
+        // Atlが押されているときは、制限無く移動する。
+    // 選択されていない場合何もしない。
+    if (_selectionOriginRow == null || _selectionOriginCol == null) return;
+
+    // 範囲の特定（行）
+    int startRow = min(_selectionOriginRow!, _cursorRow);
+    int endRow = max(_selectionOriginRow!, _cursorRow);
+
+    // 範囲の特定( 見た目のX座標: VisualX )
+    // Painterと同じロジックで「矩形の左端」と「矩形の右端」を算出する
+
+    // 開始地点のVisualX
+    String originLine = "";
+    if (_selectionOriginRow! < _lines.length) {
+      originLine = _lines[_selectionOriginRow!];
+    }
+    String originText = "";
+    if (_selectionOriginCol! <= originLine.length) {
+      originText = originLine.substring(0, _selectionOriginCol!);
+    StringBuffer buffer = StringBuffer();
+
+    if (_isRectangularSelection) {
+      // --- 矩形選択コピー ---
+      // 範囲の特定（行）
+      int startRow = min(_selectionOriginRow!, _cursorRow);
+      int endRow = max(_selectionOriginRow!, _cursorRow);
+
+      // 範囲の特定( 見た目のX座標: VisualX )
+      // Painterと同じロジックで「矩形の左端」と「矩形の右端」を算出する
+
+      // 開始地点のVisualX
+      String originLine = "";
+      if (_selectionOriginRow! < _lines.length) {
+        originLine = _lines[_selectionOriginRow!];
+      }
+      String originText = "";
+      if (_selectionOriginCol! <= originLine.length) {
+        originText = originLine.substring(0, _selectionOriginCol!);
+      } else {
+        originText =
+            originLine + (' ' * (_selectionOriginCol! - originLine.length));
+      }
+      // 共通関数
+      int originVisualX = TextUtils.calcTextWidth(originText);
+
+      // カーソル地点のVisualX
+      String cursorLine = "";
+      if (_cursorRow < _lines.length) {
+        cursorLine = _lines[_cursorRow];
+      }
+      String cursorText = "";
+      if (_cursorCol <= cursorLine.length) {
+        cursorText = cursorLine.substring(0, _cursorCol);
+      } else {
+        cursorText = cursorLine + (' ' * (_cursorCol - cursorLine.length));
+      }
+      // 共通関数
+      int cursorVisualX = TextUtils.calcTextWidth(cursorText);
+
+      int minVisualX = min(originVisualX, cursorVisualX);
+      int maxVisualX = max(originVisualX, cursorVisualX);
+
+      for (int i = startRow; i <= endRow; i++) {
+        String line = "";
+        if (i < _lines.length) {
+          line = _lines[i];
+        }
+        // VisualX から 文字列のインデックス(col) に変換
+        int startCol = TextUtils.getColFromVisualX(line, minVisualX);
+        int endCol = TextUtils.getColFromVisualX(line, maxVisualX);
+
+        if (startCol > endCol) {
+          int temp = startCol;
+          startCol = endCol;
+          endCol = temp;
+        }
+
+        // 文字列切り出し
+        String extracted = "";
+        if (startCol < line.length) {
+          int safeEnd = min(endCol, line.length);
+          extracted = line.substring(startCol, safeEnd);
+        }
+        buffer.writeln(extracted);
+      }
+    } else {
+      originText =
+          originLine + (' ' * (_selectionOriginCol! - originLine.length));
+    }
+    // 共通関数
+    int originVisualX = TextUtils.calcTextWidth(originText);
+
+    // カーソル地点のVisualX
+    String cursorLine = "";
+    if (_cursorRow < _lines.length) {
+      cursorLine = _lines[_cursorRow];
+    }
+    String cursorText = "";
+    if (_cursorCol <= cursorLine.length) {
+      cursorText = cursorLine.substring(0, _cursorCol);
+    } else {
+      cursorText = cursorLine + (' ' * (_cursorCol - cursorLine.length));
+    }
+    // 共通関数
+    int cursorVisualX = TextUtils.calcTextWidth(cursorText);
+
+    int minVisualX = min(originVisualX, cursorVisualX);
+    int maxVisualX = max(originVisualX, cursorVisualX);
+
+    // 各行からテキストを抽出して結合
+    StringBuffer buffer = StringBuffer();
+
+    for (int i = startRow; i <= endRow; i++) {
+      String line = "";
+      if (i < _lines.length) {
+        line = _lines[i];
+      }
+      // VisualX から 文字列のインデックス(col) に変換
+      int startCol = TextUtils.getColFromVisualX(line, minVisualX);
+      int endCol = TextUtils.getColFromVisualX(line, maxVisualX);
+
+      if (startCol > endCol) {
+        int temp = startCol;
+        startCol = endCol;
+        endCol = temp;
+      }
+
+      // 文字列切り出し
+      // endColが行の長さを超えないようにガード
+      String extracted = "";
+      if (startCol < line.length) {
+        int safeEnd = min(endCol, line.length);
+        extracted = line.substring(startCol, safeEnd);
+      }
+      // 必要であれば、矩形として形を保つために右側をスペースで埋める処理をここに入れることも可能ですが、
+      // まずは「ある文字だけコピー」します。
+
+      buffer.writeln(extracted);
+      // --- 通常選択コピー (ストリーム) ---
+      int startRow = _selectionOriginRow!;
+      int startCol = _selectionOriginCol!;
+      int endRow = _cursorRow;
+      int endCol = _cursorCol;
+
+      // 反転対応
+      if (startRow > endRow || (startRow == endRow && startCol > endCol)) {
+        int t = startRow; startRow = endRow; endRow = t;
+        t = startCol; startCol = endCol; endCol = t;
+      }
+
+      for (int i = startRow; i <= endRow; i++) {
+        if (i >= _lines.length) break;
+        String line = _lines[i];
+
+        int s = (i == startRow) ? startCol : 0;
+        int e = (i == endRow) ? endCol : line.length;
+
+        if (s > line.length) s = line.length;
+        if (e > line.length) e = line.length;
+        if (s < 0) s = 0;
+        if (e < 0) e = 0;
+
+        buffer.write(line.substring(s, e));
+
+        // 最終行以外なら改行を入れる
+        if (i < endRow) {
+          buffer.write('\n');
+        }
+      }
+    }
+    await Clipboard.setData(ClipboardData(text: buffer.toString()));
+
+                      // ドラッグ開始点を記録
+                      _selectionOriginRow = _cursorRow;
+                      _selectionOriginCol = _cursorCol;
+                      // Altキーが押されていれば矩形選択モード
+                      _isRectangularSelection = HardwareKeyboard.instance.isAltPressed;
+                    });
+                  },
+                  // ドラッグ中(カーソル位置を更新=選択範囲の最終位置が変わる)
+                        selectionOriginRow: _selectionOriginRow,
+                        selectionOriginCol: _selectionOriginCol,
+                        showCursor: _showCursor,
+                        isRectangularSelection: _isRectangularSelection,
+                      ),
+                      size: Size.infinite,
+                      child: Container(
+```
+
+📘 解説
+_isRectangularSelection: 選択モードを管理するフラグです。
+_handleSelectionOnMove: カーソル移動時に呼ばれ、Alt キーが押されていれば矩形選択モード (true)、そうでなければ通常選択モード (false) に切り替えます。
+_copySelection:
+矩形選択の場合: 以前と同じく、見た目のX座標 (VisualX) を基準に四角く切り取ります。
+通常選択の場合: 開始位置から終了位置まで、行をまたいで素直に文字を連結します（ストリーム選択）。
+MemoPainter への連携: build メソッドでフラグを渡すことで、画面上の選択範囲の描画も「青い連続した範囲（通常）」と「四角い範囲（矩形）」で切り替わるようになります。
+これで、Alt キーを使った選択モードの使い分けが可能になります。
+
+
+## 選択は良さそうだが、選択範囲の描画が正しくない。Exceptionもでる。
+
+ご指摘ありがとうございます。 矩形選択（_drawRectangularSelection）の実装において、「カーソルが文字のない場所（虚空）にある場合」 の考慮が漏れており、存在しない文字インデックスにアクセスして RangeError が発生しています。
+
+また、矩形選択の描画は「行ごとの文字数」ではなく、「見た目のX座標（VisualX）」 を基準に描画する必要があります。これにより、全角・半角が混在していても、綺麗な長方形（Box）として描画されます。
+
+lib/memo_painter.dart を以下のコードで全面的に書き換えてください。 （前回修正した通常選択のロジックも含め、全ての描画ロジックを整理・統合した完全版です）
+
+修正のポイント
+_drawRectangularSelection の修正:
+_calculateVisualX というヘルパーメソッドを作成し、「行の文字数を超えていても、スペースで埋めたと仮定してX座標を計算する」 処理を追加しました。これでエラーが消えます。
+始点と終点の VisualX を計算し、その幅で四角形を描画するようにしました。
+_drawNormalSelection の維持:
+前回修正した「範囲外アクセス防止（クランプ）」入りのロジックをそのまま採用しています。
+📄 lib/memo_painter.dart (完全版)
+
+```
+dart
+import 'dart:math';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'text_utils.dart';
+
+class MemoPainter extends CustomPainter {
+  final List<String> lines;
+  final double charWidth;
+  final double charHeight;
+  final double lineHeight;
+  final bool showGrid;
+  final bool isOverwriteMode;
+  final int cursorRow;
+  final int cursorCol;
+  final TextStyle textStyle;
+  final String composingText;
+  final int? selectionOriginRow;
+  final int? selectionOriginCol;
+  final bool isRectangularSelection; // 矩形選択モードかどうか
+
+  MemoPainter({
+    required this.lines,
+    required this.charWidth,
+    required this.charHeight,
+    required this.showGrid,
+    required this.isOverwriteMode,
+    required this.cursorRow,
+    required this.cursorCol,
+    required this.lineHeight,
+    required this.textStyle,
+    required this.composingText,
+    this.selectionOriginRow,
+    this.selectionOriginCol,
+    this.isRectangularSelection = false,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // --------------------------------------------------------
+    // 0. 選択範囲の背景描画
+    // --------------------------------------------------------
+    if (selectionOriginRow != null && selectionOriginCol != null) {
+      if (isRectangularSelection) {
+        _drawRectangularSelection(canvas);
+      } else {
+        _drawNormalSelection(canvas);
+      }
+    }
+
+    // --------------------------------------------------------
+    // 1. テキスト（確定済み）の描画
+    // --------------------------------------------------------
+    for (int i = 0; i < lines.length; i++) {
+      final String line = lines[i];
+
+      final textSpan = TextSpan(text: line, style: textStyle);
+      final textPainter = TextPainter(
+        text: textSpan,
+        textDirection: TextDirection.ltr,
+      );
+      textPainter.layout();
+      textPainter.paint(canvas, Offset(0, i * lineHeight));
+
+      // 改行マークの描画
+      int visualWidth = TextUtils.calcTextWidth(line);
+      double lineEndX = visualWidth * charWidth;
+      double lineY = i * lineHeight;
+
+      final markStyle = TextStyle(
+        color: Colors.grey.shade400,
+        fontSize: textStyle.fontSize,
+      );
+      final markSpan = TextSpan(text: '↓', style: markStyle);
+      final markPainter = TextPainter(
+        text: markSpan,
+        textDirection: TextDirection.ltr,
+      );
+      markPainter.layout();
+      markPainter.paint(canvas, Offset(lineEndX + 2, lineY));
+    }
+
+    // --------------------------------------------------------
+    // 2. カーソル位置のX座標計算 (全角対応・虚空対応)
+    // --------------------------------------------------------
+    double cursorPixelX = _calculateVisualX(cursorRow, cursorCol);
+    double cursorPixelY = cursorRow * lineHeight;
+
+    // --------------------------------------------------------
+    // 3. 未確定文字 (composingText) の描画
+    // --------------------------------------------------------
+    if (composingText.isNotEmpty) {
+      final composingStyle = TextStyle(
+        color: Colors.black,
+        fontSize: textStyle.fontSize,
+        fontFamily: textStyle.fontFamily,
+        decoration: TextDecoration.underline,
+        decorationStyle: TextDecorationStyle.solid,
+        decorationColor: Colors.blue,
+        backgroundColor: Colors.white.withValues(alpha: 0.8),
+      );
+
+      final span = TextSpan(text: composingText, style: composingStyle);
+      final tp = TextPainter(text: span, textDirection: TextDirection.ltr);
+      tp.layout();
+
+      tp.paint(canvas, Offset(cursorPixelX, cursorPixelY));
+    }
+
+    // --------------------------------------------------------
+    // 4. カーソルの描画
+    // --------------------------------------------------------
+    if (isOverwriteMode) {
+      final cursorRect = Rect.fromLTWH(
+        cursorPixelX,
+        cursorPixelY,
+        charWidth,
+        lineHeight,
+      );
+      canvas.drawRect(
+        cursorRect,
+        Paint()..color = Colors.blue.withValues(alpha: 0.5),
+      );
+    } else {
+      final cursorPaint = Paint()
+        ..color = Colors.black
+        ..strokeWidth = 2.0
+        ..strokeCap = StrokeCap.square;
+
+      canvas.drawLine(
+        Offset(cursorPixelX, cursorPixelY),
+        Offset(cursorPixelX, cursorPixelY + lineHeight),
+        cursorPaint,
+      );
+    }
+
+    // --------------------------------------------------------
+    // 5. グリッド線 (showGrid時)
+    // --------------------------------------------------------
+    if (showGrid) {
+      final gridPaint = Paint()
+        ..color = Colors.grey.withValues(alpha: 0.3)
+        ..strokeWidth = 1.0;
+
+      // 縦線
+      for (double x = 0; x < size.width; x += charWidth) {
+        canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridPaint);
+      }
+      // 横線
+      for (double y = 0; y < size.height; y += lineHeight) {
+        canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
+      }
+    }
+  }
+
+  // ★矩形選択の描画ロジック (VisualX基準)
+  void _drawRectangularSelection(Canvas canvas) {
+    final paint = Paint()..color = Colors.blue.withOpacity(0.3);
+
+    int startRow = min(selectionOriginRow!, cursorRow);
+    int endRow = max(selectionOriginRow!, cursorRow);
+
+    // 始点と終点の「見た目のX座標」を計算
+    double originVX = _calculateVisualX(selectionOriginRow!, selectionOriginCol!);
+    double cursorVX = _calculateVisualX(cursorRow, cursorCol);
+
+    double left = min(originVX, cursorVX);
+    double right = max(originVX, cursorVX);
+
+    // 行ごとに描画 (矩形なのでX座標は固定)
+    for (int i = startRow; i <= endRow; i++) {
+      double top = i * lineHeight;
+      double bottom = top + lineHeight;
+
+      canvas.drawRect(
+        Rect.fromLTRB(left, top, right, bottom),
+        paint,
+      );
+    }
+  }
+
+  // ★通常選択の描画ロジック (行またぎ対応)
+  void _drawNormalSelection(Canvas canvas) {
+    final paint = Paint()..color = Colors.blue.withOpacity(0.3);
+
+    int startRow = selectionOriginRow!;
+    int startCol = selectionOriginCol!;
+    int endRow = cursorRow;
+    int endCol = cursorCol;
+
+    if (startRow > endRow || (startRow == endRow && startCol > endCol)) {
+      int t;
+      t = startRow; startRow = endRow; endRow = t;
+      t = startCol; startCol = endCol; endCol = t;
+    }
+
+    for (int i = startRow; i <= endRow; i++) {
+      if (i >= lines.length) break;
+
+      String line = lines[i];
+      int lineLen = line.length;
+
+      int localStart = (i == startRow) ? startCol : 0;
+      int localEnd = (i == endRow) ? endCol : lineLen;
+
+      // 範囲外アクセス防止 (クランプ)
+      if (localStart > lineLen) localStart = lineLen;
+      if (localEnd > lineLen) localEnd = lineLen;
+      if (localStart < 0) localStart = 0;
+      if (localEnd < 0) localEnd = 0;
+
+      String preText = line.substring(0, localStart);
+      String selText = line.substring(localStart, localEnd);
+
+      double startX = TextUtils.calcTextWidth(preText) * charWidth;
+      double selWidth = TextUtils.calcTextWidth(selText) * charWidth;
+
+      // 改行選択の表現 (行末を超えている場合)
+      bool isPastLineEnd = (i < endRow) || (i == endRow && endCol > lineLen);
+      if (isPastLineEnd) {
+        selWidth += charWidth / 2; // 改行分として少し幅を足す
+      }
+
+      double top = i * lineHeight;
+      double bottom = top + lineHeight;
+
+      canvas.drawRect(
+        Rect.fromLTRB(startX, top, startX + selWidth, bottom),
+        paint,
+      );
+    }
+  }
+
+  // ★ヘルパー: 指定した行・列の VisualX (ピクセル) を計算
+  // 虚空(行末より右)にある場合も、スペースで埋めたと仮定して計算する
+  double _calculateVisualX(int row, int col) {
+    String line = "";
+    if (row < lines.length) {
+      line = lines[row];
+    }
+
+    String textBefore = "";
+    if (col <= line.length) {
+      textBefore = line.substring(0, col);
+    } else {
+      // 虚空対応: 足りない分をスペースで埋める
+      textBefore = line + (' ' * (col - line.length));
+    }
+
+    return TextUtils.calcTextWidth(textBefore) * charWidth;
+  }
+
+  @override
+  bool shouldRepaint(covariant MemoPainter oldDelegate) {
+    return listEquals(oldDelegate.lines, lines) ||
+        oldDelegate.charWidth != charWidth ||
+        oldDelegate.charHeight != charHeight ||
+        oldDelegate.showGrid != showGrid ||
+        oldDelegate.cursorRow != cursorRow ||
+        oldDelegate.cursorCol != cursorCol ||
+        oldDelegate.textStyle != textStyle ||
+        oldDelegate.composingText != composingText ||
+        oldDelegate.selectionOriginRow != selectionOriginRow ||
+        oldDelegate.selectionOriginCol != selectionOriginCol ||
+        oldDelegate.isRectangularSelection != isRectangularSelection;
+  }
+}
+```
+
+## このテストはあるのか？
+
+ご質問ありがとうございます。現状のテストコード（test/editor_logic_test.dart）を確認しました。
+
+結論：一部ありますが、不十分です。
+現状の Copy, Paste, and Rectangular Paste Logic テストケースでカバーできている範囲と、不足している範囲は以下の通りです。
+
+ ✅ テストされているもの:
+--
+  コピー (Ctrl + C): 範囲選択後のコピー動作（ただし、通常選択としての挙動のみ）。
+  矩形貼り付け (Ctrl + Alt + V): 複数行にわたる矩形データの貼り付け動作。
+
+❌ テストされていない（不足している）もの:
+--
+- 通常貼り付け (Ctrl + V): 普通のテキスト貼り付け動作の検証がありません。
+
+- 選択モードの使い分け: Alt キーを押しながら選択した場合（矩形選択）と、押さない場合（通常選択）で、コピーされる内容が変化することの検証がありません。
+
+- 上書きモード時の貼り付け: Insert キーでモードを切り替えた際の挙動検証がありません。
+
+### 💡 提案：テストの追加
+
+実装した機能（通常選択と矩形選択の使い分け、通常貼り付け）を確実に保証するために、以下のテストシナリオを追加する方針はいかがでしょうか？
+
+- 通常貼り付け (Ctrl + V) のテスト:
+クリップボードにテキストをセットし、Ctrl + V でカーソル位置に挿入されるか確認する。
+
+- 選択モード（通常 vs 矩形）の比較テスト:
+  1. ケースA (通常): Shift + 矢印で選択し、コピー。改行を含むテキストとして取得できるか確認。
+  2. ケースB (矩形): Shift + Alt + 矢印で選択し、コピー。矩形ブロックとして取得できるか確認。
+
+この方針で、不足しているテストコードを追加してもよろしいでしょうか？
+
+## 追加して。
+
+承知いたしました。 合意いただいた方針に基づき、「通常貼り付け」 と 「選択モード（通常 vs 矩形）の比較」 を検証するテストコードを追加します。
+
+🛠️ 実装内容
+test/editor_logic_test.dart の末尾に、新しいテストケース Normal Paste (Ctrl+V) and Selection Modes (Normal vs Rectangular) を追加します。
+
+テストのシナリオ:
+
+準備:
+クリップボードをモック化します。
+テキスト "abcde", "fghij" を入力します。
+通常貼り付け検証 (Ctrl + V):
+クリップボードに "XYZ" をセットします。
+(0, 0) で Ctrl + V を実行し、"XYZabcde" となる（カーソルが3つ進む）ことを確認します。
+通常選択コピー検証 (Shift + Arrow):
+(1, 1) から (1, 3) までを選択し、Ctrl + C。
+"gh" がコピーされることを確認します。
+矩形選択コピー検証 (Shift + Alt + Arrow):
+(0, 1) から (1, 2) までを矩形選択し、Ctrl + C。
+縦方向の "Y" と "g" がコピーされることを確認します。
+💻 修正コード
+test/editor_logic_test.dart の末尾に以下のコードを追加してください。
+
+```
+editor_logic_test.dart
+-0
++149
+ Show full code block 
+      null,
+    );
+  });
+
+  testWidgets('Normal Paste (Ctrl+V) and Selection Modes (Normal vs Rectangular)', (
+    WidgetTester tester,
+  ) async {
+    // 1. クリップボードのモック化
+    final List<MethodCall> log = <MethodCall>[];
+    String? mockClipboardData;
+
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (MethodCall methodCall) async {
+        log.add(methodCall);
+        if (methodCall.method == 'Clipboard.setData') {
+          final Map<String, dynamic> args =
+              methodCall.arguments as Map<String, dynamic>;
+          mockClipboardData = args['text'] as String?;
+          return null;
+        } else if (methodCall.method == 'Clipboard.getData') {
+          return {'text': mockClipboardData};
+        }
+        return null;
+      },
+    );
+
+    // 2. アプリ起動
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1.0;
+    await tester.pumpWidget(const MaterialApp(home: EditorPage()));
+    await tester.pumpAndSettle();
+
+    final state = tester.state(find.byType(EditorPage)) as dynamic;
+
+    // 3. テキスト入力
+    // Row 0: "abcde"
+    // Row 1: "fghij"
+    // カーソルリセット
+    for (int i = 0; i < 10; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    }
+    await tester.pump();
+
+    // 入力
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyB);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyE);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyG);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyH);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyI);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyJ);
+    await tester.pump();
+
+    // --- Test: 通常貼り付け (Ctrl + V) ---
+    // 準備: クリップボードに "XYZ" をセット
+    mockClipboardData = "XYZ";
+
+    // カーソルを (0, 0) へ
+    for (int i = 0; i < 10; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    }
+    await tester.pump();
+
+    // 貼り付け実行 (Ctrl + V)
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.control);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.control);
+    await tester.pump();
+
+    // 検証: カーソルが3文字進んでいるか ("XYZ"の分)
+    // 元: "abcde" -> "XYZabcde"
+    expect(state.debugCursorRow, 0, reason: "通常貼り付け後: 行は変わらず");
+    expect(state.debugCursorCol, 3, reason: "通常貼り付け後: 3文字分進む");
+
+    // --- Test: 通常選択コピー (Shift + Arrow) ---
+    // カーソルを (1, 1) 'g' の前へ移動
+    // 現在 (0, 3)。下へ行って (1, 3)。左へ2回で (1, 1)。
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pump();
+
+    // 選択開始: (1, 1) から (1, 3) まで ('g', 'h')
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shift);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight); // (1, 2)
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight); // (1, 3)
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shift);
+    await tester.pump();
+
+    // コピー実行 (Ctrl + C)
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.control);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.control);
+    await tester.pump();
+
+    // 検証: "gh" がコピーされているか
+    expect(mockClipboardData, equals("gh"), reason: "通常選択コピー: 行内選択");
+
+    // --- Test: 矩形選択コピー (Shift + Alt + Arrow) ---
+    // カーソルを (0, 1) 'Y' の前へ
+    // 現在の状態:
+    // Row 0: "XYZabcde"
+    // Row 1: "fghij"
+    
+    // カーソルリセット
+    for (int i = 0; i < 10; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    }
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight); // (0, 1)
+    await tester.pump();
+
+    // 矩形選択: (0, 1) から (1, 2) まで
+    // Row 0: index 1 ('Y')
+    // Row 1: index 1 ('g')
+    // 幅: 1文字分
+    
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shift);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.alt); // Alt押下
+    
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown); // (1, 1)
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight); // (1, 2) 幅確保
+    
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.alt);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shift);
+    await tester.pump();
+
+    // コピー実行
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.control);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.control);
+    await tester.pump();
+
+    // 検証: 矩形コピー
+    // Row 0: "XYZ..." の index 1 ('Y')
+    // Row 1: "fgh..." の index 1 ('g')
+    // 期待値: "Y\ng\n" (実装により末尾改行の有無が異なるが、trim()で吸収)
+    expect(mockClipboardData?.trim(), equals("Y\ng"), reason: "矩形選択コピー: 縦に切り出される");
+
+    // モック解除
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      null,
+    );
+  });
+}
+```
+
+📘 解説
+
+通常貼り付け: Ctrl + V で "XYZ" が挿入され、カーソルが3文字分進むことを確認しています。
+通常選択: Shift キーのみで選択し、行内の連続した文字 "gh" がコピーされることを確認しています。
+矩形選択: Shift + Alt キーで選択し、縦方向の文字 "Y" と "g" がコピーされることを確認しています。
+これで、実装した機能が正しく動作しているか検証できます。
+
+
+## テストは異常なく終了した。次は、、、選択状態でキー入力、Enter,、貼り付けなどが行われると、通常のエディタは選択部分が選択状態の部分が入力で上書きされる。上書き・挿入モードの状態もあり、選択がストリームか、矩形かも状態もある。このエディタではどうなのるが理想的なのか。 あと、マウスカーソルと選択範囲がずれるケースがある。条件はまだ不明
+
+## ご相談ありがとうございます。 エディタの挙動に関する仕様決めと、バグ調査についての方針を提案します。
+
+1. 選択状態での入力時の挙動（理想的な仕様）
+自由配置や矩形選択、上書きモードがある場合でも、基本的には**「ユーザーの意図した範囲を新しい入力で置き換える」**という動作が最も直感的で標準的です。
+
+提案する仕様: 「入力（文字、Enter、貼り付け）操作が行われた際、選択範囲が存在すれば、まずその範囲を削除してから、操作を実行する」
+
+通常選択（ストリーム）の場合:
+選択範囲を削除（文字を詰める）し、削除された位置（先頭）にカーソルを移動してから、文字入力や改行を行います。
+上書きモードであっても、選択範囲がある場合は「範囲の置換」を優先します。
+矩形選択の場合:
+矩形範囲を削除（切り取りと同様に文字を詰める）し、矩形の左上の位置にカーソルを移動してから、操作を行います。
+これにより、矩形選択して文字を入力すると、矩形部分が消えて1文字入る（または貼り付けられる）という動作になります。
+2. マウスカーソルと選択範囲のズレ（バグ調査）
+「ズレる」原因の多くは、**「クリック位置から文字数を計算するロジック」と「実際に描画されている文字幅」**の不一致です。特に全角文字や記号が含まれる場合に発生しやすくなります。
+
+提案する対策:
+
+_handleTap メソッドにデバッグログ (print) を追加し、クリックした座標、計算されたVisualX、判定されたColなどを出力するようにします。これにより、どの文字でズレが発生しているか特定します。
+🚀 実装方針
+この方針に基づき、以下の修正を行ってもよろしいでしょうか？
+
+ - _deleteSelection() メソッドの追加:
+    
+    現在の選択範囲（通常・矩形）を削除し、カーソルを適切な位置に戻す共通メソッドを実装します。
+
+ - 各操作への組み込み:
+    _handleKeyPress 内の「文字入力」「Enter」「Backspace」「Delete」「貼り付け」の処理の冒頭で、_deleteSelection() を呼び出すように修正します。
+
+ - デバッグログの追加:
+_handleTap に座標計算のログ出力を追加します。
+この方針でコードを作成しますか？
+
+## 選択状態での入力時の挙動（理想的な仕様） についてはそれで行こう。２.の範囲のずれは、文字幅とかの問題ではない。矩形選択のとき、画面カーソルの位置に対して選択範囲の表示が１行上ずれている。
+
+ご提示いただいた仕様とバグ報告に基づき、以下の2点を修正します。
+
+矩形選択の描画ズレ修正:
+MemoPainter のループ条件を修正し、カーソルがある行（終点行）まで正しく選択範囲が描画されるようにします。
+選択範囲の削除ロジック実装:
+_deleteSelection メソッドを実装し、通常選択・矩形選択のどちらであっても、入力操作時に対象範囲を削除してから処理を行うようにします。
+1. lib/memo_painter.dart の修正
+矩形選択の描画ループ条件を < から <= に変更し、終点行を含めるようにします。
+```
+memo_painter.dart
+-1
++1
+    double right = max(originVX, cursorVX);
+
+    // 行ごとの描画 (矩形なのでX座標は固定)
+    for (int i = startRow; i < endRow; i++) {
+    for (int i = startRow; i <= endRow; i++) {
+      double top = i * lineHeight;
+      double bottom = top + lineHeight;
+```
+2. lib/editor_page.dart の修正
+選択範囲を削除する _deleteSelection メソッドを追加し、各キー操作（Enter, Backspace, Delete, 文字入力, 貼り付け）の冒頭で呼び出すようにします。
+
+```
+editor_page.dart
+-4
++112
+      if (physicalKey == PhysicalKeyboardKey.keyV) {
+        if (isAlt) {
+          // Ctrl + Alt + V 矩形貼り付け
+          if (_selectionOriginRow != null) {
+            _saveHistory();
+            _deleteSelection();
+          }
+          _pasteRectangular();
+        } else {
+          // Ctrl + V 通常貼り付け
+          if (_selectionOriginRow != null) {
+            _saveHistory();
+            _deleteSelection();
+          }
+          _pasteNormal();
+        }
+        return KeyEventResult.handled;
+    switch (physicalKey) {
+      case PhysicalKeyboardKey.enter:
+        _saveHistory(); // UNDO用 状態保存
+        _deleteSelection(); // 選択範囲があれば削除
+        final currentLine = _lines[_cursorRow];
+        final part1 = currentLine.substring(0, _cursorCol);
+        final part2 = currentLine.substring(_cursorCol);
+
+      case PhysicalKeyboardKey.backspace:
+        _saveHistory(); // UNDO用 状態保存
+        if (_selectionOriginRow != null) {
+          _deleteSelection(); // 選択範囲削除のみで終了
+          return KeyEventResult.handled;
+        }
+
+        if (_cursorCol > 0) {
+          final currentLine = _lines[_cursorRow];
+          final part1 = currentLine.substring(0, _cursorCol - 1);
+
+      case PhysicalKeyboardKey.delete:
+        _saveHistory(); // UNDO用 状態保存
+        if (_selectionOriginRow != null) {
+          _deleteSelection(); // 選択範囲削除のみで終了
+          return KeyEventResult.handled;
+        }
+
+        if (_cursorRow >= _lines.length) return KeyEventResult.handled;
+
+        final currentLine = _lines[_cursorRow];
+      default:
+        if (character != null && character.isNotEmpty) {
+          _saveHistory(); // UNDO用 状態保存
+          _deleteSelection(); // 選択範囲があれば削除
+          _fillVirtualSpaceIfNeeded();
+          _insertText(character);
+          return KeyEventResult.handled;
+    }
+  }
+
+  // 選択範囲を削除する (通常・矩形対応)
+  void _deleteSelection() {
+    if (_selectionOriginRow == null || _selectionOriginCol == null) return;
+
+    if (_isRectangularSelection) {
+      // --- 矩形選択削除 ---
+      int startRow = min(_selectionOriginRow!, _cursorRow);
+      int endRow = max(_selectionOriginRow!, _cursorRow);
+
+      // VisualX範囲の特定 (copySelectionと同じロジック)
+      String originLine = "";
+      if (_selectionOriginRow! < _lines.length) {
+        originLine = _lines[_selectionOriginRow!];
+      }
+      String originText = "";
+      if (_selectionOriginCol! <= originLine.length) {
+        originText = originLine.substring(0, _selectionOriginCol!);
+      } else {
+        originText =
+            originLine + (' ' * (_selectionOriginCol! - originLine.length));
+      }
+      int originVisualX = TextUtils.calcTextWidth(originText);
+
+      String cursorLine = "";
+      if (_cursorRow < _lines.length) {
+        cursorLine = _lines[_cursorRow];
+      }
+      String cursorText = "";
+      if (_cursorCol <= cursorLine.length) {
+        cursorText = cursorLine.substring(0, _cursorCol);
+      } else {
+        cursorText = cursorLine + (' ' * (_cursorCol - cursorLine.length));
+      }
+      int cursorVisualX = TextUtils.calcTextWidth(cursorText);
+
+      int minVisualX = min(originVisualX, cursorVisualX);
+      int maxVisualX = max(originVisualX, cursorVisualX);
+
+      for (int i = startRow; i <= endRow; i++) {
+        if (i >= _lines.length) continue;
+        String line = _lines[i];
+
+        int startCol = TextUtils.getColFromVisualX(line, minVisualX);
+        int endCol = TextUtils.getColFromVisualX(line, maxVisualX);
+
+        if (startCol > endCol) {
+          int t = startCol; startCol = endCol; endCol = t;
+        }
+        if (startCol > line.length) startCol = line.length;
+        if (endCol > line.length) endCol = line.length;
+
+        String part1 = line.substring(0, startCol);
+        String part2 = line.substring(endCol);
+        _lines[i] = part1 + part2;
+      }
+      // カーソルを矩形左上に移動
+      _cursorRow = startRow;
+      if (_cursorRow < _lines.length) {
+        _cursorCol = TextUtils.getColFromVisualX(_lines[_cursorRow], minVisualX);
+        if (_cursorCol > _lines[_cursorRow].length) _cursorCol = _lines[_cursorRow].length;
+      }
+    } else {
+      // --- 通常選択削除 ---
+      int startRow = _selectionOriginRow!;
+      int startCol = _selectionOriginCol!;
+      int endRow = _cursorRow;
+      int endCol = _cursorCol;
+
+      if (startRow > endRow || (startRow == endRow && startCol > endCol)) {
+        int t = startRow; startRow = endRow; endRow = t;
+        t = startCol; startCol = endCol; endCol = t;
+      }
+
+      String startLine = (startRow < _lines.length) ? _lines[startRow] : "";
+      String prefix = (startCol < startLine.length) ? startLine.substring(0, startCol) : startLine;
+
+      String endLine = (endRow < _lines.length) ? _lines[endRow] : "";
+      String suffix = (endCol < endLine.length) ? endLine.substring(endCol) : "";
+
+      _lines[startRow] = prefix + suffix;
+
+      if (endRow > startRow) {
+        _lines.removeRange(startRow + 1, endRow + 1);
+      }
+
+      _cursorRow = startRow;
+      _cursorCol = startCol;
+    }
+    _selectionOriginRow = null;
+    _selectionOriginCol = null;
+  }
+
+  // 選択範囲をコピーする。
+  void _copySelection() async {
+    // 選択されていない場合何もしない。
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    if (data == null || data.text == null || data.text!.isEmpty) return;
+
+    _saveHistory(); // UNDO用 状態保存
+
+    // 行ごとに分割 (改行コードの除去)
+    final List<String> pasteLines = const LineSplitter().convert(data.text!);
+    if (pasteLines.isEmpty) return;
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    if (data == null || data.text == null) return;
+
+    _saveHistory(); // UNDO用 状態保存
+
+    // 改行コード統一
+    String text = data.text!.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+    List<String> parts = text.split('\n');
+```
+
+## 上書きモードの選択範囲のずれは修正された。今回加えた選択範囲の上書きの動作確認のテストを作成したい。選択の範囲表示はテストが作成できるのか？
+
+ご質問ありがとうございます。
+
+1. 選択範囲表示のテストについて
+結論から申し上げますと、「可能ですが、アプローチが2種類あります」。
+
+ロジックのテスト（推奨）:
+
+「選択範囲の始点（selectionOriginRow/Col）」や「矩形モードフラグ（isRectangularSelection）」が、キー操作によって正しく値としてセットされているかを検証します。
+メリット: 高速で安定的。バグの多く（ロジックミス）はここで発見できます。
+方法: WidgetTester で操作し、MemoPainter に渡された引数を確認します。
+見た目のテスト（Golden Test）:
+
+実際に画面を描画し、その画像（スクリーンショット）を正解画像と比較します。
+メリット: 「青い四角がズレていないか」など、描画そのものを検証できます。
+デメリット: フォントやOS環境に依存しやすく、セットアップが少し大変です。
+今回は、まず**「ロジックと動作（上書き結果）」**を確実に検証するテストを作成しましょう。これが通れば、機能としては安心できます。
+
+2. 選択範囲の上書き動作確認テスト
+「選択範囲がある状態で文字を入力すると、範囲が削除されて文字が入る」という挙動を、通常選択と矩形選択の両方で検証するテストを作成します。
+
+準備：テスト用ゲッターの追加
+テストコードから「エディタの中身（_lines）」を確認できるように、lib/editor_page.dart にテスト専用の抜け道（ゲッター）を追加します。
+
+```
+editor_page.dart
+-0
++3
+  @visibleForTesting
+  int get debugCursorRow => _cursorRow;
+
+  @visibleForTesting
+  List<String> get debugLines => _lines;
+
+  @override
+  void initState() {
+    super.initState();
+```
+
+テストコードの追加
+test/editor_logic_test.dart に、以下のテストケースを追加します。
+
+通常選択の上書き: "abcde" の "bc" を選択して "X" を入力 → "aXde" になるか。
+矩形選択の上書き: 複数行の特定列を選択して "X" を入力 → 各行の選択部分が "X" に置換されるか。
+
+```
+editor_logic_test.dart
+-0
++94
+      null,
+    );
+  });
+
+  testWidgets('Overwrite Selection (Normal & Rectangular)', (WidgetTester tester) async {
+    // 1. アプリ起動
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1.0;
+    await tester.pumpWidget(const MaterialApp(home: EditorPage()));
+    await tester.pumpAndSettle();
+
+    final state = tester.state(find.byType(EditorPage)) as dynamic;
+
+    // 2. テキスト入力
+    // Row 0: "abcde"
+    // Row 1: "fghij"
+    // カーソルリセット
+    for (int i = 0; i < 10; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    }
+    await tester.pump();
+
+    // 入力
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyB);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyE);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyG);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyH);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyI);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyJ);
+    await tester.pump();
+
+    // --- Test 1: 通常選択の上書き ---
+    // カーソルを (0, 1) 'b' の前へ
+    for (int i = 0; i < 10; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    }
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight); // (0, 1)
+    await tester.pump();
+
+    // "bc" を選択 (Shift + Right x 2)
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shift);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shift);
+    await tester.pump();
+
+    // "X" を入力 (選択範囲 "bc" が消えて "X" になるはず)
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyX);
+    await tester.pump();
+
+    // 検証: "abcde" -> "aXde"
+    expect(state.debugLines[0], equals("aXde"), reason: "通常選択の上書き: 選択範囲が置換されること");
+
+    // --- Test 2: 矩形選択の上書き ---
+    // 状態リセット: テキストを "abcde", "fghij" に戻すのは手間なので、
+    // 現在の "aXde", "fghij" をベースにテストする
+    
+    // カーソルを (0, 1) 'X' の前へ
+    for (int i = 0; i < 10; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    }
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight); // (0, 1)
+    await tester.pump();
+
+    // 矩形選択: (0, 1) から (1, 2) まで
+    // Row 0: "aXde" の index 1 ('X')
+    // Row 1: "fghij" の index 1 ('g')
+    // 幅: 1文字分 (Right x 1)
+    
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shift);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.alt); // Alt押下(矩形)
+    
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown); // (1, 1)
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight); // (1, 2) 幅確保
+    
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.alt);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shift);
+    await tester.pump();
+
+    // "Y" を入力 (矩形範囲が消えて "Y" になるはず)
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyY);
+    await tester.pump();
+
+    // 検証:
+    // Row 0: "aXde" -> "aYde" ('X'が'Y'に)
+    // Row 1: "fghij" -> "fYhij" ('g'が'Y'に)
+    expect(state.debugLines[0], equals("aYde"), reason: "矩形選択の上書き(Row0)");
+    expect(state.debugLines[1], equals("fYhij"), reason: "矩形選択の上書き(Row1)");
+  });
+}
+```
+実行方法
+ターミナルで以下を実行してください。
+
+bash
+flutter test test/editor_logic_test.dart
+これで、選択範囲に対する入力（上書き）が正しく機能しているか確認できます。
+
+##  Which: is different. Expected: aXde Actual: axde (笑
+
+笑ってしまいましたね！失礼しました。 tester.sendKeyEvent(LogicalKeyboardKey.keyX) は、Shiftキーを押さない限り 「小文字の x」 として入力されるのが仕様でした。
+
+テストコードの期待値（Expected）を、現実に合わせて小文字の x と y に修正します。
+
+🛠️ 修正内容
+test/editor_logic_test.dart の期待値を修正します。
+
+通常選択: aXde → axde
+矩形選択: aYde → ayde, fYhij → fyhij
+💻 修正コード
+editor_logic_test.dart
+-8
++8
+The code change produced by Gemini cannot be fully applied. Blocks that failed (highlighted below) can be applied manually.
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyX);
+    await tester.pump();
+
+    // 検証: "abcde" -> "aXde"
+    // 検証: "abcde" -> "axde" (Shiftなしなので小文字)
+    expect(
+      state.debugLines[0],
+      equals("aXde"),
+      equals("axde"),
+      reason: "通常選択の上書き: 選択範囲が置換されること",
+    );
+
+    // --- Test 2: 矩形選択の上書き ---
+    // 状態リセット: テキストを "abcde", "fghij" に戻すのは手間なので、
+    // 現在の "aXde", "fghij" をベースにテストする
+    // 現在の "axde", "fghij" をベースにテストする
+    
+    // カーソルを (0, 1) 'X' の前へ
+    for (int i = 0; i < 10; i++) {
+    await tester.pump();
+
+    // 矩形選択: (0, 1) から (1, 2) まで
+    // Row 0: "aXde" の index 1 ('X')
+    // Row 0: "axde" の index 1 ('x')
+    // Row 1: "fghij" の index 1 ('g')
+    // 幅: 1文字分 (Right x 1)
+    
+    await tester.pump();
+
+    // 検証:
+    // Row 0: "aXde" -> "aYde" ('X'が'Y'に)
+    // Row 1: "fghij" -> "fYhij" ('g'が'Y'に)
+    expect(state.debugLines[0], equals("aYde"), reason: "矩形選択の上書き(Row0)");
+    expect(state.debugLines[1], equals("fYhij"), reason: "矩形選択の上書き(Row1)");
+    // Row 0: "axde" -> "ayde" ('x'が'y'に)
+    // Row 1: "fghij" -> "fyhij" ('g'が'y'に)
+    expect(state.debugLines[0], equals("ayde"), reason: "矩形選択の上書き(Row0)");
+    expect(state.debugLines[1], equals("fyhij"), reason: "矩形選択の上書き(Row1)");
+  });
+}
+これでテストが通るはずです！
+
+## The following TestFailure was thrown running a test:
+```
+ Expected: 'fyhij' 
+   Actual: 'fhij' Which: is different.
+  Expected: fyhij 
+  Actual:   fhij 
+             ^ Differ at offset 1 矩形選択の上書き(Row1)
+When the exception was thrown, this was the stack: #4 main.<anonymous closure> (file:///C:/Users/dora/home/src/free_memo_editor/test/editor_logic_test.dart:580:5)
+```
+
+## エラーの原因は、矩形選択時の文字入力処理にあります。
+
+現在の実装では、文字入力時に _deleteSelection() を呼び出して選択範囲を削除した後、_insertText(character) を呼び出しています。 しかし、_insertText はカーソルがある1行（先頭行）にしか文字を挿入しません。
+
+その結果、矩形選択範囲（複数行）はすべて削除されますが、文字が挿入されるのは1行目だけで、2行目以降は「削除されたまま（文字が入らない）」状態になっていました。これが Actual: 'fhij' （'y'がない）の原因です。
+
+### 💡 修正方針
+矩形選択されている状態で文字が入力された場合、「選択範囲のすべての行に対して、削除と文字挿入（置換）を行う」 必要があります。
+
+_replaceRectangularSelection メソッドの追加:
+矩形範囲の各行について、「範囲削除」と「文字挿入」を一括で行う専用メソッドを作成します。
+
+_handleKeyPress の修正:
+文字入力時に、矩形選択モードであれば上記のメソッドを呼び出すように分岐させます。
+
+### 💻 修正コード
+lib/editor_page.dart を修正します。
+```
+editor_page.dart
+-3
++94
+      default:
+        if (character != null && character.isNotEmpty) {
+          _saveHistory(); // UNDO用 状態保存
+          _deleteSelection(); // 選択範囲があれば削除
+          _fillVirtualSpaceIfNeeded();
+          _insertText(character);
+          // 矩形選択時は専用の置換処理を行う
+          if (_isRectangularSelection && _selectionOriginRow != null) {
+            _replaceRectangularSelection(character);
+          } else {
+            _deleteSelection(); // 選択範囲があれば削除
+            _fillVirtualSpaceIfNeeded();
+            _insertText(character);
+          }
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+    _selectionOriginCol = null;
+  }
+
+  // 矩形選択範囲を指定文字で置換する
+  void _replaceRectangularSelection(String text) {
+    if (_selectionOriginRow == null || _selectionOriginCol == null) return;
+
+    int startRow = min(_selectionOriginRow!, _cursorRow);
+    int endRow = max(_selectionOriginRow!, _cursorRow);
+
+    // VisualX範囲の特定
+    String originLine = "";
+    if (_selectionOriginRow! < _lines.length) {
+      originLine = _lines[_selectionOriginRow!];
+    }
+    String originText = "";
+    if (_selectionOriginCol! <= originLine.length) {
+      originText = originLine.substring(0, _selectionOriginCol!);
+    } else {
+      originText =
+          originLine + (' ' * (_selectionOriginCol! - originLine.length));
+    }
+    int originVisualX = TextUtils.calcTextWidth(originText);
+
+    String cursorLine = "";
+    if (_cursorRow < _lines.length) {
+      cursorLine = _lines[_cursorRow];
+    }
+    String cursorText = "";
+    if (_cursorCol <= cursorLine.length) {
+      cursorText = cursorLine.substring(0, _cursorCol);
+    } else {
+      cursorText = cursorLine + (' ' * (_cursorCol - cursorLine.length));
+    }
+    int cursorVisualX = TextUtils.calcTextWidth(cursorText);
+
+    int minVisualX = min(originVisualX, cursorVisualX);
+    int maxVisualX = max(originVisualX, cursorVisualX);
+
+    // カーソル位置更新用
+    int newCursorRow = startRow;
+    int newCursorCol = 0;
+
+    for (int i = startRow; i <= endRow; i++) {
+      if (i >= _lines.length) continue;
+      String line = _lines[i];
+
+      int startCol = TextUtils.getColFromVisualX(line, minVisualX);
+      int endCol = TextUtils.getColFromVisualX(line, maxVisualX);
+
+      if (startCol > endCol) {
+        int t = startCol;
+        startCol = endCol;
+        endCol = t;
+      }
+      if (startCol > line.length) startCol = line.length;
+      if (endCol > line.length) endCol = line.length;
+
+      String part1 = line.substring(0, startCol);
+      String part2 = line.substring(endCol);
+      _lines[i] = part1 + text + part2;
+
+      // カーソルは開始行の、挿入した文字の後ろに置く
+      if (i == startRow) {
+        newCursorCol = part1.length + text.length;
+      }
+    }
+
+    _cursorRow = newCursorRow;
+    _cursorCol = newCursorCol;
+
+    // 選択解除
+    _selectionOriginRow = null;
+    _selectionOriginCol = null;
+
+    // VisualX更新
+    if (_cursorRow < _lines.length) {
+      String line = _lines[_cursorRow];
+      if (_cursorCol > line.length) _cursorCol = line.length;
+      _preferredVisualX = TextUtils.calcTextWidth(
+        line.substring(0, _cursorCol),
+      );
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _updateImeWindowPosition();
+    });
+  }
+
+  // 選択範囲をコピーする。
+  void _copySelection() async {
+    // 選択されていない場合何もしない。
+```

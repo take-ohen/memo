@@ -326,4 +326,257 @@ void main() {
       null,
     );
   });
+
+  testWidgets('普通貼付け (Ctrl+V) and 矩形モード (Normal vs Rectangular)', (
+    WidgetTester tester,
+  ) async {
+    // 1. クリップボードのモック化
+    final List<MethodCall> log = <MethodCall>[];
+    String? mockClipboardData;
+
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (MethodCall methodCall) async {
+        log.add(methodCall);
+        if (methodCall.method == 'Clipboard.setData') {
+          final Map<String, dynamic> args =
+              methodCall.arguments as Map<String, dynamic>;
+          mockClipboardData = args['text'] as String?;
+          return null;
+        } else if (methodCall.method == 'Clipboard.getData') {
+          return {'text': mockClipboardData};
+        }
+        return null;
+      },
+    );
+
+    // 2. アプリ起動
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1.0;
+    await tester.pumpWidget(const MaterialApp(home: EditorPage()));
+    await tester.pumpAndSettle();
+
+    final state = tester.state(find.byType(EditorPage)) as dynamic;
+
+    // 3. テキスト入力
+    // Row 0: "abcde"
+    // Row 1: "fghij"
+    // カーソルリセット
+    for (int i = 0; i < 10; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    }
+    await tester.pump();
+
+    // 入力
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyB);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyE);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyG);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyH);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyI);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyJ);
+    await tester.pump();
+
+    // --- Test: 通常貼り付け (Ctrl + V) ---
+    // 準備: クリップボードに "XYZ" をセット
+    mockClipboardData = "XYZ";
+
+    // カーソルを (0, 0) へ
+    for (int i = 0; i < 10; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    }
+    await tester.pump();
+
+    // 貼り付け実行 (Ctrl + V)
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.control);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.control);
+    await tester.pump();
+
+    // 検証: カーソルが3文字進んでいるか ("XYZ"の分)
+    // 元: "abcde" -> "XYZabcde"
+    expect(state.debugCursorRow, 0, reason: "通常貼り付け後: 行は変わらず");
+    expect(state.debugCursorCol, 3, reason: "通常貼り付け後: 3文字分進む");
+
+    // --- Test: 通常選択コピー (Shift + Arrow) ---
+    // カーソルを (1, 1) 'g' の前へ移動
+    // 現在 (0, 3)。下へ行って (1, 3)。左へ2回で (1, 1)。
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pump();
+
+    // 選択開始: (1, 1) から (1, 3) まで ('g', 'h')
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shift);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight); // (1, 2)
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight); // (1, 3)
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shift);
+    await tester.pump();
+
+    // コピー実行 (Ctrl + C)
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.control);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.control);
+    await tester.pump();
+
+    // 検証: "gh" がコピーされているか
+    expect(mockClipboardData, equals("gh"), reason: "通常選択コピー: 行内選択");
+
+    // --- Test: 矩形選択コピー (Shift + Alt + Arrow) ---
+    // カーソルを (0, 1) 'Y' の前へ
+    // 現在の状態:
+    // Row 0: "XYZabcde"
+    // Row 1: "fghij"
+
+    // カーソルリセット
+    for (int i = 0; i < 10; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    }
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight); // (0, 1)
+    await tester.pump();
+
+    // 矩形選択: (0, 1) から (1, 2) まで
+    // Row 0: index 1 ('Y')
+    // Row 1: index 1 ('g')
+    // 幅: 1文字分
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shift);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.alt); // Alt押下
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown); // (1, 1)
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight); // (1, 2) 幅確保
+
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.alt);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shift);
+    await tester.pump();
+
+    // コピー実行
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.control);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.control);
+    await tester.pump();
+
+    // 検証: 矩形コピー
+    // Row 0: "XYZ..." の index 1 ('Y')
+    // Row 1: "fgh..." の index 1 ('g')
+    // 期待値: "Y\ng\n" (実装により末尾改行の有無が異なるが、trim()で吸収)
+    expect(
+      mockClipboardData?.trim(),
+      equals("Y\ng"),
+      reason: "矩形選択コピー: 縦に切り出される",
+    );
+
+    // モック解除
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      null,
+    );
+  });
+
+  testWidgets('Overwrite Selection (Normal & Rectangular)', (
+    WidgetTester tester,
+  ) async {
+    // 1. アプリ起動
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1.0;
+    await tester.pumpWidget(const MaterialApp(home: EditorPage()));
+    await tester.pumpAndSettle();
+
+    final state = tester.state(find.byType(EditorPage)) as dynamic;
+
+    // 2. テキスト入力
+    // Row 0: "abcde"
+    // Row 1: "fghij"
+    // カーソルリセット
+    for (int i = 0; i < 10; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    }
+    await tester.pump();
+
+    // 入力
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyB);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyE);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyG);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyH);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyI);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyJ);
+    await tester.pump();
+
+    // --- Test 1: 通常選択の上書き ---
+    // カーソルを (0, 1) 'b' の前へ
+    for (int i = 0; i < 10; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    }
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight); // (0, 1)
+    await tester.pump();
+
+    // "bc" を選択 (Shift + Right x 2)
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shift);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shift);
+    await tester.pump();
+
+    // "X" を入力 (選択範囲 "bc" が消えて "X" になるはず)
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyX);
+    await tester.pump();
+
+    // 検証: "abcde" -> "axde"
+    expect(
+      state.debugLines[0],
+      equals("axde"),
+      reason: "通常選択の上書き: 選択範囲が置換されること",
+    );
+
+    // --- Test 2: 矩形選択の上書き ---
+    // 状態リセット: テキストを "abcde", "fghij" に戻すのは手間なので、
+    // 現在の "aXde", "fghij" をベースにテストする
+
+    // カーソルを (0, 1) 'X' の前へ
+    for (int i = 0; i < 10; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    }
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight); // (0, 1)
+    await tester.pump();
+
+    // 矩形選択: (0, 1) から (1, 2) まで
+    // Row 0: "axde" の index 1 ('x')
+    // Row 1: "fghij" の index 1 ('g')
+    // 幅: 1文字分 (Right x 1)
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shift);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.alt); // Alt押下(矩形)
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown); // (1, 1)
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight); // (1, 2) 幅確保
+
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.alt);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shift);
+    await tester.pump();
+
+    // "Y" を入力 (矩形範囲が消えて "Y" になるはず)
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyY);
+    await tester.pump();
+
+    // 検証:
+    // Row 0: "axde" -> "ayde" ('x'が'y'に)
+    // Row 1: "fghij" -> "fyhij" ('g'が'y'に)
+    expect(state.debugLines[0], equals("ayde"), reason: "矩形選択の上書き(Row0)");
+    expect(state.debugLines[1], equals("fyhij"), reason: "矩形選択の上書き(Row1)");
+  });
 }

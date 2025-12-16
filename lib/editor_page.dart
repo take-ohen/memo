@@ -38,6 +38,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   // 矩形選択の範囲の開始位置
   int? _selectionOriginRow;
   int? _selectionOriginCol;
+  bool _isRectangularSelection = false; // 矩形選択モードフラグ
 
   // 操作履歴スタック
   List<HistoryEntry> _undoStack = [];
@@ -60,6 +61,9 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
   @visibleForTesting
   int get debugCursorRow => _cursorRow;
+
+  @visibleForTesting
+  List<String> get debugLines => _lines;
 
   @override
   void initState() {
@@ -140,10 +144,11 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   }
 
   // ヘルパー関数 カーソル移動処理の前後に呼ぶ
-  void _handleSelectionOnMove(bool isShift) {
+  void _handleSelectionOnMove(bool isShift, bool isAlt) {
     if (isShift) {
       _selectionOriginRow ??= _cursorRow;
       _selectionOriginCol ??= _cursorCol;
+      _isRectangularSelection = isAlt; // Altキーの状態に合わせてモード切替
     } else {
       _selectionOriginRow = null;
       _selectionOriginCol = null;
@@ -288,9 +293,17 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
       if (physicalKey == PhysicalKeyboardKey.keyV) {
         if (isAlt) {
           // Ctrl + Alt + V 矩形貼り付け
+          if (_selectionOriginRow != null) {
+            _saveHistory();
+            _deleteSelection();
+          }
           _pasteRectangular();
         } else {
           // Ctrl + V 通常貼り付け
+          if (_selectionOriginRow != null) {
+            _saveHistory();
+            _deleteSelection();
+          }
           _pasteNormal();
         }
         return KeyEventResult.handled;
@@ -303,7 +316,15 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
         setState(() {
           _selectionOriginRow = _cursorRow;
           _selectionOriginCol = _cursorCol;
+          _isRectangularSelection = isAlt;
         });
+      } else {
+        // 選択中もAltの状態を反映させる（動的な切り替え）
+        if (_isRectangularSelection != isAlt) {
+          setState(() {
+            _isRectangularSelection = isAlt;
+          });
+        }
       }
     } else {
       // Shiftが押されていなければ選択解除 (矢印キー以外で解除したい場合もあるので
@@ -318,6 +339,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     switch (physicalKey) {
       case PhysicalKeyboardKey.enter:
         _saveHistory(); // UNDO用 状態保存
+        _deleteSelection(); // 選択範囲があれば削除
         final currentLine = _lines[_cursorRow];
         final part1 = currentLine.substring(0, _cursorCol);
         final part2 = currentLine.substring(_cursorCol);
@@ -331,6 +353,11 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
       case PhysicalKeyboardKey.backspace:
         _saveHistory(); // UNDO用 状態保存
+        if (_selectionOriginRow != null) {
+          _deleteSelection(); // 選択範囲削除のみで終了
+          return KeyEventResult.handled;
+        }
+
         if (_cursorCol > 0) {
           final currentLine = _lines[_cursorRow];
           final part1 = currentLine.substring(0, _cursorCol - 1);
@@ -351,6 +378,11 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
       case PhysicalKeyboardKey.delete:
         _saveHistory(); // UNDO用 状態保存
+        if (_selectionOriginRow != null) {
+          _deleteSelection(); // 選択範囲削除のみで終了
+          return KeyEventResult.handled;
+        }
+
         if (_cursorRow >= _lines.length) return KeyEventResult.handled;
 
         final currentLine = _lines[_cursorRow];
@@ -377,7 +409,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
         return KeyEventResult.handled;
 
       case PhysicalKeyboardKey.arrowLeft:
-        _handleSelectionOnMove(isShift); // 選択状態更新
+        _handleSelectionOnMove(isShift, isAlt); // 選択状態更新
 
         // カーソルの移動
         // Altの有無に関わらず、行頭なら前の行に戻る(行跨ぎ)
@@ -411,7 +443,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
       case PhysicalKeyboardKey.arrowRight:
         // 選択状態更新
-        _handleSelectionOnMove(isShift);
+        _handleSelectionOnMove(isShift, isAlt);
 
         String currentLine = _lines[_cursorRow];
 
@@ -449,7 +481,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
       case PhysicalKeyboardKey.arrowUp:
         // 選択状態更新
-        _handleSelectionOnMove(isShift);
+        _handleSelectionOnMove(isShift, isAlt);
 
         // 行の移動
         if (_cursorRow > 0) {
@@ -477,7 +509,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
       case PhysicalKeyboardKey.arrowDown:
         // 選択状態更新
-        _handleSelectionOnMove(isShift);
+        _handleSelectionOnMove(isShift, isAlt);
 
         // 行の移動
         // Atlが押されているときは、制限無く移動する。
@@ -507,8 +539,14 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
       default:
         if (character != null && character.isNotEmpty) {
           _saveHistory(); // UNDO用 状態保存
-          _fillVirtualSpaceIfNeeded();
-          _insertText(character);
+          // 矩形選択時は専用の置換処理を行う
+          if (_isRectangularSelection && _selectionOriginRow != null) {
+            _replaceRectangularSelection(character);
+          } else {
+            _deleteSelection(); // 選択範囲があれば削除
+            _fillVirtualSpaceIfNeeded();
+            _insertText(character);
+          }
           return KeyEventResult.handled;
         }
         return KeyEventResult.ignored;
@@ -586,24 +624,120 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     }
   }
 
-  // 選択範囲をコピーする。
-  void _copySelection() async {
-    print("DEBUG: _copySelection called");
-    print(
-      "DEBUG: Origin=($_selectionOriginRow, $_selectionOriginCol), Cursor=($_cursorRow, $_cursorCol)",
-    );
-
-    // 選択されていない場合何もしない。
+  // 選択範囲を削除する (通常・矩形対応)
+  void _deleteSelection() {
     if (_selectionOriginRow == null || _selectionOriginCol == null) return;
 
-    // 範囲の特定（行）
+    if (_isRectangularSelection) {
+      // --- 矩形選択削除 ---
+      int startRow = min(_selectionOriginRow!, _cursorRow);
+      int endRow = max(_selectionOriginRow!, _cursorRow);
+
+      // VisualX範囲の特定 (copySelectionと同じロジック)
+      String originLine = "";
+      if (_selectionOriginRow! < _lines.length) {
+        originLine = _lines[_selectionOriginRow!];
+      }
+      String originText = "";
+      if (_selectionOriginCol! <= originLine.length) {
+        originText = originLine.substring(0, _selectionOriginCol!);
+      } else {
+        originText =
+            originLine + (' ' * (_selectionOriginCol! - originLine.length));
+      }
+      int originVisualX = TextUtils.calcTextWidth(originText);
+
+      String cursorLine = "";
+      if (_cursorRow < _lines.length) {
+        cursorLine = _lines[_cursorRow];
+      }
+      String cursorText = "";
+      if (_cursorCol <= cursorLine.length) {
+        cursorText = cursorLine.substring(0, _cursorCol);
+      } else {
+        cursorText = cursorLine + (' ' * (_cursorCol - cursorLine.length));
+      }
+      int cursorVisualX = TextUtils.calcTextWidth(cursorText);
+
+      int minVisualX = min(originVisualX, cursorVisualX);
+      int maxVisualX = max(originVisualX, cursorVisualX);
+
+      for (int i = startRow; i <= endRow; i++) {
+        if (i >= _lines.length) continue;
+        String line = _lines[i];
+
+        int startCol = TextUtils.getColFromVisualX(line, minVisualX);
+        int endCol = TextUtils.getColFromVisualX(line, maxVisualX);
+
+        if (startCol > endCol) {
+          int t = startCol;
+          startCol = endCol;
+          endCol = t;
+        }
+        if (startCol > line.length) startCol = line.length;
+        if (endCol > line.length) endCol = line.length;
+
+        String part1 = line.substring(0, startCol);
+        String part2 = line.substring(endCol);
+        _lines[i] = part1 + part2;
+      }
+      // カーソルを矩形左上に移動
+      _cursorRow = startRow;
+      if (_cursorRow < _lines.length) {
+        _cursorCol = TextUtils.getColFromVisualX(
+          _lines[_cursorRow],
+          minVisualX,
+        );
+        if (_cursorCol > _lines[_cursorRow].length)
+          _cursorCol = _lines[_cursorRow].length;
+      }
+    } else {
+      // --- 通常選択削除 ---
+      int startRow = _selectionOriginRow!;
+      int startCol = _selectionOriginCol!;
+      int endRow = _cursorRow;
+      int endCol = _cursorCol;
+
+      if (startRow > endRow || (startRow == endRow && startCol > endCol)) {
+        int t = startRow;
+        startRow = endRow;
+        endRow = t;
+        t = startCol;
+        startCol = endCol;
+        endCol = t;
+      }
+
+      String startLine = (startRow < _lines.length) ? _lines[startRow] : "";
+      String prefix = (startCol < startLine.length)
+          ? startLine.substring(0, startCol)
+          : startLine;
+
+      String endLine = (endRow < _lines.length) ? _lines[endRow] : "";
+      String suffix = (endCol < endLine.length)
+          ? endLine.substring(endCol)
+          : "";
+
+      _lines[startRow] = prefix + suffix;
+
+      if (endRow > startRow) {
+        _lines.removeRange(startRow + 1, endRow + 1);
+      }
+
+      _cursorRow = startRow;
+      _cursorCol = startCol;
+    }
+    _selectionOriginRow = null;
+    _selectionOriginCol = null;
+  }
+
+  // 矩形選択範囲を指定文字で置換する
+  void _replaceRectangularSelection(String text) {
+    if (_selectionOriginRow == null || _selectionOriginCol == null) return;
+
     int startRow = min(_selectionOriginRow!, _cursorRow);
     int endRow = max(_selectionOriginRow!, _cursorRow);
 
-    // 範囲の特定( 見た目のX座標: VisualX )
-    // Painterと同じロジックで「矩形の左端」と「矩形の右端」を算出する
-
-    // 開始地点のVisualX
+    // VisualX範囲の特定
     String originLine = "";
     if (_selectionOriginRow! < _lines.length) {
       originLine = _lines[_selectionOriginRow!];
@@ -615,10 +749,8 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
       originText =
           originLine + (' ' * (_selectionOriginCol! - originLine.length));
     }
-    // 共通関数
     int originVisualX = TextUtils.calcTextWidth(originText);
 
-    // カーソル地点のVisualX
     String cursorLine = "";
     if (_cursorRow < _lines.length) {
       cursorLine = _lines[_cursorRow];
@@ -629,46 +761,168 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     } else {
       cursorText = cursorLine + (' ' * (_cursorCol - cursorLine.length));
     }
-    // 共通関数
     int cursorVisualX = TextUtils.calcTextWidth(cursorText);
 
     int minVisualX = min(originVisualX, cursorVisualX);
     int maxVisualX = max(originVisualX, cursorVisualX);
-    print("DEBUG: minVisualX=$minVisualX, maxVisualX=$maxVisualX");
 
-    // 各行からテキストを抽出して結合
-    StringBuffer buffer = StringBuffer();
+    // カーソル位置更新用
+    int newCursorRow = startRow;
+    int newCursorCol = 0;
 
     for (int i = startRow; i <= endRow; i++) {
-      String line = "";
-      if (i < _lines.length) {
-        line = _lines[i];
-      }
-      // VisualX から 文字列のインデックス(col) に変換
+      if (i >= _lines.length) continue;
+      String line = _lines[i];
+
       int startCol = TextUtils.getColFromVisualX(line, minVisualX);
       int endCol = TextUtils.getColFromVisualX(line, maxVisualX);
 
       if (startCol > endCol) {
-        int temp = startCol;
+        int t = startCol;
         startCol = endCol;
-        endCol = temp;
+        endCol = t;
       }
+      if (startCol > line.length) startCol = line.length;
+      if (endCol > line.length) endCol = line.length;
 
-      // 文字列切り出し
-      // endColが行の長さを超えないようにガード
-      String extracted = "";
-      if (startCol < line.length) {
-        int safeEnd = min(endCol, line.length);
-        extracted = line.substring(startCol, safeEnd);
+      String part1 = line.substring(0, startCol);
+      String part2 = line.substring(endCol);
+      _lines[i] = part1 + text + part2;
+
+      // カーソルは開始行の、挿入した文字の後ろに置く
+      if (i == startRow) {
+        newCursorCol = part1.length + text.length;
       }
-      print(
-        "DEBUG: Row=$i, startCol=$startCol, endCol=$endCol, extracted='$extracted'",
+    }
+
+    _cursorRow = newCursorRow;
+    _cursorCol = newCursorCol;
+
+    // 選択解除
+    _selectionOriginRow = null;
+    _selectionOriginCol = null;
+
+    // VisualX更新
+    if (_cursorRow < _lines.length) {
+      String line = _lines[_cursorRow];
+      if (_cursorCol > line.length) _cursorCol = line.length;
+      _preferredVisualX = TextUtils.calcTextWidth(
+        line.substring(0, _cursorCol),
       );
+    }
 
-      // 必要であれば、矩形として形を保つために右側をスペースで埋める処理をここに入れることも可能ですが、
-      // まずは「ある文字だけコピー」します。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _updateImeWindowPosition();
+    });
+  }
 
-      buffer.writeln(extracted);
+  // 選択範囲をコピーする。
+  void _copySelection() async {
+    // 選択されていない場合何もしない。
+    if (_selectionOriginRow == null || _selectionOriginCol == null) return;
+
+    StringBuffer buffer = StringBuffer();
+
+    if (_isRectangularSelection) {
+      // --- 矩形選択コピー ---
+      // 範囲の特定（行）
+      int startRow = min(_selectionOriginRow!, _cursorRow);
+      int endRow = max(_selectionOriginRow!, _cursorRow);
+
+      // 範囲の特定( 見た目のX座標: VisualX )
+      // Painterと同じロジックで「矩形の左端」と「矩形の右端」を算出する
+
+      // 開始地点のVisualX
+      String originLine = "";
+      if (_selectionOriginRow! < _lines.length) {
+        originLine = _lines[_selectionOriginRow!];
+      }
+      String originText = "";
+      if (_selectionOriginCol! <= originLine.length) {
+        originText = originLine.substring(0, _selectionOriginCol!);
+      } else {
+        originText =
+            originLine + (' ' * (_selectionOriginCol! - originLine.length));
+      }
+      // 共通関数
+      int originVisualX = TextUtils.calcTextWidth(originText);
+
+      // カーソル地点のVisualX
+      String cursorLine = "";
+      if (_cursorRow < _lines.length) {
+        cursorLine = _lines[_cursorRow];
+      }
+      String cursorText = "";
+      if (_cursorCol <= cursorLine.length) {
+        cursorText = cursorLine.substring(0, _cursorCol);
+      } else {
+        cursorText = cursorLine + (' ' * (_cursorCol - cursorLine.length));
+      }
+      // 共通関数
+      int cursorVisualX = TextUtils.calcTextWidth(cursorText);
+
+      int minVisualX = min(originVisualX, cursorVisualX);
+      int maxVisualX = max(originVisualX, cursorVisualX);
+
+      for (int i = startRow; i <= endRow; i++) {
+        String line = "";
+        if (i < _lines.length) {
+          line = _lines[i];
+        }
+        // VisualX から 文字列のインデックス(col) に変換
+        int startCol = TextUtils.getColFromVisualX(line, minVisualX);
+        int endCol = TextUtils.getColFromVisualX(line, maxVisualX);
+
+        if (startCol > endCol) {
+          int temp = startCol;
+          startCol = endCol;
+          endCol = temp;
+        }
+
+        // 文字列切り出し
+        String extracted = "";
+        if (startCol < line.length) {
+          int safeEnd = min(endCol, line.length);
+          extracted = line.substring(startCol, safeEnd);
+        }
+        buffer.writeln(extracted);
+      }
+    } else {
+      // --- 通常選択コピー (ストリーム) ---
+      int startRow = _selectionOriginRow!;
+      int startCol = _selectionOriginCol!;
+      int endRow = _cursorRow;
+      int endCol = _cursorCol;
+
+      // 反転対応
+      if (startRow > endRow || (startRow == endRow && startCol > endCol)) {
+        int t = startRow;
+        startRow = endRow;
+        endRow = t;
+        t = startCol;
+        startCol = endCol;
+        endCol = t;
+      }
+
+      for (int i = startRow; i <= endRow; i++) {
+        if (i >= _lines.length) break;
+        String line = _lines[i];
+
+        int s = (i == startRow) ? startCol : 0;
+        int e = (i == endRow) ? endCol : line.length;
+
+        if (s > line.length) s = line.length;
+        if (e > line.length) e = line.length;
+        if (s < 0) s = 0;
+        if (e < 0) e = 0;
+
+        buffer.write(line.substring(s, e));
+
+        // 最終行以外なら改行を入れる
+        if (i < endRow) {
+          buffer.write('\n');
+        }
+      }
     }
     await Clipboard.setData(ClipboardData(text: buffer.toString()));
 
@@ -679,8 +933,6 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   Future<void> _pasteRectangular() async {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     if (data == null || data.text == null || data.text!.isEmpty) return;
-
-    _saveHistory(); // UNDO用 状態保存
 
     // 行ごとに分割 (改行コードの除去)
     final List<String> pasteLines = const LineSplitter().convert(data.text!);
@@ -797,8 +1049,6 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     // クリップボードからテキスト取得
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     if (data == null || data.text == null) return;
-
-    _saveHistory(); // UNDO用 状態保存
 
     // 改行コード統一
     String text = data.text!.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
@@ -1038,6 +1288,9 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                       // ドラッグ開始点を記録
                       _selectionOriginRow = _cursorRow;
                       _selectionOriginCol = _cursorCol;
+                      // Altキーが押されていれば矩形選択モード
+                      _isRectangularSelection =
+                          HardwareKeyboard.instance.isAltPressed;
                     });
                   },
                   // ドラッグ中(カーソル位置を更新=選択範囲の最終位置が変わる)
@@ -1070,6 +1323,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                         selectionOriginRow: _selectionOriginRow,
                         selectionOriginCol: _selectionOriginCol,
                         showCursor: _showCursor,
+                        isRectangularSelection: _isRectangularSelection,
                       ),
                       size: Size.infinite,
                       child: Container(
