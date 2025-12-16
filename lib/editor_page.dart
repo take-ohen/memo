@@ -54,6 +54,13 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     color: Colors.black,
   );
 
+  // テスト専用のゲッター(抜け道)
+  @visibleForTesting
+  int get debugCursorCol => _cursorCol;
+
+  @visibleForTesting
+  int get debugCursorRow => _cursorRow;
+
   @override
   void initState() {
     super.initState();
@@ -98,7 +105,6 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     });
   }
 
-  //  void _handleTap(TapDownDetails details) {
   void _handleTap(Offset localPosition) {
     if (_charWidth == 0 || _charHeight == 0) return;
 
@@ -374,21 +380,12 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
         _handleSelectionOnMove(isShift); // 選択状態更新
 
         // カーソルの移動
-        if (isAlt) {
-          // Alt 押下  行またぎをせず、単純に左へ
-          if (_cursorCol > 0) {
-            // 現在カーソルが行頭でない場合、カーソル位置を減らす。
-            _cursorCol--;
-          }
-        } else {
-          // 通常の移動
-          if (_cursorCol > 0) {
-            // カーソルが1行目でなければ、
-            _cursorCol--; // 1行カーソルを上に上げる。
-          } else if (_cursorRow > 0) {
-            _cursorRow--;
-            _cursorCol = _lines[_cursorRow].length; //その行の最後の文字にする。
-          }
+        // Altの有無に関わらず、行頭なら前の行に戻る(行跨ぎ)
+        if (_cursorCol > 0) {
+          _cursorCol--;
+        } else if (_cursorRow > 0) {
+          _cursorRow--;
+          _cursorCol = _lines[_cursorRow].length;
         }
 
         // 見た目のカーソル位置の更新
@@ -591,6 +588,11 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
   // 選択範囲をコピーする。
   void _copySelection() async {
+    print("DEBUG: _copySelection called");
+    print(
+      "DEBUG: Origin=($_selectionOriginRow, $_selectionOriginCol), Cursor=($_cursorRow, $_cursorCol)",
+    );
+
     // 選択されていない場合何もしない。
     if (_selectionOriginRow == null || _selectionOriginCol == null) return;
 
@@ -632,6 +634,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
     int minVisualX = min(originVisualX, cursorVisualX);
     int maxVisualX = max(originVisualX, cursorVisualX);
+    print("DEBUG: minVisualX=$minVisualX, maxVisualX=$maxVisualX");
 
     // 各行からテキストを抽出して結合
     StringBuffer buffer = StringBuffer();
@@ -658,6 +661,9 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
         int safeEnd = min(endCol, line.length);
         extracted = line.substring(startCol, safeEnd);
       }
+      print(
+        "DEBUG: Row=$i, startCol=$startCol, endCol=$endCol, extracted='$extracted'",
+      );
 
       // 必要であれば、矩形として形を保つために右側をスペースで埋める処理をここに入れることも可能ですが、
       // まずは「ある文字だけコピー」します。
