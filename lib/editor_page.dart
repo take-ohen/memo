@@ -1,13 +1,16 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:math';
 import 'dart:async';
+import 'package:file_picker/file_picker.dart';
 
 // 分割したファイルをインポート
 import 'memo_painter.dart';
 import 'text_utils.dart';
+import 'history_manager.dart';
 
 class EditorPage extends StatefulWidget {
   const EditorPage({super.key});
@@ -24,8 +27,9 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   int _cursorCol = 0; // 現在のlines上でのカーソル位置(全半角区別なし)
   int _preferredVisualX = 0; // 見た目(全半角区別あり)の現在のカーソル位置(col)
   bool _isOverwriteMode = false; // 上書きモード フラグ
-  bool _isDragging = false; // マウスドラッグ開始時のフラグ管理
+  //  bool _isDragging = false; // マウスドラッグ開始時のフラグ管理
   List<String> _lines = [''];
+  String? _currentFilePath; // 現在開いているファイルのパス
 
   bool _showGrid = false;
   TextInputConnection? _inputConnection;
@@ -41,8 +45,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   bool _isRectangularSelection = false; // 矩形選択モードフラグ
 
   // 操作履歴スタック
-  List<HistoryEntry> _undoStack = [];
-  List<HistoryEntry> _redoStack = [];
+  final HistoryManager _historyManager = HistoryManager();
 
   final ScrollController _horizontalScrollController = ScrollController();
   final ScrollController _verticalScrollController = ScrollController();
@@ -191,58 +194,36 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
   // --- 履歴保存メソッド (変更直前に呼ぶ) ---
   void _saveHistory() {
-    // 現在の状態をディープコピーして保存
-    // List<String>のコピーを作成することが重要
-    final entry = HistoryEntry(List.from(_lines), _cursorRow, _cursorCol);
-
-    _undoStack.add(entry);
-
-    // スタック数制限（任意：例 100回）
-    if (_undoStack.length > 100) {
-      _undoStack.removeAt(0);
-    }
-
-    // 新しい操作をしたらRedoスタックはクリア
-    _redoStack.clear();
+    _historyManager.save(_lines, _cursorRow, _cursorCol);
   }
 
   // --- UNDO (Ctrl+Z) ---
   void _undo() {
-    if (_undoStack.isEmpty) return;
-
-    // 現在の状態をRedoスタックへ退避
-    _redoStack.add(HistoryEntry(List.from(_lines), _cursorRow, _cursorCol));
-
-    // Undoスタックから復元
-    final entry = _undoStack.removeLast();
-    setState(() {
-      _lines = List.from(entry.lines); // リストを再生成
-      _cursorRow = entry.cursorRow;
-      _cursorCol = entry.cursorCol;
-      // VisualXなども更新が必要ならここで
-      if (_cursorRow < _lines.length) {
-        String line = _lines[_cursorRow];
-        if (_cursorCol > line.length) _cursorCol = line.length;
-        _preferredVisualX = TextUtils.calcTextWidth(
-          line.substring(0, _cursorCol),
-        );
-      }
-    });
+    final entry = _historyManager.undo(_lines, _cursorRow, _cursorCol);
+    if (entry != null) {
+      _applyHistoryEntry(entry);
+    }
   }
 
   // --- REDO (Ctrl+Y) ---
   void _redo() {
-    if (_redoStack.isEmpty) return;
+    final entry = _historyManager.redo(_lines, _cursorRow, _cursorCol);
+    if (entry != null) {
+      _applyHistoryEntry(entry);
+    }
+  }
 
-    // 現在の状態をUndoスタックへ退避
-    _undoStack.add(HistoryEntry(List.from(_lines), _cursorRow, _cursorCol));
-
-    // Redoスタックから復元
-    final entry = _redoStack.removeLast();
+  // 履歴エントリを現在の状態に適用するヘルパー
+  void _applyHistoryEntry(HistoryEntry entry) {
     setState(() {
-      _lines = List.from(entry.lines);
+      _lines = List.from(entry.lines); // リストを再生成
       _cursorRow = entry.cursorRow;
       _cursorCol = entry.cursorCol;
+
+      // 選択状態は解除
+      _selectionOriginRow = null;
+      _selectionOriginCol = null;
+
       // VisualX更新
       if (_cursorRow < _lines.length) {
         String line = _lines[_cursorRow];
@@ -256,6 +237,12 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
   // キー処理
   KeyEventResult _handleKeyPress(KeyEvent event) {
+    // IME入力中（未確定文字がある）場合は、エディタとしてのキー処理（カーソル移動や選択など）をスキップし、
+    // IMEに処理を任せる。これにより、変換中のShiftキーなどで意図しない範囲選択が発生するのを防ぐ。
+    if (_composingText.isNotEmpty) {
+      return KeyEventResult.ignored;
+    }
+
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
     }
@@ -308,33 +295,27 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
         }
         return KeyEventResult.handled;
       }
-    }
 
-    //
-    if (isShift) {
-      if (_selectionOriginRow == null) {
-        setState(() {
-          _selectionOriginRow = _cursorRow;
-          _selectionOriginCol = _cursorCol;
-          _isRectangularSelection = isAlt;
-        });
-      } else {
-        // 選択中もAltの状態を反映させる（動的な切り替え）
-        if (_isRectangularSelection != isAlt) {
-          setState(() {
-            _isRectangularSelection = isAlt;
-          });
+      // Save (Ctrl + S) / Save As (Ctrl + Shift + S)
+      if (physicalKey == PhysicalKeyboardKey.keyS) {
+        if (isShift) {
+          _saveAsFile();
+        } else {
+          _saveFile();
         }
+        return KeyEventResult.handled;
       }
-    } else {
-      // Shiftが押されていなければ選択解除 (矢印キー以外で解除したい場合もあるので
-      // ここでリセットするかは要件次第だが、一旦移動系はリセット前提)
-      // ただし、文字入力時などは別途考える必要あり。今回は矢印移動で解説。
+
+      // Select All (Ctrl + A)
+      if (physicalKey == PhysicalKeyboardKey.keyA) {
+        _selectAll();
+        return KeyEventResult.handled;
+      }
     }
 
-    int currentLineLength = 0;
+    //    int currentLineLength = 0;
     if (_cursorRow < _lines.length) {
-      currentLineLength = _lines[_cursorRow].length;
+      //      currentLineLength = _lines[_cursorRow].length;
     }
     switch (physicalKey) {
       case PhysicalKeyboardKey.enter:
@@ -544,7 +525,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
             _replaceRectangularSelection(character);
           } else {
             _deleteSelection(); // 選択範囲があれば削除
-            _fillVirtualSpaceIfNeeded();
+            _ensureVirtualSpace(_cursorRow, _cursorCol);
             _insertText(character);
           }
           return KeyEventResult.handled;
@@ -556,19 +537,9 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   void _insertText(String text) {
     if (text.isEmpty) return;
 
-    if (_cursorRow >= _lines.length) {
-      int newLinesNeeded = _cursorRow - _lines.length + 1;
-      for (int i = 0; i < newLinesNeeded; i++) {
-        _lines.add("");
-      }
-    }
+    _ensureVirtualSpace(_cursorRow, _cursorCol);
 
-    var currentLine = _lines[_cursorRow];
-
-    if (_cursorCol > currentLine.length) {
-      int spacesNeeded = _cursorCol - currentLine.length;
-      currentLine += ' ' * spacesNeeded;
-    }
+    String currentLine = _lines[_cursorRow];
 
     String part1 = currentLine.substring(0, _cursorCol);
     String part2 = currentLine.substring(_cursorCol);
@@ -615,12 +586,18 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     }
   }
 
-  void _fillVirtualSpaceIfNeeded() {
-    while (_lines.length <= _cursorRow) {
-      _lines.add("");
+  // 指定した行・列までデータを拡張する（行追加・スペース埋め）共通メソッド
+  void _ensureVirtualSpace(int row, int col) {
+    // 行の拡張
+    if (row >= _lines.length) {
+      int newLinesNeeded = row - _lines.length + 1;
+      for (int i = 0; i < newLinesNeeded; i++) {
+        _lines.add("");
+      }
     }
-    if (_cursorCol > _lines[_cursorRow].length) {
-      _lines[_cursorRow] = _lines[_cursorRow].padRight(_cursorCol);
+    // 列の拡張（スペース埋め）
+    if (col > _lines[row].length) {
+      _lines[row] = _lines[row].padRight(col);
     }
   }
 
@@ -967,19 +944,13 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
         ); // ゴミ除去
         int pasteWidth = TextUtils.calcTextWidth(textToPaste);
 
-        // 行が足りない場合の処理
-        if (targetRow >= _lines.length) {
-          int needed = targetRow - _lines.length + 1;
-          for (int k = 0; k < needed; k++) _lines.add(""); // 足りない部分に改行を入れる。
-        }
+        // 行拡張とターゲット位置までのスペース埋めを共通関数で行う
+        // ただし、targetVisualX は見た目の幅なので、文字数(col)に変換する必要があるが、
+        // ここでは簡易的に「足りない幅分スペースを足す」という既存ロジックを維持しつつ、
+        // 行拡張部分だけ共通化、あるいは _ensureVirtualSpace を活用する形に修正。
 
-        // 貼り付け前に、必ず targetVisualX までスペースで埋める
-        // これを行わないと、短い行の「末尾」に張り付いてしまい、垂直にならない
-        int currentLineWidth = TextUtils.calcTextWidth(_lines[targetRow]);
-        if (currentLineWidth < targetVisualX) {
-          // 足りない幅の分だけスペースを追加 (半角1文字=幅1前提)
-          int spacesNeeded = targetVisualX - currentLineWidth;
-          _lines[targetRow] += ' ' * spacesNeeded;
+        if (targetRow >= _lines.length) {
+          _ensureVirtualSpace(targetRow, 0); // 行だけ作る
         }
 
         String line = _lines[targetRow]; // 挿入している行
@@ -987,8 +958,11 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
         // ターゲット位置までスペースで埋める (虚空対策)
         int insertIndex = TextUtils.getColFromVisualX(line, targetVisualX);
 
-        // 安全策: indexが行長を超えないようにガード
-        if (insertIndex > line.length) insertIndex = line.length;
+        // 挿入位置までスペースで埋める
+        if (insertIndex > line.length) {
+          _ensureVirtualSpace(targetRow, insertIndex);
+          line = _lines[targetRow]; // 更新された行を再取得
+        }
 
         // 分岐: 挿入と上書きをモードで振り分けて処理
         if (!_isOverwriteMode) {
@@ -1056,16 +1030,8 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
     setState(() {
       // 1. カーソル位置まで埋める (虚空対策)
-      if (_cursorRow >= _lines.length) {
-        int needed = _cursorRow - _lines.length + 1;
-        for (int k = 0; k < needed; k++) _lines.add("");
-      }
+      _ensureVirtualSpace(_cursorRow, _cursorCol);
       String line = _lines[_cursorRow];
-      if (_cursorCol > line.length) {
-        line += ' ' * (_cursorCol - line.length);
-        _lines[_cursorRow] = line;
-        _cursorCol = line.length;
-      }
 
       String prefix = line.substring(0, _cursorCol);
 
@@ -1163,6 +1129,106 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     );
   }
 
+  // 全選択 (Ctrl + A)
+  void _selectAll() {
+    setState(() {
+      _selectionOriginRow = 0;
+      _selectionOriginCol = 0;
+      _cursorRow = _lines.length - 1;
+      _cursorCol = _lines.last.length;
+      _isRectangularSelection = false; // 全選択は通常選択モードで
+
+      // VisualX更新
+      String line = _lines[_cursorRow];
+      _preferredVisualX = TextUtils.calcTextWidth(line);
+    });
+  }
+
+  // --- ファイル操作 ---
+
+  // ファイルを開く
+  Future<void> _openFile() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['txt', 'md', 'dart', 'json', 'xml', 'log'],
+      );
+
+      if (result != null && result.files.single.path != null) {
+        File file = File(result.files.single.path!);
+        String content = await file.readAsString();
+
+        // 履歴に現在の状態を保存（ロードを取り消せるようにする場合）
+        _saveHistory();
+
+        setState(() {
+          _currentFilePath = result.files.single.path!;
+          // 改行コードを統一して分割
+          content = content.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+          _lines = content.split('\n');
+          if (_lines.isEmpty) {
+            _lines = [''];
+          }
+
+          // カーソルリセット
+          _cursorRow = 0;
+          _cursorCol = 0;
+          _preferredVisualX = 0;
+          _selectionOriginRow = null;
+          _selectionOriginCol = null;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error opening file: $e');
+    }
+  }
+
+  // 上書き保存 (Ctrl + S)
+  Future<void> _saveFile() async {
+    // パスがない場合は「名前を付けて保存」へ
+    if (_currentFilePath == null) {
+      await _saveAsFile();
+      return;
+    }
+
+    try {
+      File file = File(_currentFilePath!);
+      String content = _lines.join('\n'); // 改行コードはLFで結合
+      await file.writeAsString(content);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('保存しました: $_currentFilePath'),
+            duration: const Duration(seconds: 1),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error saving file: $e');
+    }
+  }
+
+  // 名前を付けて保存 (Ctrl + Shift + S)
+  Future<void> _saveAsFile() async {
+    try {
+      String? outputFile = await FilePicker.platform.saveFile(
+        dialogTitle: '名前を付けて保存',
+        fileName: 'memo.txt',
+      );
+
+      if (outputFile != null) {
+        setState(() {
+          _currentFilePath = outputFile;
+        });
+        File file = File(outputFile);
+        String content = _lines.join('\n'); // 改行コードはLFで結合
+        await file.writeAsString(content);
+      }
+    } catch (e) {
+      debugPrint('Error saving file: $e');
+    }
+  }
+
   void _activateIme(BuildContext context) {
     if (_inputConnection == null || !_inputConnection!.attached) {
       final viewId = View.of(context).viewId;
@@ -1228,6 +1294,21 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
         title: const Text('Free-form Memo'),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.folder_open),
+            onPressed: _openFile,
+            tooltip: '開く',
+          ),
+          IconButton(
+            icon: const Icon(Icons.save), // 上書き保存
+            onPressed: _saveFile,
+            tooltip: '上書き保存 (Ctrl+S)',
+          ),
+          IconButton(
+            icon: const Icon(Icons.save_as), // 名前を付けて保存
+            onPressed: _saveAsFile,
+            tooltip: '名前を付けて保存 (Ctrl+Shift+S)',
+          ),
           Row(
             children: [
               const Text('Grid'),
@@ -1280,7 +1361,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                   },
                   //ドラッグ開始 (選択範囲の始点を記録)
                   onPanStart: (details) {
-                    _isDragging = true;
+                    //                    _isDragging = true;
                     _resetCursorBlink();
                     _handleTap(details.localPosition);
 
@@ -1300,7 +1381,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                     setState(() {});
                   },
                   onPanEnd: (details) {
-                    _isDragging = false;
+                    //                    _isDragging = false;
                   },
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(
@@ -1389,13 +1470,4 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   void showToolbar() {}
   @override
   AutofillScope? get currentAutofillScope => null;
-}
-
-// 操作履歴管理クラス
-class HistoryEntry {
-  final List<String> lines;
-  final int cursorRow;
-  final int cursorCol;
-
-  HistoryEntry(this.lines, this.cursorRow, this.cursorCol);
 }

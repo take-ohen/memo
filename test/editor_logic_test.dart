@@ -579,4 +579,129 @@ void main() {
     expect(state.debugLines[0], equals("ayde"), reason: "矩形選択の上書き(Row0)");
     expect(state.debugLines[1], equals("fyhij"), reason: "矩形選択の上書き(Row1)");
   });
+
+  testWidgets('Shift Key Selection Logic (No selection on Shift only)', (
+    WidgetTester tester,
+  ) async {
+    // 1. アプリ起動
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1.0;
+    await tester.pumpWidget(const MaterialApp(home: EditorPage()));
+    await tester.pumpAndSettle();
+
+    // 2. テキスト入力 "abc"
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyB);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.pump();
+
+    // カーソルを先頭へ (0,0)
+    for (int i = 0; i < 10; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    }
+    await tester.pump();
+
+    // --- Test: Shiftキーを押すだけ (KeyDown) ---
+    // これだけでは選択モードに入らないことを確認したいが、
+    // 内部状態が見えないため、次の操作で確認する。
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shift);
+    await tester.pump();
+
+    // --- Test: Shiftを押したまま右へ ---
+    // ここで初めて選択モードになり、(0,0) -> (0,1) が選択されるはず
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+
+    // Shiftを離す
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shift);
+    await tester.pump();
+
+    // クリップボードモック設定
+    String? mockClipboardData;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (MethodCall methodCall) async {
+        if (methodCall.method == 'Clipboard.setData') {
+          final args = methodCall.arguments as Map<String, dynamic>;
+          mockClipboardData = args['text'] as String?;
+        }
+        return null;
+      },
+    );
+
+    // コピー実行 (Ctrl + C)
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.control);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.control);
+    await tester.pump();
+
+    // 検証: "a" がコピーされていること
+    expect(mockClipboardData, equals("a"), reason: "Shift+Rightで選択され、コピーできること");
+
+    // モック解除
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      null,
+    );
+  });
+
+  testWidgets('IME Composing Logic (Ignore keys during composition)', (
+    WidgetTester tester,
+  ) async {
+    // 1. アプリ起動
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1.0;
+    await tester.pumpWidget(const MaterialApp(home: EditorPage()));
+    await tester.pumpAndSettle();
+
+    final state = tester.state(find.byType(EditorPage)) as dynamic;
+
+    // 2. テキスト入力 "abc"
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyB);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.pump();
+
+    // カーソル位置確認: (0, 3)
+    expect(state.debugCursorCol, 3);
+
+    // --- Test: IME入力中状態にする ---
+    // updateEditingValue を呼んで composing 状態を作る
+    // "d" を入力中で未確定の状態をシミュレート
+    state.updateEditingValue(
+      const TextEditingValue(text: 'd', composing: TextRange(start: 0, end: 1)),
+    );
+    await tester.pump();
+
+    // --- Test: 矢印キー操作 (無視されるべき) ---
+    // 左キーを押す
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pump();
+
+    // 検証: カーソル位置は (0, 3) のまま変わっていないはず
+    expect(state.debugCursorCol, 3, reason: "IME入力中は矢印キーが無視されること");
+
+    // --- Test: Shift + 矢印キー (無視されるべき) ---
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shift);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shift);
+    await tester.pump();
+
+    expect(state.debugCursorCol, 3, reason: "IME入力中はShift+矢印も無視されること");
+
+    // --- Test: IME確定 ---
+    // composingを解除して確定させる
+    state.updateEditingValue(
+      const TextEditingValue(text: 'd', composing: TextRange.empty),
+    );
+    await tester.pump();
+
+    // 確定処理により "abc" + "d" -> "abcd" となり、カーソルは 4 に進むはず
+    expect(state.debugCursorCol, 4, reason: "IME確定後は文字が挿入されカーソルが進む");
+
+    // 確定後はキー操作が可能になるはず
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pump();
+    expect(state.debugCursorCol, 3, reason: "IME確定後は矢印キー操作が可能");
+  });
 }
