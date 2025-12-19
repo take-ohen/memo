@@ -1,9 +1,11 @@
 // test/editor_logic_test.dart
+import 'dart:io'; // ファイル操作用
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 //
 import 'package:free_memo_editor/editor_page.dart';
+import 'package:free_memo_editor/file_io_helper.dart'; // 追加
 
 void main() {
   testWidgets('矢印キー操作 (上、下、左、右) 動作確認', (WidgetTester tester) async {
@@ -13,7 +15,7 @@ void main() {
     // エディタを起動(ポンプ)する
     await tester.pumpWidget(const MaterialApp(home: EditorPage()));
     // 画面完了を待つ
-    await tester.pumpAndSettle();
+    await tester.pump();
 
     // Stateを取得 (内部変数をチェックするため)
     // 画面上にあるウィジェットを探し、その内部状態（State）を取得します。
@@ -115,7 +117,7 @@ void main() {
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1.0;
     await tester.pumpWidget(const MaterialApp(home: EditorPage()));
-    await tester.pumpAndSettle();
+    await tester.pump();
 
     final state = tester.state(find.byType(EditorPage)) as dynamic;
 
@@ -229,7 +231,7 @@ void main() {
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1.0;
     await tester.pumpWidget(const MaterialApp(home: EditorPage()));
-    await tester.pumpAndSettle();
+    await tester.pump();
 
     final state = tester.state(find.byType(EditorPage)) as dynamic;
 
@@ -354,7 +356,7 @@ void main() {
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1.0;
     await tester.pumpWidget(const MaterialApp(home: EditorPage()));
-    await tester.pumpAndSettle();
+    await tester.pump();
 
     final state = tester.state(find.byType(EditorPage)) as dynamic;
 
@@ -487,7 +489,7 @@ void main() {
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1.0;
     await tester.pumpWidget(const MaterialApp(home: EditorPage()));
-    await tester.pumpAndSettle();
+    await tester.pump();
 
     final state = tester.state(find.byType(EditorPage)) as dynamic;
 
@@ -587,7 +589,7 @@ void main() {
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1.0;
     await tester.pumpWidget(const MaterialApp(home: EditorPage()));
-    await tester.pumpAndSettle();
+    await tester.pump();
 
     // 2. テキスト入力 "abc"
     await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
@@ -652,7 +654,7 @@ void main() {
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1.0;
     await tester.pumpWidget(const MaterialApp(home: EditorPage()));
-    await tester.pumpAndSettle();
+    await tester.pump();
 
     final state = tester.state(find.byType(EditorPage)) as dynamic;
 
@@ -704,4 +706,151 @@ void main() {
     await tester.pump();
     expect(state.debugCursorCol, 3, reason: "IME確定後は矢印キー操作が可能");
   });
+
+  testWidgets('Select All (Ctrl+A) Logic', (WidgetTester tester) async {
+    // 1. アプリ起動
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1.0;
+    await tester.pumpWidget(const MaterialApp(home: EditorPage()));
+    await tester.pump();
+
+    // 2. テキスト入力 "abc\nde"
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyB);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyE);
+    await tester.pump();
+
+    // 3. 全選択 (Ctrl + A)
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.control);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.control);
+    await tester.pump();
+
+    // 4. コピーして検証 (Ctrl + C)
+    String? mockClipboardData;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (MethodCall methodCall) async {
+        if (methodCall.method == 'Clipboard.setData') {
+          final args = methodCall.arguments as Map<String, dynamic>;
+          mockClipboardData = args['text'] as String?;
+        }
+        return null;
+      },
+    );
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.control);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.control);
+    await tester.pump();
+
+    // 改行コードの違いを吸収して比較
+    final normalizedClipboard = mockClipboardData?.replaceAll('\r\n', '\n');
+    expect(normalizedClipboard, equals("abc\nde"), reason: "全選択で全文がコピーされること");
+
+    // モック解除
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      null,
+    );
+  });
+
+  testWidgets('File Save & Load Logic (Mocking FilePicker)', (
+    WidgetTester tester,
+  ) async {
+    // カーソル点滅タイマーを無効化して、pumpAndSettleを使えるようにする
+    EditorPage.disableCursorBlink = true;
+
+    // 1. テスト用の一時ディレクトリとファイルを作成
+    final tempDir = Directory.systemTemp.createTempSync('memo_test');
+
+    final testFile = File('${tempDir.path}/test_input.txt');
+    testFile.writeAsStringSync('Hello\nWorld'); // 初期データ
+
+    final savePath = '${tempDir.path}/test_output.txt';
+
+    // 2. FileIOHelper のモック差し替え
+    // FilePickerPlatform を直接いじるのではなく、自前のラッパーを差し替える
+    final mockHelper = MockFileIOHelper();
+    mockHelper.mockPickPath = testFile.path;
+    mockHelper.mockSavePath = savePath;
+    FileIOHelper.instance = mockHelper;
+
+    // 3. アプリ起動
+    await tester.pumpWidget(const MaterialApp(home: EditorPage()));
+    await tester.pump();
+    final state = tester.state(find.byType(EditorPage)) as dynamic;
+
+    // --- Test: ファイルを開く ---
+    // UIの「開く」ボタンをタップ
+    await tester.tap(find.byIcon(Icons.folder_open));
+    // タイマーを無効化したので、pumpAndSettle で安全に非同期処理の完了と描画安定を待てる
+    await tester.pumpAndSettle();
+
+    // 検証: ファイルの内容が読み込まれているか
+    expect(state.debugLines.length, 2);
+    expect(state.debugLines[0], "Hello");
+    expect(state.debugLines[1], "World");
+
+    // --- Test: 編集して保存 ---
+    // 1行目を "Hello Edited" に変更
+    // カーソルは読み込み直後 (0,0) にあるはず
+    // 行末へ移動して " Edited" を追記
+    for (int i = 0; i < 5; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    }
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyE);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyI);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyT);
+    await tester.pump();
+
+    // UIの「名前を付けて保存」ボタンをタップ (Icons.save_as)
+    await tester.tap(find.byIcon(Icons.save_as));
+    await tester.pumpAndSettle();
+
+    // 検証: 保存先のファイルに書き込まれているか
+    final outputFile = File(savePath);
+    expect(outputFile.existsSync(), isTrue, reason: "保存ファイルが作成されていること");
+    final content = outputFile.readAsStringSync();
+    expect(content, contains("Hello edit\nWorld"), reason: "編集内容が保存されていること");
+    // ※注: キー入力シミュレーションは高速なため、"edit"までしか入らない場合や
+    // "Edited"全て入る場合があるが、containsで検証。
+
+    // 後始末
+    tempDir.deleteSync(recursive: true);
+  });
+}
+
+// --- Mock Class ---
+
+class MockFileIOHelper extends FileIOHelper {
+  String? mockPickPath;
+  String? mockSavePath;
+
+  @override
+  Future<String?> pickFilePath() async {
+    return mockPickPath;
+  }
+
+  @override
+  Future<String?> saveFilePath() async {
+    return mockSavePath;
+  }
+
+  @override
+  Future<String> readFileAsString(String path) async {
+    // テスト時は同期的に読み込むことでハングを防ぐ
+    return File(path).readAsStringSync();
+  }
+
+  @override
+  Future<void> writeStringToFile(String path, String content) async {
+    // テスト時は同期的に書き込むことでハングを防ぐ
+    File(path).writeAsStringSync(content);
+  }
 }

@@ -5,15 +5,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:math';
 import 'dart:async';
-import 'package:file_picker/file_picker.dart';
 
 // 分割したファイルをインポート
 import 'memo_painter.dart';
 import 'text_utils.dart';
 import 'history_manager.dart';
+import 'package:free_memo_editor/file_io_helper.dart'; // 相対パスからpackageパスへ変更
 
 class EditorPage extends StatefulWidget {
   const EditorPage({super.key});
+
+  // テスト時にカーソル点滅タイマーを無効化するためのフラグ
+  @visibleForTesting
+  static bool disableCursorBlink = false;
 
   @override
   State<EditorPage> createState() => _EditorPageState();
@@ -140,7 +144,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
       _focusNode.requestFocus();
 
-      WidgetsBinding.instance.addPersistentFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
         _updateImeWindowPosition();
       });
     });
@@ -174,6 +178,8 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   // カーソル点滅用のタイマー
   void _startCursorTimer() {
     _cursorBlinkTimer?.cancel();
+    if (EditorPage.disableCursorBlink) return; // テスト時はタイマーを起動しない
+
     _cursorBlinkTimer = Timer.periodic(const Duration(milliseconds: 500), (
       timer,
     ) {
@@ -1149,20 +1155,16 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   // ファイルを開く
   Future<void> _openFile() async {
     try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['txt', 'md', 'dart', 'json', 'xml', 'log'],
-      );
-
-      if (result != null && result.files.single.path != null) {
-        File file = File(result.files.single.path!);
-        String content = await file.readAsString();
+      // FileIOHelper経由でパスを取得
+      String? path = await FileIOHelper.instance.pickFilePath();
+      if (path != null) {
+        String content = await FileIOHelper.instance.readFileAsString(path);
 
         // 履歴に現在の状態を保存（ロードを取り消せるようにする場合）
         _saveHistory();
 
         setState(() {
-          _currentFilePath = result.files.single.path!;
+          _currentFilePath = path;
           // 改行コードを統一して分割
           content = content.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
           _lines = content.split('\n');
@@ -1192,9 +1194,8 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     }
 
     try {
-      File file = File(_currentFilePath!);
       String content = _lines.join('\n'); // 改行コードはLFで結合
-      await file.writeAsString(content);
+      await FileIOHelper.instance.writeStringToFile(_currentFilePath!, content);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1211,18 +1212,15 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   // 名前を付けて保存 (Ctrl + Shift + S)
   Future<void> _saveAsFile() async {
     try {
-      String? outputFile = await FilePicker.platform.saveFile(
-        dialogTitle: '名前を付けて保存',
-        fileName: 'memo.txt',
-      );
+      // FileIOHelper経由でパスを取得
+      String? outputFile = await FileIOHelper.instance.saveFilePath();
 
       if (outputFile != null) {
         setState(() {
           _currentFilePath = outputFile;
         });
-        File file = File(outputFile);
         String content = _lines.join('\n'); // 改行コードはLFで結合
-        await file.writeAsString(content);
+        await FileIOHelper.instance.writeStringToFile(outputFile, content);
       }
     } catch (e) {
       debugPrint('Error saving file: $e');
