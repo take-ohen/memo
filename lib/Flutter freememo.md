@@ -15355,3 +15355,152 @@ flutter pub add file_picker:^3.0.0-nullsafety.2
 ✅ IOの抽象化: FileIOHelper クラスを作成し、アプリから直接 FilePicker や File を触らないようにした。
 ✅ 同期処理への置換: テスト用モック（MockFileIOHelper）では、読み書きを 同期処理 (readAsStringSync, writeAsStringSync) に差し替えた。これにより、非同期待ちの問題を根本から排除した。
 
+## はい、ログを削除してコードを整理して。
+
+Gemini 2.5 generated this response due to high traffic on Gemini 3
+
+承知いたしました。 テストが成功し、原因究明のためのログが不要になったので、コードをクリーンな状態に戻します。
+
+以下の2ファイルから、調査のために追加した print 文を削除します。
+
+💻 コードの修正
+1. lib/editor_page.dart
+editor_page.dart
+-7
++0
+
+  // ファイルを開く
+  Future<void> _openFile() async {
+    print('DEBUG: _openFile called');
+    try {
+      // FileIOHelper経由でパスを取得
+      String? path = await FileIOHelper.instance.pickFilePath();
+      print('DEBUG: pickFilePath result: $path');
+      if (path != null) {
+        String content = await FileIOHelper.instance.readFileAsString(path);
+        print('DEBUG: file content read. length: ${content.length}');
+
+        // 履歴に現在の状態を保存（ロードを取り消せるようにする場合）
+        _saveHistory();
+          if (_lines.isEmpty) {
+            _lines = [''];
+          }
+          print('DEBUG: _lines updated. count: ${_lines.length}');
+
+          // カーソルリセット
+          _cursorRow = 0;
+          _selectionOriginRow = null;
+          _selectionOriginCol = null;
+        });
+      } else {
+        print('DEBUG: path is null');
+      }
+    } catch (e) {
+      debugPrint('Error opening file: $e');
+      print('DEBUG: Error opening file: $e');
+    }
+  }
+
+
+2. test/editor_logic_test.dart
+editor_logic_test.dart
+-17
++0
+  testWidgets('File Save & Load Logic (Mocking FilePicker)', (
+    WidgetTester tester,
+  ) async {
+    print('=== TEST START: File Save & Load Logic ===');
+    // カーソル点滅タイマーを無効化して、pumpAndSettleを使えるようにする
+    EditorPage.disableCursorBlink = true;
+
+    // 1. テスト用の一時ディレクトリとファイルを作成
+    print('Step: Creating temp dir...');
+    final tempDir = Directory.systemTemp.createTempSync('memo_test');
+    print('Step: Temp dir created: ${tempDir.path}');
+
+    final testFile = File('${tempDir.path}/test_input.txt');
+    print('Step: Writing to file...');
+    testFile.writeAsStringSync('Hello\nWorld'); // 初期データ
+    print('Step: File written');
+
+    final savePath = '${tempDir.path}/test_output.txt';
+
+    // 2. FileIOHelper のモック差し替え
+    // FilePickerPlatform を直接いじるのではなく、自前のラッパーを差し替える
+    print('Step: Setting up Mock...');
+    final mockHelper = MockFileIOHelper();
+    mockHelper.mockPickPath = testFile.path;
+    mockHelper.mockSavePath = savePath;
+    FileIOHelper.instance = mockHelper;
+    print('Step: Mock setup done');
+
+    // 3. アプリ起動
+    print('Step: pumpWidget');
+    await tester.pumpWidget(const MaterialApp(home: EditorPage()));
+    await tester.pump();
+    print('Step: Initial pump done');
+    final state = tester.state(find.byType(EditorPage)) as dynamic;
+
+    // --- Test: ファイルを開く ---
+    // UIの「開く」ボタンをタップ
+    print('Step: Tap Open Button');
+    await tester.tap(find.byIcon(Icons.folder_open));
+    // タイマーを無効化したので、pumpAndSettle で安全に非同期処理の完了と描画安定を待てる
+    print('Step: Waiting for Open File (pumpAndSettle)');
+    await tester.pumpAndSettle();
+    print('Step: Open File Done');
+
+    // 検証: ファイルの内容が読み込まれているか
+    expect(state.debugLines.length, 2);
+    await tester.pump();
+
+    // UIの「名前を付けて保存」ボタンをタップ (Icons.save_as)
+    print('Step: Tap Save As Button');
+    await tester.tap(find.byIcon(Icons.save_as));
+    print('Step: Waiting for Save File (pumpAndSettle)');
+    await tester.pumpAndSettle();
+    print('Step: Save File Done');
+
+    // 検証: 保存先のファイルに書き込まれているか
+    final outputFile = File(savePath);
+
+  @override
+  Future<String?> pickFilePath() async {
+    print('DEBUG: Mock pickFilePath called. returning: $mockPickPath');
+    return mockPickPath;
+  }
+
+  @override
+  Future<String?> saveFilePath() async {
+    print('DEBUG: Mock saveFilePath called. returning: $mockSavePath');
+    return mockSavePath;
+  }
+
+
+🚀 次のアクション
+これでコードが整理され、次の大きなステップであるリファクタリング（EditorControllerの導入）に進む準備が整いました。
+
+## リファクタリングを実施して。
+
+リファクタリング、承知いたしました。 ついにこの時が来ましたね。テストでロジックを固めた今こそ、肥大化した EditorPage を整理する絶好の機会です。
+
+方針：MVCパターンへの移行（Controllerの導入）
+
+現在の EditorPage は、画面の描画（View）と、テキスト編集のロジック（Model/Controller）が混在しており、コードが読みづらくなっています。 これを分離するために、EditorController という新しいクラスを作成します。
+
+具体的な手順:
+
+1. lib/editor_controller.dart の作成:
+
+データ（状態）の移動: _lines（テキストデータ）、_cursorRow/Col（カーソル位置）、_selectionOrigin...（選択範囲）、_historyManager（履歴）などをこのクラスに移します。
+ロジックの移動: insertText（文字入力）、deleteSelection（削除）、moveCursor（移動）、copy/paste（コピペ）、undo/redo などの操作メソッドをこちらに実装します。
+
+2. lib/editor_page.dart の修正:
+
+ロジック部分を削除し、代わりに EditorController のインスタンスを保持します。
+キーボードやマウスの入力イベントを受け取ったら、controller.insertText(...) のようにコントローラーに依頼し、その直後に setState を呼んで画面を更新する形に変更します。
+メリット:
+
+コードがスッキリする: EditorPage は「入力と表示」に集中でき、見通しが良くなります。
+テストがさらに容易になる: UIを通さずに EditorController 単体でロジックのテストが可能になります（今回の FileIOHelper のように）。
+この「EditorController を導入してロジックを分離する」方針で、コードを作成してもよろしいでしょうか？
