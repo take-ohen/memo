@@ -49,6 +49,12 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     color: Colors.black,
   );
 
+  static const _lineNumberStyle = TextStyle(
+    fontFamily: 'BIZ UDゴシック',
+    fontSize: 16.0,
+    color: Colors.grey,
+  );
+
   // テスト専用のゲッター(抜け道)
   @visibleForTesting
   int get debugCursorCol => _controller.cursorCol;
@@ -286,6 +292,10 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
   @override
   Widget build(BuildContext context) {
+    // 行番号エリアの幅を計算 (桁数 * 文字幅 + パディング)
+    int digits = _controller.lines.length.toString().length;
+    double lineNumberAreaWidth = digits * _charWidth + 20.0;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Free-form Memo'),
@@ -317,6 +327,25 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
               ),
             ],
           ),
+          PopupMenuButton<int>(
+            tooltip: 'タブ幅設定',
+            icon: const Icon(Icons.space_bar),
+            onSelected: (value) {
+              _controller.setTabWidth(value);
+            },
+            itemBuilder: (context) => [
+              CheckedPopupMenuItem(
+                checked: _controller.tabWidth == 2,
+                value: 2,
+                child: const Text('Tab Width: 2'),
+              ),
+              CheckedPopupMenuItem(
+                checked: _controller.tabWidth == 4,
+                value: 4,
+                child: const Text('Tab Width: 4'),
+              ),
+            ],
+          ),
         ],
       ),
       body: Scrollbar(
@@ -331,93 +360,119 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
           child: SingleChildScrollView(
             controller: _verticalScrollController,
             scrollDirection: Axis.vertical,
-            child: Focus(
-              focusNode: _focusNode,
-              onKeyEvent: (FocusNode node, KeyEvent event) {
-                final result = _handleKeyPress(event);
-                return result;
-              },
-              child: SingleChildScrollView(
-                controller: _horizontalScrollController,
-                scrollDirection: Axis.horizontal,
-                child: GestureDetector(
-                  // タップダウン； カーソル移動＆選択解除
-                  onTapDown: (details) {
-                    _resetCursorBlink();
-                    _controller.clearSelection();
-                    _controller.handleTap(
-                      details.localPosition,
-                      _charWidth,
-                      _lineHeight,
-                    );
-                    _focusNode.requestFocus();
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      _updateImeWindowPosition();
-                    });
-                  },
-                  //ドラッグ開始 (選択範囲の始点を記録)
-                  onPanStart: (details) {
-                    _resetCursorBlink();
-                    _controller.handlePanStart(
-                      details.localPosition,
-                      _charWidth,
-                      _lineHeight,
-                      HardwareKeyboard.instance.isAltPressed,
-                    );
-                    _focusNode.requestFocus();
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      _updateImeWindowPosition();
-                    });
-                  },
-                  // ドラッグ中(カーソル位置を更新=選択範囲の最終位置が変わる)
-                  onPanUpdate: (details) {
-                    _resetCursorBlink();
-                    _controller.handleTap(
-                      details.localPosition,
-                      _charWidth,
-                      _lineHeight,
-                    );
-                    // ドラッグ中はフォーカス要求は不要だが、IME位置更新は必要かもしれない
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      _updateImeWindowPosition();
-                    });
-                  },
-                  onPanEnd: (details) {
-                    //                    _isDragging = false;
-                  },
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(
-                      minWidth: 2000,
-                      minHeight: 2000,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // --- 行番号エリア ---
+                Container(
+                  width: lineNumberAreaWidth,
+                  color: Colors.grey.shade200,
+                  child: CustomPaint(
+                    size: Size(
+                      lineNumberAreaWidth,
+                      _controller.lines.length * _lineHeight,
                     ),
-                    child: CustomPaint(
-                      key: _painterKey,
-                      painter: MemoPainter(
-                        lines: _controller.lines,
-                        charWidth: _charWidth,
-                        charHeight: _charHeight,
-                        showGrid: _controller.showGrid,
-                        isOverwriteMode: _controller.isOverwriteMode,
-                        cursorRow: _controller.cursorRow,
-                        cursorCol: _controller.cursorCol,
-                        lineHeight: _lineHeight,
-                        textStyle: _textStyle,
-                        composingText: _controller.composingText,
-                        selectionOriginRow: _controller.selectionOriginRow,
-                        selectionOriginCol: _controller.selectionOriginCol,
-                        showCursor: _showCursor,
-                        isRectangularSelection:
-                            _controller.isRectangularSelection,
-                      ),
-                      size: Size.infinite,
-                      child: Container(
-                        // 画面全体のタッチ判定を有効にするため、透明または白の色を指定
-                        color: Colors.transparent,
+                    painter: LineNumberPainter(
+                      lineCount: _controller.lines.length,
+                      lineHeight: _lineHeight,
+                      textStyle: _lineNumberStyle,
+                    ),
+                  ),
+                ),
+                // --- エディタエリア ---
+                Expanded(
+                  child: Focus(
+                    focusNode: _focusNode,
+                    onKeyEvent: (FocusNode node, KeyEvent event) {
+                      final result = _handleKeyPress(event);
+                      return result;
+                    },
+                    child: SingleChildScrollView(
+                      controller: _horizontalScrollController,
+                      scrollDirection: Axis.horizontal,
+                      child: GestureDetector(
+                        // タップダウン； カーソル移動＆選択解除
+                        onTapDown: (details) {
+                          _resetCursorBlink();
+                          _controller.clearSelection();
+                          _controller.handleTap(
+                            details.localPosition,
+                            _charWidth,
+                            _lineHeight,
+                          );
+                          _focusNode.requestFocus();
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            _updateImeWindowPosition();
+                          });
+                        },
+                        //ドラッグ開始 (選択範囲の始点を記録)
+                        onPanStart: (details) {
+                          _resetCursorBlink();
+                          _controller.handlePanStart(
+                            details.localPosition,
+                            _charWidth,
+                            _lineHeight,
+                            HardwareKeyboard.instance.isAltPressed,
+                          );
+                          _focusNode.requestFocus();
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            _updateImeWindowPosition();
+                          });
+                        },
+                        // ドラッグ中(カーソル位置を更新=選択範囲の最終位置が変わる)
+                        onPanUpdate: (details) {
+                          _resetCursorBlink();
+                          _controller.handleTap(
+                            details.localPosition,
+                            _charWidth,
+                            _lineHeight,
+                          );
+                          // ドラッグ中はフォーカス要求は不要だが、IME位置更新は必要かもしれない
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            _updateImeWindowPosition();
+                          });
+                        },
+                        onPanEnd: (details) {
+                          //                    _isDragging = false;
+                        },
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(
+                            minWidth: 2000,
+                            minHeight: 2000,
+                          ),
+                          child: CustomPaint(
+                            key: _painterKey,
+                            painter: MemoPainter(
+                              lines: _controller.lines,
+                              charWidth: _charWidth,
+                              charHeight: _charHeight,
+                              showGrid: _controller.showGrid,
+                              isOverwriteMode: _controller.isOverwriteMode,
+                              cursorRow: _controller.cursorRow,
+                              cursorCol: _controller.cursorCol,
+                              lineHeight: _lineHeight,
+                              textStyle: _textStyle,
+                              composingText: _controller.composingText,
+                              selectionOriginRow:
+                                  _controller.selectionOriginRow,
+                              selectionOriginCol:
+                                  _controller.selectionOriginCol,
+                              showCursor: _showCursor,
+                              isRectangularSelection:
+                                  _controller.isRectangularSelection,
+                            ),
+                            size: Size.infinite,
+                            child: Container(
+                              // 画面全体のタッチ判定を有効にするため、透明または白の色を指定
+                              color: Colors.transparent,
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
+              ],
             ),
           ),
         ),

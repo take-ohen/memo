@@ -17748,3 +17748,683 @@ editor_page.dart
 
 最後に flutter test を実行して、すべての機能が正常に動作することを確認してください。
 
+## テストは完了。さて、次は？
+
+リファクタリングの完了、お疲れ様でした！ これで EditorPage（見た目）と EditorController（ロジック）が綺麗に分離され、今後の機能追加やテストが非常にやりやすい強固な土台が完成しました。
+
+さて、次に取り組むべき機能拡張ですが、以前挙がっていたアイデアの中から、優先度が高く、エディタとしての完成度をぐっと高めるものをいくつか提案します。
+
+どれから着手しましょうか？
+
+🚀 次の機能候補
+行番号の表示 (Line Numbers)
+
+概要: 画面左端に行番号を表示します。
+実装: 左側に固定領域を作り、スクロールに合わせて番号を描画します。エディタらしさが一気に増します。
+難易度: 中（レイアウト調整とPainterの追加が必要）
+Tabキー対応 (Tab Support)
+
+概要: Tab キーでインデント（字下げ）を行えるようにします。
+実装: 現在はフォーカス移動に使われてしまっている Tab キーを捕捉し、スペース（例: 4つ）を挿入する処理などを実装します。
+難易度: 低〜中（矩形選択時のTab挙動などをどうするかによる）
+メニューバー化 (Menu Bar)
+
+概要: AppBarのアイコンが増えてきたので、Windowsアプリのような File, Edit, View といったメニューバーに整理します。
+実装: flutter_menu などのパッケージを使うか、自前でUIを組みます。
+難易度: 中（UI構造の変更）
+検索・置換 (Find & Replace)
+
+概要: テキスト内の文字列を検索し、ハイライトしたり置換したりします。
+実装: 検索窓のUIと、検索ロジックの実装。
+難易度: 高（ハイライト描画やスクロールジャンプなど）
+私のおすすめは「1. 行番号の表示」です。 リファクタリングで描画周りも整理された今なら、スムーズに実装できるはずです。また、見た目の変化が大きく、達成感があります。
+
+いかがいたしますか？
+
+## 「行番号の表示」を実装したいです。方針を提案してください。
+
+
+「行番号の表示」の実装、素晴らしいですね。エディタとしての完成度が一段と高まります。
+
+ご提案いただいた機能を実現するために、以下の方針を提案します。
+
+🏗️ 実装方針：Rowウィジェットによるエリア分割
+現在の「全体が1つのキャンバス」という構造から、「行番号エリア」と「エディタエリア」を横に並べる構造に変更します。
+
+変更後の構造イメージ
+mermaid
+ Show full code block 
+:::mermaid
+graph TD
+    VerticalScroll[縦スクロール SingleChildScrollView] --> Focus[キー入力検知 Focus]
+    Focus --> Row[横並び配置 Row]
+    
+    Row --> LineNumber[1. 行番号エリア 固定幅]
+    Row --> HorizontalScroll[2. エディタエリア Expanded & 横スクロール]
+    
+    HorizontalScroll --> EditorCanvas[描画キャンバス CustomPaint]
+:::
+この構造のメリット
+
+スクロールの自然な同期:
+
+全体が「縦スクロール」の中に入っているため、スクロールすれば行番号と本文が一緒に上下します。複雑な同期処理（LinkedScrollControllerなど）が不要です。
+
+横スクロールの分離:
+
+エディタ部分だけが「横スクロール」の中にあるため、長い行を右にスクロールしても、行番号は左端に固定されたままになります。
+
+📝 具体的な作業手順
+
+lib/memo_painter.dart の修正:
+  
+  行番号を描画するための専用クラス LineNumberPainter を追加します。
+
+lib/editor_page.dart の修正:
+
+  build メソッド内のウィジェットツリーを組み替え、Row を使って行番号とエディタを配置します。
+
+  この方針で実装を進めてよろしいでしょうか
+
+## mermaidに半角丸括弧が入るとエラーになるんだよね。
+
+指摘ありがとうございます。 Mermaid記法において半角丸括弧 () はノードの形状指定などに使われる特殊文字であるため、テキストとして表示する場合は ""（ダブルクォーテーション）で囲む必要があります。以後の出力では注意いたします。
+
+それでは、**「行番号の表示」**の実装に進みます。 方針通り、Row ウィジェットを使用して画面を「行番号エリア」と「エディタエリア」に分割し、縦スクロールを同期させつつ、横スクロールを分離します。
+
+📝 実装内容
+lib/memo_painter.dart:
+行番号を描画するための LineNumberPainter クラスを追加します。
+lib/editor_page.dart:
+build メソッド内のウィジェットツリーを組み替え、Row を配置します。
+行番号エリアの幅を、現在の行数（桁数）に基づいて計算するようにします。
+
+## 修正内容
+lib/memo_painter.dart:
+行番号を描画するための LineNumberPainter クラスを追加します。
+lib/editor_page.dart:
+行番号用のスタイル _lineNumberStyle を追加します。
+build メソッド内で、行番号エリアの幅を計算します。
+SingleChildScrollView (垂直) の子要素を Row に変更し、左側に「行番号エリア」、右側に「エディタエリア（Expanded）」を配置します。
+memo_painter.dart
+-0
++36
+```
+        oldDelegate.isRectangularSelection != isRectangularSelection;
+  }
+}
+
+class LineNumberPainter extends CustomPainter {
+  final int lineCount;
+  final double lineHeight;
+  final TextStyle textStyle;
+
+  LineNumberPainter({
+    required this.lineCount,
+    required this.lineHeight,
+    required this.textStyle,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (int i = 0; i < lineCount; i++) {
+      final textSpan = TextSpan(
+        text: '${i + 1}',
+        style: textStyle,
+      );
+      final textPainter = TextPainter(
+        text: textSpan,
+        textDirection: TextDirection.ltr,
+        textAlign: TextAlign.right,
+      );
+      textPainter.layout(minWidth: size.width);
+      textPainter.paint(canvas, Offset(0, i * lineHeight));
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant LineNumberPainter oldDelegate) {
+    return oldDelegate.lineCount != lineCount ||
+        oldDelegate.lineHeight != lineHeight ||
+        oldDelegate.textStyle != textStyle;
+  }
+}
+editor_page.dart
+-83
++115
+    color: Colors.black,
+  );
+
+  static const _lineNumberStyle = TextStyle(
+    fontFamily: 'BIZ UDゴシック',
+    fontSize: 16.0,
+    color: Colors.grey,
+  );
+
+  // テスト専用のゲッター(抜け道)
+  @visibleForTesting
+  int get debugCursorCol => _controller.cursorCol;
+
+  @override
+  Widget build(BuildContext context) {
+    // 行番号エリアの幅を計算 (桁数 * 文字幅 + パディング)
+    int digits = _controller.lines.length.toString().length;
+    double lineNumberAreaWidth = digits * _charWidth + 20.0;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Free-form Memo'),
+          child: SingleChildScrollView(
+            controller: _verticalScrollController,
+            scrollDirection: Axis.vertical,
+            child: Focus(
+              focusNode: _focusNode,
+              onKeyEvent: (FocusNode node, KeyEvent event) {
+                final result = _handleKeyPress(event);
+                return result;
+              },
+              child: SingleChildScrollView(
+                controller: _horizontalScrollController,
+                scrollDirection: Axis.horizontal,
+                child: GestureDetector(
+                  // タップダウン； カーソル移動＆選択解除
+                  onTapDown: (details) {
+                    _resetCursorBlink();
+                    _controller.clearSelection();
+                    _controller.handleTap(
+                      details.localPosition,
+                      _charWidth,
+                      _lineHeight,
+                    );
+                    _focusNode.requestFocus();
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      _updateImeWindowPosition();
+                    });
+                  },
+                  //ドラッグ開始 (選択範囲の始点を記録)
+                  onPanStart: (details) {
+                    _resetCursorBlink();
+                    _controller.handlePanStart(
+                      details.localPosition,
+                      _charWidth,
+                      _lineHeight,
+                      HardwareKeyboard.instance.isAltPressed,
+                    );
+                    _focusNode.requestFocus();
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      _updateImeWindowPosition();
+                    });
+                  },
+                  // ドラッグ中(カーソル位置を更新=選択範囲の最終位置が変わる)
+                  onPanUpdate: (details) {
+                    _resetCursorBlink();
+                    _controller.handleTap(
+                      details.localPosition,
+                      _charWidth,
+                      _lineHeight,
+                    );
+                    // ドラッグ中はフォーカス要求は不要だが、IME位置更新は必要かもしれない
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      _updateImeWindowPosition();
+                    });
+                  },
+                  onPanEnd: (details) {
+                    //                    _isDragging = false;
+                  },
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      minWidth: 2000,
+                      minHeight: 2000,
+                    ),
+                    child: CustomPaint(
+                      key: _painterKey,
+                      painter: MemoPainter(
+                        lines: _controller.lines,
+                        charWidth: _charWidth,
+                        charHeight: _charHeight,
+                        showGrid: _controller.showGrid,
+                        isOverwriteMode: _controller.isOverwriteMode,
+                        cursorRow: _controller.cursorRow,
+                        cursorCol: _controller.cursorCol,
+                        lineHeight: _lineHeight,
+                        textStyle: _textStyle,
+                        composingText: _controller.composingText,
+                        selectionOriginRow: _controller.selectionOriginRow,
+                        selectionOriginCol: _controller.selectionOriginCol,
+                        showCursor: _showCursor,
+                        isRectangularSelection:
+                            _controller.isRectangularSelection,
+                      ),
+                      size: Size.infinite,
+                      child: Container(
+                        // 画面全体のタッチ判定を有効にするため、透明または白の色を指定
+                        color: Colors.transparent,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // --- 行番号エリア ---
+                Container(
+                  width: lineNumberAreaWidth,
+                  color: Colors.grey.shade200,
+                  child: CustomPaint(
+                    size: Size(lineNumberAreaWidth,
+                        _controller.lines.length * _lineHeight),
+                    painter: LineNumberPainter(
+                      lineCount: _controller.lines.length,
+                      lineHeight: _lineHeight,
+                      textStyle: _lineNumberStyle,
+                    ),
+                  ),
+                ),
+                // --- エディタエリア ---
+                Expanded(
+                  child: Focus(
+                    focusNode: _focusNode,
+                    onKeyEvent: (FocusNode node, KeyEvent event) {
+                      final result = _handleKeyPress(event);
+                      return result;
+                    },
+                    child: SingleChildScrollView(
+                      controller: _horizontalScrollController,
+                      scrollDirection: Axis.horizontal,
+                      child: GestureDetector(
+                        // タップダウン； カーソル移動＆選択解除
+                        onTapDown: (details) {
+                          _resetCursorBlink();
+                          _controller.clearSelection();
+                          _controller.handleTap(
+                            details.localPosition,
+                            _charWidth,
+                            _lineHeight,
+                          );
+                          _focusNode.requestFocus();
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            _updateImeWindowPosition();
+                          });
+                        },
+                        //ドラッグ開始 (選択範囲の始点を記録)
+                        onPanStart: (details) {
+                          _resetCursorBlink();
+                          _controller.handlePanStart(
+                            details.localPosition,
+                            _charWidth,
+                            _lineHeight,
+                            HardwareKeyboard.instance.isAltPressed,
+                          );
+                          _focusNode.requestFocus();
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            _updateImeWindowPosition();
+                          });
+                        },
+                        // ドラッグ中(カーソル位置を更新=選択範囲の最終位置が変わる)
+                        onPanUpdate: (details) {
+                          _resetCursorBlink();
+                          _controller.handleTap(
+                            details.localPosition,
+                            _charWidth,
+                            _lineHeight,
+                          );
+                          // ドラッグ中はフォーカス要求は不要だが、IME位置更新は必要かもしれない
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            _updateImeWindowPosition();
+                          });
+                        },
+                        onPanEnd: (details) {
+                          //                    _isDragging = false;
+                        },
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(
+                            minWidth: 2000,
+                            minHeight: 2000,
+                          ),
+                          child: CustomPaint(
+                            key: _painterKey,
+                            painter: MemoPainter(
+                              lines: _controller.lines,
+                              charWidth: _charWidth,
+                              charHeight: _charHeight,
+                              showGrid: _controller.showGrid,
+                              isOverwriteMode: _controller.isOverwriteMode,
+                              cursorRow: _controller.cursorRow,
+                              cursorCol: _controller.cursorCol,
+                              lineHeight: _lineHeight,
+                              textStyle: _textStyle,
+                              composingText: _controller.composingText,
+                              selectionOriginRow: _controller.selectionOriginRow,
+                              selectionOriginCol: _controller.selectionOriginCol,
+                              showCursor: _showCursor,
+                              isRectangularSelection:
+                                  _controller.isRectangularSelection,
+                            ),
+                            size: Size.infinite,
+                            child: Container(
+                              // 画面全体のタッチ判定を有効にするため、透明または白の色を指定
+                              color: Colors.transparent,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              ],
+            ),
+          ),
+        ),
+```
+
+## これのテストプログラムができるのか？
+
+はい、行番号表示機能のテストプログラムを作成することは可能です。
+
+ただし、行番号は Text ウィジェットではなく CustomPainter を使ってキャンバスに直接描画しているため、通常の「文字を探すテスト（find.text）」では検出できません。
+
+そのため、以下の方針でテストを作成することを提案します。
+
+🧪 テスト方針：Painterの状態確認
+描画された「絵」を判定する代わりに、**「行番号を描画するクラス（LineNumberPainter）に、正しい行数が渡されているか」**を検証します。
+
+ウィジェットの特定:
+画面内から LineNumberPainter を使用している CustomPaint ウィジェットを探し出します。
+プロパティの検証:
+その Painter が持っている lineCount（行数）プロパティが、エディタの行数と一致しているかを確認します。
+例：3行入力したら、Painterにも「3行分描画しろ」という命令が渡っているかをテストします。
+この方法であれば、画像比較などの複雑な手順なしに、ロジックが正しく動いているかを確実にテストできます。
+
+この方針で、行番号表示のテストコードを提案してもよろしいでしょうか？
+
+## はい、その方針でテストコードを作成してください。
+
+知いたしました。 行番号表示機能のロジックを検証するテストコードを作成します。
+
+📝 テストコードの実装内容
+test/editor_logic_test.dart に以下のテストケースを追加します。
+
+LineNumberPainter の特定:
+画面内の CustomPaint ウィジェットの中から、LineNumberPainter を使用しているものを探し出します。
+行数の検証:
+初期状態（1行）で lineCount が 1 であることを確認します。
+テキストを入力して改行し（3行にする）、lineCount が 3 に更新されることを確認します。
+修正内容
+c:\Users\dora\home\src\free_memo_editor\test\editor_logic_test.dart
+
+editor_logic_test.dart
+-0
++40
+```
+ Show full code block 
+//
+import 'package:free_memo_editor/editor_page.dart';
+import 'package:free_memo_editor/file_io_helper.dart'; // 追加
+import 'package:free_memo_editor/memo_painter.dart'; // LineNumberPainter用
+
+void main() {
+  testWidgets('矢印キー操作 (上、下、左、右) 動作確認', (WidgetTester tester) async {
+    // 後始末
+    tempDir.deleteSync(recursive: true);
+  });
+
+  testWidgets('Line Number Display Logic', (WidgetTester tester) async {
+    // 1. アプリ起動
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1.0;
+    await tester.pumpWidget(const MaterialApp(home: EditorPage()));
+    await tester.pump();
+
+    // 2. LineNumberPainter を探すヘルパー関数
+    LineNumberPainter? findLineNumberPainter() {
+      final customPaints = tester.widgetList<CustomPaint>(
+        find.byType(CustomPaint),
+      );
+      for (final cp in customPaints) {
+        if (cp.painter is LineNumberPainter) {
+          return cp.painter as LineNumberPainter;
+        }
+      }
+      return null;
+    }
+
+    // --- 初期状態 (1行) ---
+    final painter1 = findLineNumberPainter();
+    expect(painter1, isNotNull, reason: "LineNumberPainterが見つかること");
+    expect(painter1!.lineCount, 1, reason: "初期状態は1行");
+
+    // --- テキスト入力 (3行にする) ---
+    // "a" + Enter + "b" + Enter + "c"
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyB);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.pump();
+
+    // --- 検証 ---
+    final painter2 = findLineNumberPainter();
+    expect(painter2!.lineCount, 3, reason: "3行入力後はlineCountが3になること");
+  });
+  ```
+}
+🚀 次のアクション
+テストを実行して、行番号表示機能が正しく動作しているか確認してください。
+
+bash
+```
+flutter test
+```
+
+## 正常に終了した。今のところ問題なし。、
+
+テストの成功、おめでとうございます！ 行番号が表示され、エディタとしての見た目と機能がまた一つ充実しました。
+
+さて、次は以前の候補にあった 「Tabキー対応」 を実装するのはいかがでしょうか？ 現在は Tab キーを押すと、エディタからフォーカスが外れてボタンなどに移動してしまいます。これを「インデント（字下げ）を入力する」挙動に変更します。
+
+🏗️ 実装方針：Tabキーの制御
+Flutterの標準動作（フォーカス移動）を無効化し、エディタとしての入力処理を実装します。
+
+処理フロー
+:::mermaid
+graph TD
+    Key[Tabキー押下] --> Check{エディタ内?}
+    Check -- Yes --> Block[標準のフォーカス移動をブロック]
+    Block --> Insert[スペース4つを挿入]
+    Insert --> Update[画面更新]
+:::
+
+具体的な作業
+
+EditorController:
+
+indent() メソッドを追加します。
+現在はシンプルに「スペース4つを挿入する」処理とします（矩形選択時の挙動などは、まずは考慮せず基本機能を実装します）。
+
+EditorPage:
+
+キーイベント処理 (_handleKeyPress) で Tab キーを検知します。
+Tab キーが押されたら controller.indent() を呼び出し、「処理済み (handled)」 を返してフォーカス移動を防ぎます。
+
+
+この方針で実装を進めてよろしいでしょうか？
+
+## はい、その方針で実装してください。あとでタイアログで設定したい,
+
+承知いたしました。 今回はツールバー（AppBar）へのメニュー追加という方針で実装を進めます。 将来的に設定項目が増えてきた段階で、まとめて「設定ダイアログ」へ移行しましょう。
+
+📝 実装内容
+lib/editor_controller.dart:
+
+変数 tabWidth を追加（初期値: 4）。
+indent() メソッドを修正し、tabWidth 分のスペースを挿入するように変更。
+設定変更用の setTabWidth(int) メソッドを追加。
+
+lib/editor_page.dart:
+
+AppBar にタブ幅変更用のメニューボタンを追加します。
+現在の設定値にはチェックマークが付くようにします。
+
+1.  lib/editor_controller.dart
+editor_controller.dart
+```
+-1
++7
+  String? currentFilePath;
+  bool showGrid = false; // グリッド表示フラグ
+  String composingText = ""; // IME未確定文字
+  int tabWidth = 4; // タブ幅 (初期値4)
+
+  // 選択範囲
+  int? selectionOriginRow;
+  void indent() {
+    saveHistory();
+    deleteSelection();
+    insertText('    ');
+    insertText(' ' * tabWidth);
+  }
+
+  void setTabWidth(int width) {
+    tabWidth = width;
+    notifyListeners();
+  }
+
+  // --- File I/O ---
+```
+
+2. lib/editor_page.dart
+AppBar の actions の末尾に、タブ幅切り替え用の PopupMenuButton を追加します。
+
+editor_page.dart
+```
+-0
++19
+              ),
+            ],
+          ),
+          PopupMenuButton<int>(
+            tooltip: 'タブ幅設定',
+            icon: const Icon(Icons.space_bar),
+            onSelected: (value) {
+              _controller.setTabWidth(value);
+            },
+            itemBuilder: (context) => [
+              CheckedPopupMenuItem(
+                checked: _controller.tabWidth == 2,
+                value: 2,
+                child: const Text('Tab Width: 2'),
+              ),
+              CheckedPopupMenuItem(
+                checked: _controller.tabWidth == 4,
+                value: 4,
+                child: const Text('Tab Width: 4'),
+              ),
+            ],
+          ),
+        ],
+      ),
+      body: Scrollbar(
+```
+🚀 動作確認
+アプリを実行し、右上のツールバーに追加されたアイコン（space_bar）をクリックしてください。
+メニューから「Tab Width: 2」を選択します。
+エディタ上で Tab キーを押し、スペースが2つ挿入されることを確認してください。
+同様に「Tab Width: 4」に戻して動作を確認してください。
+
+## 動作確認できたが、テストプログラムができるのか？
+
+はい、作成可能です。 今回追加した「Tab幅の変更機能」と、それが実際の「Tabキー入力」に反映されるかを確認するテストコードを作成できます。
+
+以下の方針でテストを作成することを提案します。
+
+🧪 テスト方針：設定変更と入力結果の検証
+UI（メニュー）の操作と、その結果としてのエディタ挙動（入力）をセットで検証します。
+
+設定変更のテスト:
+
+画面右上の「タブ幅設定ボタン（Icons.space_bar）」をタップします。
+表示されたメニューから「Tab Width: 2」を選択します。
+内部状態（controller.tabWidth）が 2 に変更されたことを確認します。
+
+入力動作のテスト:
+
+エディタ上で Tab キーを押します。
+カーソルが 2文字分 進んでいることを確認します（スペースが2つ挿入されたか）。
+同様に「Tab Width: 4」に戻し、Tab キーで 4文字分 進むことを確認します。
+この方針で、Tab幅変更機能のテストコードを作成してもよろしいでしょうか？
+
+## はい、その方針でテストコードを作成してください。
+
+承知いたしました。 方針通り、Tab幅の設定変更と、それによるインデント動作の変化を確認するテストコードを作成します。
+
+📝 テストコードの実装内容
+test/editor_logic_test.dart に以下のテストケースを追加します。
+
+初期状態の確認:
+デフォルト（幅4）で Tab キーを押し、カーソルが4文字進むことを確認します。
+設定変更 (幅2へ):
+UI上のアイコンをタップしてメニューを開き、「Tab Width: 2」を選択します。
+Tab キーを押し、カーソルが 2文字分 進むことを確認します。
+設定変更 (幅4へ戻す):
+再度メニューから「Tab Width: 4」を選択します。
+Tab キーを押し、カーソルが 4文字分 進むことを確認します。
+修正内容
+c:\Users\dora\home\src\free_memo_editor\test\editor_logic_test.dart
+
+editor_logic_test.dart
+-0
++48
+    final painter2 = findLineNumberPainter();
+    expect(painter2!.lineCount, 3, reason: "3行入力後はlineCountが3になること");
+  });
+
+  testWidgets('Tab Width Setting & Indentation Logic', (WidgetTester tester) async {
+    // 1. アプリ起動
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1.0;
+    await tester.pumpWidget(const MaterialApp(home: EditorPage()));
+    await tester.pump();
+
+    final state = tester.state(find.byType(EditorPage)) as dynamic;
+
+    // 初期状態確認 (Tab Width: 4)
+    // タブキーを押して4文字進むか確認
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    expect(state.debugCursorCol, 4, reason: "初期設定(4)でTabキー押下 -> 4文字進む");
+
+    // --- Test: Tab Width を 2 に変更 ---
+    // 1. 設定メニューを開く
+    await tester.tap(find.byIcon(Icons.space_bar));
+    await tester.pumpAndSettle(); // メニューアニメーション完了待ち
+
+    // 2. "Tab Width: 2" を選択
+    await tester.tap(find.text('Tab Width: 2'));
+    await tester.pumpAndSettle(); // メニューが閉じるのを待つ
+
+    // 3. 入力テスト
+    // 現在 (0, 4)。Tab(幅2)を押すと (0, 6) になるはず
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+
+    expect(state.debugCursorCol, 6, reason: "設定変更(2)後にTabキー押下 -> +2文字進む");
+
+    // --- Test: Tab Width を 4 に戻す ---
+    // 1. 設定メニューを開く
+    await tester.tap(find.byIcon(Icons.space_bar));
+    await tester.pumpAndSettle();
+
+    // 2. "Tab Width: 4" を選択
+    await tester.tap(find.text('Tab Width: 4'));
+    await tester.pumpAndSettle();
+
+    // 3. 入力テスト
+    // 現在 (0, 6)。Tab(幅4)を押すと (0, 10) になるはず
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+
+    expect(state.debugCursorCol, 10, reason: "設定戻し(4)後にTabキー押下 -> +4文字進む");
+  });
+}
+
+// --- Mock Class ---
+```
+🚀 次のアクション
+テストを実行して、Tab幅の変更機能が正しく動作しているか確認してください。

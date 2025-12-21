@@ -19,6 +19,7 @@ class EditorController extends ChangeNotifier {
   String? currentFilePath;
   bool showGrid = false; // グリッド表示フラグ
   String composingText = ""; // IME未確定文字
+  int tabWidth = 4; // タブ幅 (初期値4)
 
   // 選択範囲
   int? selectionOriginRow;
@@ -277,6 +278,18 @@ class EditorController extends ChangeNotifier {
     cursorCol = lines.last.length;
     isRectangularSelection = false;
     preferredVisualX = _calcVisualX(cursorRow, cursorCol);
+    notifyListeners();
+  }
+
+  // --- Indentation ---
+  void indent() {
+    saveHistory();
+    deleteSelection();
+    insertText(' ' * tabWidth);
+  }
+
+  void setTabWidth(int width) {
+    tabWidth = width;
     notifyListeners();
   }
 
@@ -699,6 +712,10 @@ class EditorController extends ChangeNotifier {
 
     // --- Other Special Keys ---
     switch (physicalKey) {
+      case PhysicalKeyboardKey.tab:
+        indent();
+        return KeyEventResult.handled;
+
       case PhysicalKeyboardKey.enter:
         saveHistory();
         deleteSelection();

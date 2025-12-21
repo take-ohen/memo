@@ -290,3 +290,36 @@ class MemoPainter extends CustomPainter {
         oldDelegate.composingText != composingText;
   }
 }
+
+class LineNumberPainter extends CustomPainter {
+  final int lineCount;
+  final double lineHeight;
+  final TextStyle textStyle;
+
+  LineNumberPainter({
+    required this.lineCount,
+    required this.lineHeight,
+    required this.textStyle,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (int i = 0; i < lineCount; i++) {
+      final textSpan = TextSpan(text: '${i + 1}', style: textStyle);
+      final textPainter = TextPainter(
+        text: textSpan,
+        textDirection: TextDirection.ltr,
+        textAlign: TextAlign.right,
+      );
+      textPainter.layout(minWidth: size.width);
+      textPainter.paint(canvas, Offset(0, i * lineHeight));
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant LineNumberPainter oldDelegate) {
+    return oldDelegate.lineCount != lineCount ||
+        oldDelegate.lineHeight != lineHeight ||
+        oldDelegate.textStyle != textStyle;
+  }
+}
