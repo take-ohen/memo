@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'history_manager.dart';
 import 'text_utils.dart';
 import 'search_result.dart';
@@ -21,6 +22,9 @@ class EditorController extends ChangeNotifier {
   bool showGrid = false; // グリッド表示フラグ
   String composingText = ""; // IME未確定文字
   int tabWidth = 4; // タブ幅 (初期値4)
+  String fontFamily = "BIZ UDゴシック"; // フォント名
+  double fontSize = 16.0; // フォントサイズ
+  double minCanvasSize = 2000.0; // 最小キャンバスサイズ
 
   // 検索・置換
   List<SearchResult> searchResults = [];
@@ -36,6 +40,56 @@ class EditorController extends ChangeNotifier {
 
   bool get hasSelection =>
       selectionOriginRow != null && selectionOriginCol != null;
+
+  // --- Settings Persistence (設定の保存) ---
+
+  /// 設定を読み込む (アプリ起動時に呼ぶ)
+  Future<void> loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    showGrid = prefs.getBool('showGrid') ?? false;
+    tabWidth = prefs.getInt('tabWidth') ?? 4;
+    isOverwriteMode = prefs.getBool('isOverwriteMode') ?? false;
+    fontFamily = prefs.getString('fontFamily') ?? "BIZ UDゴシック";
+    fontSize = prefs.getDouble('fontSize') ?? 16.0;
+    minCanvasSize = prefs.getDouble('minCanvasSize') ?? 2000.0;
+    notifyListeners();
+  }
+
+  /// Bool値を保存するヘルパー
+  Future<void> _saveBool(String key, bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(key, value);
+  }
+
+  /// Int値を保存するヘルパー
+  Future<void> _saveInt(String key, int value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(key, value);
+  }
+
+  /// Double値を保存するヘルパー
+  Future<void> _saveDouble(String key, double value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(key, value);
+  }
+
+  /// String値を保存するヘルパー
+  Future<void> _saveString(String key, String value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(key, value);
+  }
+
+  void setFontSize(double size) {
+    fontSize = size;
+    _saveDouble('fontSize', size);
+    notifyListeners();
+  }
+
+  void setMinCanvasSize(double size) {
+    minCanvasSize = size;
+    _saveDouble('minCanvasSize', size);
+    notifyListeners();
+  }
 
   // --- Search & Replace Logic ---
 
@@ -434,6 +488,7 @@ class EditorController extends ChangeNotifier {
 
   void setTabWidth(int width) {
     tabWidth = width;
+    _saveInt('tabWidth', tabWidth);
     notifyListeners();
   }
 
@@ -961,6 +1016,7 @@ class EditorController extends ChangeNotifier {
 
       case PhysicalKeyboardKey.insert:
         isOverwriteMode = !isOverwriteMode;
+        _saveBool('isOverwriteMode', isOverwriteMode);
         notifyListeners();
         return KeyEventResult.handled;
     }
@@ -1023,6 +1079,7 @@ class EditorController extends ChangeNotifier {
 
   void toggleGrid() {
     showGrid = !showGrid;
+    _saveBool('showGrid', showGrid);
     notifyListeners();
   }
 

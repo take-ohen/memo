@@ -50,15 +50,16 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   final FocusNode _focusNode = FocusNode();
   final GlobalKey _painterKey = GlobalKey();
 
-  static const _textStyle = TextStyle(
-    fontFamily: 'BIZ UDゴシック',
-    fontSize: 16.0,
+  // コントローラーの設定値を使用するように変更
+  TextStyle get _textStyle => TextStyle(
+    fontFamily: _controller.fontFamily,
+    fontSize: _controller.fontSize,
     color: Colors.black,
   );
 
-  static const _lineNumberStyle = TextStyle(
-    fontFamily: 'BIZ UDゴシック',
-    fontSize: 16.0,
+  TextStyle get _lineNumberStyle => TextStyle(
+    fontFamily: _controller.fontFamily,
+    fontSize: _controller.fontSize,
     color: Colors.grey,
   );
 
@@ -79,8 +80,13 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   void initState() {
     super.initState();
     _controller = EditorController(); // コントローラー初期化
-    // コントローラーの変更を検知して画面を更新する (Step 2以降でロジックを移動した際に必要)
-    _controller.addListener(() => setState(() {}));
+
+    // 設定読み込み
+    _controller.loadSettings();
+
+    // コントローラーの変更を検知して画面を更新する
+    // フォントサイズ変更時などにメトリクス再計算が必要
+    _controller.addListener(() => _calculateGlyphMetrics());
 
     _calculateGlyphMetrics();
     WidgetsBinding.instance;
@@ -115,7 +121,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
   void _calculateGlyphMetrics() {
     final painter = TextPainter(
-      text: const TextSpan(text: 'M', style: _textStyle),
+      text: TextSpan(text: 'M', style: _textStyle),
       textDirection: TextDirection.ltr,
     );
     painter.layout();
@@ -492,7 +498,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
     // 2. エディタ領域のサイズ決定 (画面サイズ以上の余白を持たせる)
     Size screenSize = MediaQuery.of(context).size;
-    const double minCanvasSize = 2000.0; // 最小サイズ(虚空)を確保
+    double minCanvasSize = _controller.minCanvasSize; // 設定値を使用
 
     double editorWidth = max(
       minCanvasSize,
