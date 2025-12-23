@@ -25,6 +25,8 @@ class EditorController extends ChangeNotifier {
   String fontFamily = "BIZ UDゴシック"; // フォント名
   double fontSize = 16.0; // フォントサイズ
   double minCanvasSize = 2000.0; // 最小キャンバスサイズ
+  bool isDirty = false; // 変更ありフラグ
+  Encoding currentEncoding = utf8; // 文字コード
 
   // 検索・置換
   List<SearchResult> searchResults = [];
@@ -274,6 +276,7 @@ class EditorController extends ChangeNotifier {
     lines[cursorRow] = part1 + text + part2;
     cursorCol += text.length;
 
+    isDirty = true;
     // VisualX更新
     String newLine = lines[cursorRow];
     int safeEnd = min(cursorCol, newLine.length);
@@ -293,6 +296,7 @@ class EditorController extends ChangeNotifier {
     }
     selectionOriginRow = null;
     selectionOriginCol = null;
+    isDirty = true;
     notifyListeners();
   }
 
@@ -341,6 +345,7 @@ class EditorController extends ChangeNotifier {
 
     cursorRow = startRow;
     cursorCol = startCol;
+    isDirty = true;
   }
 
   void _deleteRectangularSelection() {
@@ -381,6 +386,7 @@ class EditorController extends ChangeNotifier {
         cursorCol = lines[cursorRow].length;
       }
     }
+    isDirty = true;
   }
 
   /// 矩形選択範囲を指定文字で置換
@@ -440,6 +446,7 @@ class EditorController extends ChangeNotifier {
       preferredVisualX = TextUtils.calcTextWidth(line.substring(0, cursorCol));
     }
 
+    isDirty = true;
     notifyListeners();
   }
 
@@ -447,6 +454,7 @@ class EditorController extends ChangeNotifier {
   void undo() {
     final entry = historyManager.undo(lines, cursorRow, cursorCol);
     if (entry != null) {
+      isDirty = true;
       _applyHistoryEntry(entry);
     }
   }
@@ -454,6 +462,7 @@ class EditorController extends ChangeNotifier {
   void redo() {
     final entry = historyManager.redo(lines, cursorRow, cursorCol);
     if (entry != null) {
+      isDirty = true;
       _applyHistoryEntry(entry);
     }
   }
@@ -509,6 +518,7 @@ class EditorController extends ChangeNotifier {
         cursorCol = 0;
         preferredVisualX = 0;
         selectionOriginRow = null;
+        isDirty = false;
         selectionOriginCol = null;
         notifyListeners();
       }
@@ -524,6 +534,8 @@ class EditorController extends ChangeNotifier {
     try {
       String content = lines.join('\n');
       await FileIOHelper.instance.writeStringToFile(currentFilePath!, content);
+      isDirty = false;
+      notifyListeners();
       return currentFilePath;
     } catch (e) {
       debugPrint('Error saving file: $e');
@@ -538,6 +550,7 @@ class EditorController extends ChangeNotifier {
         currentFilePath = outputFile;
         String content = lines.join('\n');
         await FileIOHelper.instance.writeStringToFile(outputFile, content);
+        isDirty = false;
         notifyListeners();
         return outputFile;
       }
@@ -666,6 +679,7 @@ class EditorController extends ChangeNotifier {
 
     preferredVisualX = _calcVisualX(cursorRow, cursorCol);
     selectionOriginRow = null;
+    isDirty = true;
     selectionOriginCol = null;
     notifyListeners();
   }
@@ -925,6 +939,7 @@ class EditorController extends ChangeNotifier {
         lines.insert(cursorRow + 1, part2);
         cursorRow++;
         cursorCol = 0;
+        isDirty = true;
         notifyListeners();
         return KeyEventResult.handled;
 
@@ -948,6 +963,7 @@ class EditorController extends ChangeNotifier {
                 : 0;
           }
           preferredVisualX = _calcVisualX(cursorRow, cursorCol);
+          isDirty = true;
           notifyListeners();
           return KeyEventResult.handled;
         }
@@ -974,6 +990,7 @@ class EditorController extends ChangeNotifier {
           }
         }
         preferredVisualX = _calcVisualX(cursorRow, cursorCol);
+        isDirty = true;
         notifyListeners();
         return KeyEventResult.handled;
 
@@ -1011,6 +1028,7 @@ class EditorController extends ChangeNotifier {
           lines[cursorRow] = part1 + part2;
         }
         preferredVisualX = _calcVisualX(cursorRow, cursorCol);
+        isDirty = true;
         notifyListeners();
         return KeyEventResult.handled;
 

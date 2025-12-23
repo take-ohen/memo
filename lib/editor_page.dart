@@ -702,6 +702,39 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
               ),
             ),
           ),
+          // --- ステータスバー ---
+          Container(
+            height: 24,
+            color: Colors.grey.shade300,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Row(
+              children: [
+                // 変更状態
+                SizedBox(
+                  width: 80,
+                  child: Text(
+                    _controller.isDirty ? "未保存 *" : "",
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                // カーソル位置
+                Text(
+                  "Ln ${_controller.cursorRow + 1}, Col ${_controller.cursorCol + 1}",
+                  style: const TextStyle(fontSize: 12),
+                ),
+                const SizedBox(width: 16),
+                // 文字コード
+                Text(
+                  _controller.currentEncoding.name,
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
