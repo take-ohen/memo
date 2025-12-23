@@ -6,6 +6,8 @@ import 'package:flutter_test/flutter_test.dart';
 //
 import 'package:free_memo_editor/editor_page.dart';
 import 'package:free_memo_editor/file_io_helper.dart'; // 追加
+import 'package:free_memo_editor/editor_controller.dart'; // 追加
+import 'package:free_memo_editor/memo_painter.dart'; // LineNumberPainter用
 
 void main() {
   testWidgets('矢印キー操作 (上、下、左、右) 動作確認', (WidgetTester tester) async {
@@ -823,6 +825,275 @@ void main() {
 
     // 後始末
     tempDir.deleteSync(recursive: true);
+  });
+  testWidgets('Input in Void (Virtual Space) should not crash', (
+    WidgetTester tester,
+  ) async {
+    // 1. アプリ起動
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1.0;
+    await tester.pumpWidget(const MaterialApp(home: EditorPage()));
+    await tester.pumpAndSettle();
+
+    final state = tester.state(find.byType(EditorPage)) as dynamic;
+
+    // 2. 虚空へ移動 (Alt + Down 連打)
+    // 初期状態は1行。10回下へ移動すれば確実に虚空(10行目)になる。
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.alt);
+    for (int i = 0; i < 10; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    }
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.alt);
+    await tester.pump();
+
+    // 検証: カーソルが10行目にあること
+    expect(state.debugCursorRow, 10, reason: "Alt+Downで虚空(10行目)に移動できていること");
+
+    // 検証: まだ行は増えていないこと(1行のまま)
+    // ※ここが重要。データがない場所に入力しようとする状況を作る。
+    expect(state.debugLines.length, 1, reason: "入力前は行数は増えていないこと");
+
+    // 3. 文字入力 ("a")
+    // ★修正前はここで RangeError が発生してクラッシュする
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    await tester.pump();
+
+    // 4. 検証
+    // クラッシュせずにここに来ればOK
+
+    // 行数が自動拡張されていること (0行目〜10行目 なので 計11行になるはず)
+    expect(state.debugLines.length, 11, reason: "入力により行が自動拡張されること");
+
+    // 10行目に "a" が入っていること
+    expect(state.debugLines[10], "a", reason: "虚空に入力した文字が反映されること");
+  });
+
+  testWidgets('Backspace and Delete in Void (Virtual Space)', (
+    WidgetTester tester,
+  ) async {
+    // 1. アプリ起動
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1.0;
+    await tester.pumpWidget(const MaterialApp(home: EditorPage()));
+    await tester.pumpAndSettle();
+
+    final state = tester.state(find.byType(EditorPage)) as dynamic;
+
+    // 2. テキスト入力 "abc"
+    await tester.tap(find.byType(EditorPage));
+    await tester.pump();
+
+    // タップ位置によりカーソルが移動してしまうため、強制的に(0,0)へ戻す
+    for (int i = 0; i < 50; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    }
+    await tester.pump();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyB);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.pump();
+
+    // --- Test 1: 行内虚空での Backspace ---
+    // カーソルを (0, 5) へ移動 ("abc" は長さ3なので、2文字分虚空)
+    // Alt + Right で移動
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.alt);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight); // 4
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight); // 5
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.alt);
+    await tester.pump();
+
+    expect(state.debugCursorCol, 5, reason: "カーソルが虚空(5列目)にあること");
+
+    // Backspace押下
+    await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+    await tester.pump();
+
+    expect(state.debugCursorCol, 4, reason: "虚空でのBackspaceはカーソルが左に移動すること");
+    expect(state.debugLines[0], "abc", reason: "虚空でのBackspaceで文字が消えていないこと");
+
+    // --- Test 2: 完全虚空行での Backspace ---
+    // カーソルを (2, 2) へ移動 (データは0行目のみ。1, 2行目は存在しない)
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.alt);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown); // 1行目
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown); // 2行目
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft); // 3列目
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft); // 2列目
+    await tester.pump();
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.alt);
+    await tester.pump();
+
+    expect(state.debugCursorRow, 2, reason: "カーソルが虚空行(2行目)にあること");
+    expect(state.debugCursorCol, 2, reason: "カーソルが2列目にあること");
+
+    // Backspace押下
+    await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+    await tester.pump();
+
+    expect(state.debugCursorRow, 2, reason: "行は変わらないこと");
+    expect(state.debugCursorCol, 1, reason: "カーソルが左に移動すること");
+    expect(state.debugLines.length, 1, reason: "行データは増えていないこと(1行のまま)");
+
+    // --- Test 3: 行内虚空での Delete (行結合) ---
+    // リセットして再構築
+    await tester.pumpWidget(MaterialApp(home: EditorPage(key: UniqueKey())));
+    await tester.pumpAndSettle();
+    final state2 = tester.state(find.byType(EditorPage)) as dynamic;
+
+    // 入力:
+    // abc
+    // def
+    await tester.tap(find.byType(EditorPage));
+    await tester.pump();
+
+    // タップ位置によりカーソルが移動してしまうため、強制的に(0,0)へ戻す
+    for (int i = 0; i < 50; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    }
+    await tester.pump();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyB);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump(); // Enterの処理を確定させる
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyE);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+    await tester.pump();
+
+    // テスト準備が正しく行われたか確認
+    expect(state2.debugLines.length, 2, reason: "テスト準備: 2行あること");
+    expect(state2.debugLines[1], "def", reason: "テスト準備: 2行目が'def'であること");
+
+    // カーソルを (0, 5) へ移動 (abcの後ろの虚空)
+    // まず (0,0)へ戻す
+    for (int i = 0; i < 10; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    }
+    // "abc"の後ろ(3)へ
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+
+    // Alt+Right で 5 まで移動
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.alt);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight); // 4
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight); // 5
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.alt);
+    await tester.pump();
+
+    expect(state2.debugCursorRow, 0);
+    expect(state2.debugCursorCol, 5);
+
+    // Delete押下
+    await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+    await tester.pump();
+
+    // 期待値: "abc  def"
+    // "abc"(3文字) + "  "(2文字分のスペース) + "def"
+    expect(
+      state2.debugLines[0],
+      "abc  def",
+      reason: "虚空Deleteでスペース埋め＋行結合が行われること",
+    );
+    expect(state2.debugLines.length, 1, reason: "行が結合されて1行になること");
+  });
+
+  testWidgets('Search and Replace Logic', (WidgetTester tester) async {
+    // 1. アプリ起動
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1.0;
+    await tester.pumpWidget(const MaterialApp(home: EditorPage()));
+    await tester.pump();
+
+    final state = tester.state(find.byType(EditorPage)) as dynamic;
+    final EditorController controller = state.debugController;
+
+    // 2. テキスト入力 "abc abc abc"
+    // カーソルリセット
+    for (int i = 0; i < 10; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    }
+    await tester.pump();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyB);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyB);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyB);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.pump();
+
+    expect(state.debugLines[0], "abc abc abc");
+
+    // --- Test: 検索 (Search) ---
+    // Ctrl + F で検索バーを開く
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.control);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.control);
+    await tester.pumpAndSettle();
+
+    // 検索ワード "abc" を入力
+    // 検索バーのTextFieldを探して入力
+    final searchField = find.widgetWithText(TextField, '検索');
+    expect(searchField, findsOneWidget);
+    await tester.enterText(searchField, "abc");
+    await tester.pump();
+
+    // 検証: 3件ヒットしているか
+    expect(controller.searchResults.length, 3, reason: "3つの 'abc' が見つかるはず");
+    expect(controller.currentSearchIndex, 0, reason: "最初は0番目が選択されているはず");
+
+    // 「次へ」ボタン (arrow_downward) を押す
+    await tester.tap(find.byIcon(Icons.arrow_downward));
+    await tester.pump();
+
+    // 検証: インデックスが 1 に進むか
+    expect(controller.currentSearchIndex, 1, reason: "次へボタンでインデックスが進むこと");
+
+    // --- Test: 置換 (Replace) ---
+    // Ctrl + H で置換モードへ
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.control);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyH);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.control);
+    await tester.pumpAndSettle();
+
+    // 置換ワード "def" を入力
+    final replaceField = find.widgetWithText(TextField, '置換');
+    expect(replaceField, findsOneWidget);
+    await tester.enterText(replaceField, "def");
+    await tester.pump();
+
+    // 「置換」ボタンを押す (現在の選択箇所のみ置換)
+    // 現在のインデックスは 1 (真ん中の "abc")
+    await tester.tap(find.text('置換'));
+    await tester.pump();
+
+    // 検証: 真ん中だけ "def" になっているか -> "abc def abc"
+    expect(state.debugLines[0], "abc def abc", reason: "現在の選択箇所のみ置換されること");
+    // 置換後は再検索され、インデックスが維持または調整される
+    expect(controller.searchResults.length, 2, reason: "残りの 'abc' は2つ");
+
+    // 「全て置換」ボタンを押す
+    await tester.tap(find.text('全て置換'));
+    await tester.pump();
+
+    // 検証: 全て "def" になっているか -> "def def def"
+    expect(state.debugLines[0], "def def def", reason: "全て置換されること");
+    expect(controller.searchResults.length, 0, reason: "'abc' はもう無いはず");
   });
 }
 

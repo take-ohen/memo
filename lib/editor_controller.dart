@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'history_manager.dart';
 import 'text_utils.dart';
+import 'search_result.dart';
 import 'package:free_memo_editor/file_io_helper.dart';
 
 /// エディタの状態（データ）のみを管理するコントローラー
@@ -21,6 +22,10 @@ class EditorController extends ChangeNotifier {
   String composingText = ""; // IME未確定文字
   int tabWidth = 4; // タブ幅 (初期値4)
 
+  // 検索・置換
+  List<SearchResult> searchResults = [];
+  int currentSearchIndex = -1;
+
   // 選択範囲
   int? selectionOriginRow;
   int? selectionOriginCol;
@@ -31,6 +36,131 @@ class EditorController extends ChangeNotifier {
 
   bool get hasSelection =>
       selectionOriginRow != null && selectionOriginCol != null;
+
+  // --- Search & Replace Logic ---
+
+  /// 検索実行
+  void search(String query) {
+    searchResults.clear();
+    currentSearchIndex = -1;
+
+    if (query.isEmpty) {
+      notifyListeners();
+      return;
+    }
+
+    for (int i = 0; i < lines.length; i++) {
+      String line = lines[i];
+      int index = line.indexOf(query);
+      while (index != -1) {
+        searchResults.add(SearchResult(i, index, query.length));
+        index = line.indexOf(query, index + 1);
+      }
+    }
+
+    // カーソル位置に最も近い結果を選択
+    if (searchResults.isNotEmpty) {
+      currentSearchIndex = 0;
+
+      // 検索基準位置の決定
+      // 選択範囲がある場合はその「先頭」を基準にする（入力中のジャンプ防止）
+      int baseRow = cursorRow;
+      int baseCol = cursorCol;
+
+      if (hasSelection) {
+        // 選択範囲の始点（小さい方）を採用
+        if (selectionOriginRow! < cursorRow ||
+            (selectionOriginRow! == cursorRow &&
+                selectionOriginCol! < cursorCol)) {
+          baseRow = selectionOriginRow!;
+          baseCol = selectionOriginCol!;
+        }
+      }
+
+      for (int i = 0; i < searchResults.length; i++) {
+        final result = searchResults[i];
+        // 基準位置以降にある最初の結果を探す
+        if (result.lineIndex > baseRow ||
+            (result.lineIndex == baseRow && result.startCol >= baseCol)) {
+          currentSearchIndex = i;
+          break;
+        }
+      }
+      _jumpToSearchResult(currentSearchIndex);
+    }
+    notifyListeners();
+  }
+
+  void nextMatch() {
+    if (searchResults.isEmpty) return;
+    currentSearchIndex = (currentSearchIndex + 1) % searchResults.length;
+    _jumpToSearchResult(currentSearchIndex);
+    notifyListeners();
+  }
+
+  void previousMatch() {
+    if (searchResults.isEmpty) return;
+    currentSearchIndex =
+        (currentSearchIndex - 1 + searchResults.length) % searchResults.length;
+    _jumpToSearchResult(currentSearchIndex);
+    notifyListeners();
+  }
+
+  void _jumpToSearchResult(int index) {
+    if (index < 0 || index >= searchResults.length) return;
+    final result = searchResults[index];
+
+    // 検索結果を選択状態にする
+    selectionOriginRow = result.lineIndex;
+    selectionOriginCol = result.startCol;
+    cursorRow = result.lineIndex;
+    cursorCol = result.startCol + result.length;
+    isRectangularSelection = false;
+
+    // VisualX更新
+    preferredVisualX = _calcVisualX(cursorRow, cursorCol);
+  }
+
+  void replace(String query, String newText) {
+    if (searchResults.isEmpty || currentSearchIndex == -1) return;
+
+    // 現在選択中の箇所が検索結果と一致するか確認（念のため）
+    final result = searchResults[currentSearchIndex];
+
+    // 選択範囲削除 & 挿入
+    saveHistory();
+
+    // 確実に現在の検索結果を選択状態にする
+    selectionOriginRow = result.lineIndex;
+    selectionOriginCol = result.startCol;
+    cursorRow = result.lineIndex;
+    cursorCol = result.startCol + result.length;
+
+    deleteSelection();
+    insertText(newText);
+
+    // 再検索してインデックスを維持（または次の候補へ）
+    search(query);
+  }
+
+  void replaceAll(String query, String newText) {
+    if (query.isEmpty) return;
+    saveHistory();
+
+    // 行ごとに置換
+    for (int i = 0; i < lines.length; i++) {
+      lines[i] = lines[i].replaceAll(query, newText);
+    }
+
+    // 再検索
+    search(query);
+  }
+
+  void clearSearch() {
+    searchResults.clear();
+    currentSearchIndex = -1;
+    notifyListeners();
+  }
 
   // --- ロジック (Step 2で追加) ---
 
@@ -127,6 +257,13 @@ class EditorController extends ChangeNotifier {
       endCol = t;
     }
 
+    //  開始行が存在しない(虚空)場合は、削除するものがないのでカーソル移動のみで終了
+    if (startRow >= lines.length) {
+      cursorRow = startRow;
+      cursorCol = startCol;
+      return;
+    }
+
     String startLine = (startRow < lines.length) ? lines[startRow] : "";
     String prefix = (startCol < startLine.length)
         ? startLine.substring(0, startCol)
@@ -138,7 +275,14 @@ class EditorController extends ChangeNotifier {
     lines[startRow] = prefix + suffix;
 
     if (endRow > startRow) {
-      lines.removeRange(startRow + 1, endRow + 1);
+      // 削除範囲がリストの長さを超えないように制限
+      int removeEndIndex = endRow + 1;
+      if (removeEndIndex > lines.length) {
+        removeEndIndex = lines.length;
+      }
+      if (removeEndIndex > startRow + 1) {
+        lines.removeRange(startRow + 1, removeEndIndex);
+      }
     }
 
     cursorRow = startRow;
@@ -532,8 +676,8 @@ class EditorController extends ChangeNotifier {
 
   // ヘルパー: VisualX計算
   int _calcVisualX(int row, int col) {
-    if (row >= lines.length) return 0;
-    String line = lines[row];
+    // 行が存在しない場合も、空行として扱いスペース計算を行う
+    String line = (row < lines.length) ? lines[row] : "";
     String text;
     if (col <= line.length) {
       text = line.substring(0, col);
@@ -733,22 +877,48 @@ class EditorController extends ChangeNotifier {
         saveHistory();
         if (hasSelection) {
           deleteSelection();
+          preferredVisualX = _calcVisualX(cursorRow, cursorCol);
           return KeyEventResult.handled;
         }
-        if (cursorCol > 0) {
-          final currentLine = lines[cursorRow];
-          final part1 = currentLine.substring(0, cursorCol - 1);
-          final part2 = currentLine.substring(cursorCol);
-          lines[cursorRow] = part1 + part2;
-          cursorCol--;
-        } else if (cursorRow > 0) {
-          final lineToAppend = lines[cursorRow];
-          final prevLineLength = lines[cursorRow - 1].length;
-          lines[cursorRow - 1] += lineToAppend;
-          lines.removeAt(cursorRow);
-          cursorRow--;
-          cursorCol = prevLineLength;
+
+        // 行が存在しない(虚空行)場合
+        if (cursorRow >= lines.length) {
+          if (cursorCol > 0) {
+            cursorCol--;
+          } else if (cursorRow > 0) {
+            cursorRow--;
+            // 前の行が存在すればその末尾へ、なければ0へ
+            cursorCol = (cursorRow < lines.length)
+                ? lines[cursorRow].length
+                : 0;
+          }
+          preferredVisualX = _calcVisualX(cursorRow, cursorCol);
+          notifyListeners();
+          return KeyEventResult.handled;
         }
+
+        final currentLine = lines[cursorRow];
+
+        // カーソルが行末より右にある(行内虚空)場合
+        if (cursorCol > currentLine.length) {
+          cursorCol--;
+        } else {
+          // 実体がある場所での削除
+          if (cursorCol > 0) {
+            final part1 = currentLine.substring(0, cursorCol - 1);
+            final part2 = currentLine.substring(cursorCol);
+            lines[cursorRow] = part1 + part2;
+            cursorCol--;
+          } else if (cursorRow > 0) {
+            final lineToAppend = lines[cursorRow];
+            final prevLineLength = lines[cursorRow - 1].length;
+            lines[cursorRow - 1] += lineToAppend;
+            lines.removeAt(cursorRow);
+            cursorRow--;
+            cursorCol = prevLineLength;
+          }
+        }
+        preferredVisualX = _calcVisualX(cursorRow, cursorCol);
         notifyListeners();
         return KeyEventResult.handled;
 
@@ -756,22 +926,36 @@ class EditorController extends ChangeNotifier {
         saveHistory();
         if (hasSelection) {
           deleteSelection();
+          preferredVisualX = _calcVisualX(cursorRow, cursorCol);
           return KeyEventResult.handled;
         }
+
+        // 行が存在しない場合は何もしない
         if (cursorRow >= lines.length) return KeyEventResult.handled;
+
         final currentLine = lines[cursorRow];
-        if (cursorCol < currentLine.length) {
+
+        // カーソルが行末以降にある場合
+        if (cursorCol >= currentLine.length) {
+          // 次の行があれば吸い上げる（結合する）
+          if (cursorRow < lines.length - 1) {
+            // 現在行をカーソル位置までスペースで埋める
+            if (cursorCol > currentLine.length) {
+              lines[cursorRow] = currentLine.padRight(cursorCol);
+            }
+            // 次の行を結合
+            lines[cursorRow] += lines[cursorRow + 1];
+            lines.removeAt(cursorRow + 1);
+          }
+        } else {
+          // 通常の文字削除
           final part1 = currentLine.substring(0, cursorCol);
           final part2 = (cursorCol + 1 < currentLine.length)
               ? currentLine.substring(cursorCol + 1)
               : '';
           lines[cursorRow] = part1 + part2;
-        } else if (cursorCol == currentLine.length &&
-            cursorRow < lines.length - 1) {
-          final nextLine = lines[cursorRow + 1];
-          lines[cursorRow] += nextLine;
-          lines.removeAt(cursorRow + 1);
         }
+        preferredVisualX = _calcVisualX(cursorRow, cursorCol);
         notifyListeners();
         return KeyEventResult.handled;
 

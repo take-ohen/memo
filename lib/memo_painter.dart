@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'dart:math';
 import 'text_utils.dart'; // ★作成した便利関数をインポート
+import 'search_result.dart'; // ★検索結果クラスをインポート
 
 class MemoPainter extends CustomPainter {
   final List<String> lines;
@@ -18,6 +19,8 @@ class MemoPainter extends CustomPainter {
   final int? selectionOriginRow; // 選択開始位置Row
   final int? selectionOriginCol; // 選択開始位置Col
   final bool showCursor;
+  final List<SearchResult> searchResults; // ★検索結果リスト
+  final int currentSearchIndex; // ★現在の検索結果インデックス
 
   MemoPainter({
     required this.lines,
@@ -34,6 +37,8 @@ class MemoPainter extends CustomPainter {
     this.selectionOriginCol,
     required this.showCursor,
     this.isRectangularSelection = false, // 矩形選択 defalutはfalse
+    this.searchResults = const [], // ★初期値は空
+    this.currentSearchIndex = -1, // ★初期値は-1
   });
 
   @override
@@ -49,6 +54,13 @@ class MemoPainter extends CustomPainter {
         // [新規] 通常選択の描画処理 (Shiftのみ)
         _drawNormalSelection(canvas);
       }
+    }
+
+    // --------------------------------------------------------
+    // 0.5 検索結果のハイライト描画 (テキストより先に描く)
+    // --------------------------------------------------------
+    if (searchResults.isNotEmpty) {
+      _drawSearchResults(canvas);
     }
 
     // --------------------------------------------------------
@@ -155,6 +167,40 @@ class MemoPainter extends CustomPainter {
       for (double y = 0; y < size.height; y += lineHeight) {
         canvas.drawLine(Offset(0, y), Offset(size.width, y), gridpaint);
       }
+    }
+  }
+
+  // ★検索結果のハイライト描画ロジック
+  void _drawSearchResults(Canvas canvas) {
+    final paintHighlight = Paint()
+      ..color = Colors.yellow.withOpacity(0.4); // 通常のヒット色
+    final paintCurrent = Paint()
+      ..color = Colors.orange.withOpacity(0.6); // 現在選択中のヒット色
+
+    for (int i = 0; i < searchResults.length; i++) {
+      final result = searchResults[i];
+
+      // 行が存在しない場合はスキップ
+      if (result.lineIndex >= lines.length) continue;
+
+      String line = lines[result.lineIndex];
+
+      // 範囲外ガード
+      if (result.startCol >= line.length) continue;
+
+      int endCol = min(result.startCol + result.length, line.length);
+
+      String preText = line.substring(0, result.startCol);
+      String matchText = line.substring(result.startCol, endCol);
+
+      double startX = TextUtils.calcTextWidth(preText) * charWidth;
+      double width = TextUtils.calcTextWidth(matchText) * charWidth;
+      double top = result.lineIndex * lineHeight;
+
+      canvas.drawRect(
+        Rect.fromLTWH(startX, top, width, lineHeight),
+        (i == currentSearchIndex) ? paintCurrent : paintHighlight,
+      );
     }
   }
 
@@ -287,7 +333,9 @@ class MemoPainter extends CustomPainter {
         oldDelegate.selectionOriginRow != selectionOriginRow ||
         oldDelegate.selectionOriginCol != selectionOriginCol ||
         oldDelegate.isRectangularSelection != isRectangularSelection ||
-        oldDelegate.composingText != composingText;
+        oldDelegate.composingText != composingText ||
+        oldDelegate.searchResults != searchResults || // ★変更検知に追加
+        oldDelegate.currentSearchIndex != currentSearchIndex; // ★変更検知に追加
   }
 }
 
