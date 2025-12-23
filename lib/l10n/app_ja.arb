@@ -1,0 +1,23 @@
+{
+  "menuFile": "ファイル",
+  "menuOpen": "開く",
+  "menuSave": "保存",
+  "menuSaveAs": "名前を付けて保存...",
+  "menuEdit": "編集",
+  "menuUndo": "元に戻す",
+  "menuRedo": "やり直し",
+  "menuCut": "切り取り",
+  "menuCopy": "コピー",
+  "menuPaste": "貼り付け",
+  "menuView": "表示",
+  "menuShowGrid": "グリッド表示",
+  "menuSettings": "設定",
+  "menuFont": "フォント...",
+  "menuHelp": "ヘルプ",
+  "menuAbout": "このアプリについて",
+  "statusUnsaved": "未保存 *",
+  "labelSearch": "検索",
+  "labelReplace": "置換",
+  "labelReplaceAll": "全て置換",
+  "msgSaved": "保存しました: {path}"
+}

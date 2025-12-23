@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'dart:math';
 import 'dart:async';
 
+import 'l10n/app_localizations.dart';
 // 分割したファイルをインポート
 import 'memo_painter.dart';
 import 'text_utils.dart';
@@ -275,7 +276,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
       if (mounted && path != null) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('保存しました: $path'),
+            content: Text(AppLocalizations.of(context)!.msgSaved(path)),
             duration: const Duration(seconds: 1),
           ),
         );
@@ -383,6 +384,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   // 検索バーのビルド
   Widget _buildSearchBar() {
     if (!_showSearchBar) return const SizedBox.shrink();
+    final s = AppLocalizations.of(context)!;
 
     return Container(
       color: Colors.grey.shade100,
@@ -395,8 +397,8 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                 child: TextField(
                   controller: _searchController,
                   focusNode: _searchFocusNode,
-                  decoration: const InputDecoration(
-                    labelText: '検索',
+                  decoration: InputDecoration(
+                    labelText: s.labelSearch,
                     isDense: true,
                     border: OutlineInputBorder(),
                     contentPadding: EdgeInsets.all(8),
@@ -447,8 +449,8 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                 Expanded(
                   child: TextField(
                     controller: _replaceController,
-                    decoration: const InputDecoration(
-                      labelText: '置換',
+                    decoration: InputDecoration(
+                      labelText: s.labelReplace,
                       isDense: true,
                       border: OutlineInputBorder(),
                       contentPadding: EdgeInsets.all(8),
@@ -462,7 +464,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                       _replaceController.text,
                     );
                   },
-                  child: const Text('置換'),
+                  child: Text(s.labelReplace),
                 ),
                 TextButton(
                   onPressed: () {
@@ -471,11 +473,217 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                       _replaceController.text,
                     );
                   },
-                  child: const Text('全て置換'),
+                  child: Text(s.labelReplaceAll),
                 ),
               ],
             ),
           ],
+        ],
+      ),
+    );
+  }
+
+  // メニューバーの構築
+  Widget _buildMenuBar() {
+    // MenuBarも横幅いっぱいに広がろうとするため、Row(min)でラップして左寄せ・最小サイズにする
+    final s = AppLocalizations.of(context)!;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        MenuBar(
+          children: [
+            // File
+            SubmenuButton(
+              menuChildren: [
+                MenuItemButton(
+                  onPressed: _openFile,
+                  shortcut: const SingleActivator(
+                    LogicalKeyboardKey.keyO,
+                    control: true,
+                  ),
+                  child: MenuAcceleratorLabel(s.menuOpen),
+                ),
+                MenuItemButton(
+                  onPressed: _saveFile,
+                  shortcut: const SingleActivator(
+                    LogicalKeyboardKey.keyS,
+                    control: true,
+                  ),
+                  child: MenuAcceleratorLabel(s.menuSave),
+                ),
+                MenuItemButton(
+                  onPressed: _saveAsFile,
+                  shortcut: const SingleActivator(
+                    LogicalKeyboardKey.keyS,
+                    control: true,
+                    shift: true,
+                  ),
+                  child: MenuAcceleratorLabel(s.menuSaveAs),
+                ),
+              ],
+              child: MenuAcceleratorLabel(s.menuFile),
+            ),
+            // Edit
+            SubmenuButton(
+              menuChildren: [
+                MenuItemButton(
+                  onPressed: _undo,
+                  shortcut: const SingleActivator(
+                    LogicalKeyboardKey.keyZ,
+                    control: true,
+                  ),
+                  child: MenuAcceleratorLabel(s.menuUndo),
+                ),
+                MenuItemButton(
+                  onPressed: _redo,
+                  shortcut: const SingleActivator(
+                    LogicalKeyboardKey.keyY,
+                    control: true,
+                  ),
+                  child: MenuAcceleratorLabel(s.menuRedo),
+                ),
+                const Divider(), // 区切り線
+                MenuItemButton(
+                  onPressed: () {
+                    // 切り取り実装時はここ
+                  },
+                  shortcut: const SingleActivator(
+                    LogicalKeyboardKey.keyX,
+                    control: true,
+                  ),
+                  child: MenuAcceleratorLabel(s.menuCut),
+                ),
+                MenuItemButton(
+                  onPressed: () => _controller.copySelection(),
+                  shortcut: const SingleActivator(
+                    LogicalKeyboardKey.keyC,
+                    control: true,
+                  ),
+                  child: MenuAcceleratorLabel(s.menuCopy),
+                ),
+                MenuItemButton(
+                  onPressed: () {
+                    if (HardwareKeyboard.instance.isAltPressed) {
+                      _controller.pasteRectangular();
+                    } else {
+                      _controller.pasteNormal();
+                    }
+                  },
+                  shortcut: const SingleActivator(
+                    LogicalKeyboardKey.keyV,
+                    control: true,
+                  ),
+                  child: MenuAcceleratorLabel(s.menuPaste),
+                ),
+              ],
+              child: MenuAcceleratorLabel(s.menuEdit),
+            ),
+            // View
+            SubmenuButton(
+              menuChildren: [
+                MenuItemButton(
+                  onPressed: () => _controller.toggleGrid(),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _controller.showGrid
+                            ? Icons.check_box
+                            : Icons.check_box_outline_blank,
+                        size: 16,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(s.menuShowGrid),
+                    ],
+                  ),
+                ),
+              ],
+              child: MenuAcceleratorLabel(s.menuView),
+            ),
+            // Settings (最上位)
+            SubmenuButton(
+              menuChildren: [
+                MenuItemButton(
+                  onPressed: () {
+                    // フォント設定ダイアログなどをここに実装予定
+                  },
+                  child: MenuAcceleratorLabel(s.menuFont),
+                ),
+              ],
+              child: MenuAcceleratorLabel(s.menuSettings),
+            ),
+            // Help
+            SubmenuButton(
+              menuChildren: [
+                MenuItemButton(
+                  onPressed: () {
+                    showAboutDialog(
+                      context: context,
+                      applicationName: 'Free-form Memo',
+                      applicationVersion: '1.0.0',
+                    );
+                  },
+                  child: MenuAcceleratorLabel(s.menuAbout),
+                ),
+              ],
+              child: MenuAcceleratorLabel(s.menuHelp),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // ツールバーの構築 (旧AppBarの内容)
+  Widget _buildToolbar() {
+    final s = AppLocalizations.of(context)!;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      child: Row(
+        mainAxisSize: MainAxisSize.min, // 中身のサイズに合わせる
+        children: [
+          IconButton(
+            icon: const Icon(Icons.folder_open),
+            onPressed: _openFile,
+            tooltip: s.menuOpen,
+          ),
+          IconButton(
+            icon: const Icon(Icons.save),
+            onPressed: _saveFile,
+            tooltip: '${s.menuSave} (Ctrl+S)',
+          ),
+          IconButton(
+            icon: const Icon(Icons.save_as),
+            onPressed: _saveAsFile,
+            tooltip: '${s.menuSaveAs} (Ctrl+Shift+S)',
+          ),
+          const SizedBox(width: 16),
+          IconButton(
+            icon: Icon(_controller.showGrid ? Icons.grid_on : Icons.grid_off),
+            onPressed: () {
+              _controller.toggleGrid();
+            },
+            tooltip: s.menuShowGrid,
+          ),
+          PopupMenuButton<int>(
+            tooltip: 'タブ幅設定',
+            icon: const Icon(Icons.space_bar),
+            onSelected: (value) {
+              _controller.setTabWidth(value);
+            },
+            itemBuilder: (context) => [
+              CheckedPopupMenuItem(
+                checked: _controller.tabWidth == 2,
+                value: 2,
+                child: const Text('Tab Width: 2'),
+              ),
+              CheckedPopupMenuItem(
+                checked: _controller.tabWidth == 4,
+                value: 4,
+                child: const Text('Tab Width: 4'),
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -510,59 +718,12 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     );
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Free-form Memo'),
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.folder_open),
-            onPressed: _openFile,
-            tooltip: '開く',
-          ),
-          IconButton(
-            icon: const Icon(Icons.save), // 上書き保存
-            onPressed: _saveFile,
-            tooltip: '上書き保存 (Ctrl+S)',
-          ),
-          IconButton(
-            icon: const Icon(Icons.save_as), // 名前を付けて保存
-            onPressed: _saveAsFile,
-            tooltip: '名前を付けて保存 (Ctrl+Shift+S)',
-          ),
-          Row(
-            children: [
-              const Text('Grid'),
-              Switch(
-                value: _controller.showGrid,
-                onChanged: (value) {
-                  _controller.toggleGrid();
-                },
-              ),
-            ],
-          ),
-          PopupMenuButton<int>(
-            tooltip: 'タブ幅設定',
-            icon: const Icon(Icons.space_bar),
-            onSelected: (value) {
-              _controller.setTabWidth(value);
-            },
-            itemBuilder: (context) => [
-              CheckedPopupMenuItem(
-                checked: _controller.tabWidth == 2,
-                value: 2,
-                child: const Text('Tab Width: 2'),
-              ),
-              CheckedPopupMenuItem(
-                checked: _controller.tabWidth == 4,
-                value: 4,
-                child: const Text('Tab Width: 4'),
-              ),
-            ],
-          ),
-        ],
-      ),
+      // appBar: AppBar(...), // 削除
       body: Column(
+        crossAxisAlignment: CrossAxisAlignment.start, // 左寄せ
         children: [
+          _buildMenuBar(), // メニューバー
+          _buildToolbar(), // ツールバー
           _buildSearchBar(),
           Expanded(
             child: Scrollbar(
@@ -713,7 +874,9 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                 SizedBox(
                   width: 80,
                   child: Text(
-                    _controller.isDirty ? "未保存 *" : "",
+                    _controller.isDirty
+                        ? AppLocalizations.of(context)!.statusUnsaved
+                        : "",
                     style: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
