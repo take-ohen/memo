@@ -9,6 +9,9 @@
   "menuCut": "切り取り",
   "menuCopy": "コピー",
   "menuPaste": "貼り付け",
+  "menuPasteRect": "矩形貼り付け",
+  "menuFind": "検索",
+  "menuReplace": "置換",
   "menuView": "表示",
   "menuShowGrid": "グリッド表示",
   "menuSettings": "設定",
@@ -19,5 +22,14 @@
   "labelSearch": "検索",
   "labelReplace": "置換",
   "labelReplaceAll": "全て置換",
-  "msgSaved": "保存しました: {path}"
+  "msgSaved": "保存しました: {path}",
+  "settingsTabEditor": "エディタ",
+  "settingsTabUi": "UI / メニュー",
+  "labelFontFamily": "フォント名",
+  "labelFontSize": "サイズ",
+  "labelBold": "太字",
+  "labelItalic": "斜体",
+  "btnScanFonts": "フォント一覧を更新",
+  "msgScanningFonts": "フォントをスキャン中...",
+  "previewText": "The quick brown fox jumps over the lazy dog. 0123456789 日本語のテスト"
 }

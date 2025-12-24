@@ -152,11 +152,29 @@ abstract class AppLocalizations {
   /// **'Copy'**
   String get menuCopy;
 
+  /// No description provided for @menuPasteRect.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste Rectangular'**
+  String get menuPasteRect;
+
   /// No description provided for @menuPaste.
   ///
   /// In en, this message translates to:
   /// **'Paste'**
   String get menuPaste;
+
+  /// No description provided for @menuFind.
+  ///
+  /// In en, this message translates to:
+  /// **'Find'**
+  String get menuFind;
+
+  /// No description provided for @menuReplace.
+  ///
+  /// In en, this message translates to:
+  /// **'Replace'**
+  String get menuReplace;
 
   /// No description provided for @menuView.
   ///
@@ -223,6 +241,60 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Saved: {path}'**
   String msgSaved(Object path);
+
+  /// No description provided for @settingsTabEditor.
+  ///
+  /// In en, this message translates to:
+  /// **'Editor'**
+  String get settingsTabEditor;
+
+  /// No description provided for @settingsTabUi.
+  ///
+  /// In en, this message translates to:
+  /// **'UI / Menu'**
+  String get settingsTabUi;
+
+  /// No description provided for @labelFontFamily.
+  ///
+  /// In en, this message translates to:
+  /// **'Font Family'**
+  String get labelFontFamily;
+
+  /// No description provided for @labelFontSize.
+  ///
+  /// In en, this message translates to:
+  /// **'Font Size'**
+  String get labelFontSize;
+
+  /// No description provided for @labelBold.
+  ///
+  /// In en, this message translates to:
+  /// **'Bold'**
+  String get labelBold;
+
+  /// No description provided for @labelItalic.
+  ///
+  /// In en, this message translates to:
+  /// **'Italic'**
+  String get labelItalic;
+
+  /// No description provided for @btnScanFonts.
+  ///
+  /// In en, this message translates to:
+  /// **'Rescan Fonts'**
+  String get btnScanFonts;
+
+  /// No description provided for @msgScanningFonts.
+  ///
+  /// In en, this message translates to:
+  /// **'Scanning fonts...'**
+  String get msgScanningFonts;
+
+  /// No description provided for @previewText.
+  ///
+  /// In en, this message translates to:
+  /// **'The quick brown fox jumps over the lazy dog. 0123456789'**
+  String get previewText;
 }
 
 class _AppLocalizationsDelegate

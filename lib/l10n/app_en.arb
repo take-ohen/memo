@@ -8,7 +8,10 @@
   "menuRedo": "Redo",
   "menuCut": "Cut",
   "menuCopy": "Copy",
+  "menuPasteRect": "Paste Rectangular",
   "menuPaste": "Paste",
+  "menuFind": "Find",
+  "menuReplace": "Replace",
   "menuView": "View",
   "menuShowGrid": "Show Grid",
   "menuSettings": "Settings",
@@ -19,5 +22,14 @@
   "labelSearch": "Search",
   "labelReplace": "Replace",
   "labelReplaceAll": "Replace All",
-  "msgSaved": "Saved: {path}"
+  "msgSaved": "Saved: {path}",
+  "settingsTabEditor": "Editor",
+  "settingsTabUi": "UI / Menu",
+  "labelFontFamily": "Font Family",
+  "labelFontSize": "Font Size",
+  "labelBold": "Bold",
+  "labelItalic": "Italic",
+  "btnScanFonts": "Rescan Fonts",
+  "msgScanningFonts": "Scanning fonts...",
+  "previewText": "The quick brown fox jumps over the lazy dog. 0123456789"
 }

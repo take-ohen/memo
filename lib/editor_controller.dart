@@ -28,6 +28,24 @@ class EditorController extends ChangeNotifier {
   bool isDirty = false; // 変更ありフラグ
   Encoding currentEncoding = utf8; // 文字コード
 
+  // --- UIフォント設定 ---
+  String _uiFontFamily = 'Segoe UI'; // Windows標準など
+  double _uiFontSize = 14.0;
+  bool _uiBold = false;
+  bool _uiItalic = false;
+
+  // --- エディタフォントのスタイル拡張 ---
+  bool _editorBold = false;
+  bool _editorItalic = false;
+
+  // Getters
+  String get uiFontFamily => _uiFontFamily;
+  double get uiFontSize => _uiFontSize;
+  bool get uiBold => _uiBold;
+  bool get uiItalic => _uiItalic;
+  bool get editorBold => _editorBold;
+  bool get editorItalic => _editorItalic;
+
   // 検索・置換
   List<SearchResult> searchResults = [];
   int currentSearchIndex = -1;
@@ -54,6 +72,12 @@ class EditorController extends ChangeNotifier {
     fontFamily = prefs.getString('fontFamily') ?? "BIZ UDゴシック";
     fontSize = prefs.getDouble('fontSize') ?? 16.0;
     minCanvasSize = prefs.getDouble('minCanvasSize') ?? 2000.0;
+    _uiFontFamily = prefs.getString('uiFontFamily') ?? 'Segoe UI';
+    _uiFontSize = prefs.getDouble('uiFontSize') ?? 14.0;
+    _uiBold = prefs.getBool('uiBold') ?? false;
+    _uiItalic = prefs.getBool('uiItalic') ?? false;
+    _editorBold = prefs.getBool('editorBold') ?? false;
+    _editorItalic = prefs.getBool('editorItalic') ?? false;
     notifyListeners();
   }
 
@@ -90,6 +114,35 @@ class EditorController extends ChangeNotifier {
   void setMinCanvasSize(double size) {
     minCanvasSize = size;
     _saveDouble('minCanvasSize', size);
+    notifyListeners();
+  }
+
+  // フォント設定の更新メソッド
+  void setUiFont(String family, double size, bool bold, bool italic) {
+    _uiFontFamily = family;
+    _uiFontSize = size;
+    _uiBold = bold;
+    _uiItalic = italic;
+
+    _saveString('uiFontFamily', family);
+    _saveDouble('uiFontSize', size);
+    _saveBool('uiBold', bold);
+    _saveBool('uiItalic', italic);
+
+    notifyListeners();
+  }
+
+  void setEditorFont(String family, double size, bool bold, bool italic) {
+    fontFamily = family; // 既存の変数
+    fontSize = size; // 既存の変数
+    _editorBold = bold;
+    _editorItalic = italic;
+
+    _saveString('fontFamily', family);
+    _saveDouble('fontSize', size);
+    _saveBool('editorBold', bold);
+    _saveBool('editorItalic', italic);
+
     notifyListeners();
   }
 

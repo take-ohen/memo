@@ -36,7 +36,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get menuCopy => 'Copy';
 
   @override
+  String get menuPasteRect => 'Paste Rectangular';
+
+  @override
   String get menuPaste => 'Paste';
+
+  @override
+  String get menuFind => 'Find';
+
+  @override
+  String get menuReplace => 'Replace';
 
   @override
   String get menuView => 'View';
@@ -72,4 +81,32 @@ class AppLocalizationsEn extends AppLocalizations {
   String msgSaved(Object path) {
     return 'Saved: $path';
   }
+
+  @override
+  String get settingsTabEditor => 'Editor';
+
+  @override
+  String get settingsTabUi => 'UI / Menu';
+
+  @override
+  String get labelFontFamily => 'Font Family';
+
+  @override
+  String get labelFontSize => 'Font Size';
+
+  @override
+  String get labelBold => 'Bold';
+
+  @override
+  String get labelItalic => 'Italic';
+
+  @override
+  String get btnScanFonts => 'Rescan Fonts';
+
+  @override
+  String get msgScanningFonts => 'Scanning fonts...';
+
+  @override
+  String get previewText =>
+      'The quick brown fox jumps over the lazy dog. 0123456789';
 }

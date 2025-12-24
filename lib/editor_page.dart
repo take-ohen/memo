@@ -13,6 +13,7 @@ import 'text_utils.dart';
 import 'history_manager.dart';
 import 'editor_controller.dart'; // コントローラーをインポート
 import 'package:free_memo_editor/file_io_helper.dart'; // 相対パスからpackageパスへ変更
+import 'settings_dialog.dart'; // 設定ダイアログをインポート
 
 class EditorPage extends StatefulWidget {
   const EditorPage({super.key});
@@ -55,6 +56,8 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   TextStyle get _textStyle => TextStyle(
     fontFamily: _controller.fontFamily,
     fontSize: _controller.fontSize,
+    fontWeight: _controller.editorBold ? FontWeight.bold : FontWeight.normal,
+    fontStyle: _controller.editorItalic ? FontStyle.italic : FontStyle.normal,
     color: Colors.black,
   );
 
@@ -562,18 +565,54 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                   child: MenuAcceleratorLabel(s.menuCopy),
                 ),
                 MenuItemButton(
-                  onPressed: () {
-                    if (HardwareKeyboard.instance.isAltPressed) {
-                      _controller.pasteRectangular();
-                    } else {
-                      _controller.pasteNormal();
-                    }
-                  },
+                  onPressed: () => _controller.pasteNormal(),
                   shortcut: const SingleActivator(
                     LogicalKeyboardKey.keyV,
                     control: true,
                   ),
                   child: MenuAcceleratorLabel(s.menuPaste),
+                ),
+                MenuItemButton(
+                  onPressed: () => _controller.pasteRectangular(),
+                  shortcut: const SingleActivator(
+                    LogicalKeyboardKey.keyV,
+                    control: true,
+                    alt: true,
+                  ),
+                  child: MenuAcceleratorLabel(s.menuPasteRect),
+                ),
+                const Divider(),
+                MenuItemButton(
+                  onPressed: () {
+                    setState(() {
+                      _showSearchBar = true;
+                      _isReplaceMode = false;
+                    });
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      _searchFocusNode.requestFocus();
+                    });
+                  },
+                  shortcut: const SingleActivator(
+                    LogicalKeyboardKey.keyF,
+                    control: true,
+                  ),
+                  child: MenuAcceleratorLabel(s.menuFind),
+                ),
+                MenuItemButton(
+                  onPressed: () {
+                    setState(() {
+                      _showSearchBar = true;
+                      _isReplaceMode = true;
+                    });
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      _searchFocusNode.requestFocus();
+                    });
+                  },
+                  shortcut: const SingleActivator(
+                    LogicalKeyboardKey.keyH,
+                    control: true,
+                  ),
+                  child: MenuAcceleratorLabel(s.menuReplace),
                 ),
               ],
               child: MenuAcceleratorLabel(s.menuEdit),
@@ -604,7 +643,11 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
               menuChildren: [
                 MenuItemButton(
                   onPressed: () {
-                    // フォント設定ダイアログなどをここに実装予定
+                    showDialog(
+                      context: context,
+                      builder: (context) =>
+                          SettingsDialog(controller: _controller),
+                    );
                   },
                   child: MenuAcceleratorLabel(s.menuFont),
                 ),
@@ -691,6 +734,19 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
   @override
   Widget build(BuildContext context) {
+    // UIフォント設定を適用するためのThemeラッパー
+    return Theme(
+      data: Theme.of(context).copyWith(
+        textTheme: Theme.of(context).textTheme.apply(
+          fontFamily: _controller.uiFontFamily,
+          fontSizeFactor: _controller.uiFontSize / 14.0, // 基準サイズからの倍率
+        ),
+      ),
+      child: _buildScaffold(context),
+    );
+  }
+
+  Widget _buildScaffold(BuildContext context) {
     // 行番号エリアの幅を計算 (桁数 * 文字幅 + パディング)
     int digits = _controller.lines.length.toString().length;
     double lineNumberAreaWidth = digits * _charWidth + 20.0;
@@ -917,6 +973,10 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
       }
       if (_inputConnection != null && _inputConnection!.attached) {
         _inputConnection!.setEditingState(TextEditingValue.empty);
+      }
+      // IME確定後にフォーカスが外れるのを防ぐため、明示的に要求する
+      if (!_focusNode.hasFocus) {
+        _focusNode.requestFocus();
       }
     } else {
       _controller.updateComposingText(value.text);

@@ -36,7 +36,16 @@ class AppLocalizationsJa extends AppLocalizations {
   String get menuCopy => 'コピー';
 
   @override
+  String get menuPasteRect => '矩形貼り付け';
+
+  @override
   String get menuPaste => '貼り付け';
+
+  @override
+  String get menuFind => '検索';
+
+  @override
+  String get menuReplace => '置換';
 
   @override
   String get menuView => '表示';
@@ -72,4 +81,32 @@ class AppLocalizationsJa extends AppLocalizations {
   String msgSaved(Object path) {
     return '保存しました: $path';
   }
+
+  @override
+  String get settingsTabEditor => 'エディタ';
+
+  @override
+  String get settingsTabUi => 'UI / メニュー';
+
+  @override
+  String get labelFontFamily => 'フォント名';
+
+  @override
+  String get labelFontSize => 'サイズ';
+
+  @override
+  String get labelBold => '太字';
+
+  @override
+  String get labelItalic => '斜体';
+
+  @override
+  String get btnScanFonts => 'フォント一覧を更新';
+
+  @override
+  String get msgScanningFonts => 'フォントをスキャン中...';
+
+  @override
+  String get previewText =>
+      'The quick brown fox jumps over the lazy dog. 0123456789 日本語のテスト';
 }
