@@ -176,6 +176,36 @@ abstract class AppLocalizations {
   /// **'Replace'**
   String get menuReplace;
 
+  /// No description provided for @menuFormat.
+  ///
+  /// In en, this message translates to:
+  /// **'Format'**
+  String get menuFormat;
+
+  /// No description provided for @menuDrawBoxDouble.
+  ///
+  /// In en, this message translates to:
+  /// **'Draw Box (Double/Full)'**
+  String get menuDrawBoxDouble;
+
+  /// No description provided for @menuDrawBoxSingle.
+  ///
+  /// In en, this message translates to:
+  /// **'Draw Box (Single/Half)'**
+  String get menuDrawBoxSingle;
+
+  /// No description provided for @menuFormatTableDouble.
+  ///
+  /// In en, this message translates to:
+  /// **'Convert to Table (Double/Full)'**
+  String get menuFormatTableDouble;
+
+  /// No description provided for @menuFormatTableSingle.
+  ///
+  /// In en, this message translates to:
+  /// **'Convert to Table (Single/Half)'**
+  String get menuFormatTableSingle;
+
   /// No description provided for @menuView.
   ///
   /// In en, this message translates to:

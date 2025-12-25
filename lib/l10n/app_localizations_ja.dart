@@ -48,6 +48,21 @@ class AppLocalizationsJa extends AppLocalizations {
   String get menuReplace => '置換';
 
   @override
+  String get menuFormat => '整形';
+
+  @override
+  String get menuDrawBoxDouble => '枠線で囲む (全角)';
+
+  @override
+  String get menuDrawBoxSingle => '枠線で囲む (半角)';
+
+  @override
+  String get menuFormatTableDouble => '表に変換 (全角)';
+
+  @override
+  String get menuFormatTableSingle => '表に変換 (半角)';
+
+  @override
   String get menuView => '表示';
 
   @override

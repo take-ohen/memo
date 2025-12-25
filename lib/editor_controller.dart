@@ -554,6 +554,378 @@ class EditorController extends ChangeNotifier {
     notifyListeners();
   }
 
+  // --- Formatting ---
+  void drawBox({bool useHalfWidth = false}) {
+    try {
+      if (!hasSelection) return;
+      saveHistory();
+
+      int startRow = min(selectionOriginRow!, cursorRow);
+      int endRow = max(selectionOriginRow!, cursorRow);
+
+      int originVisualX = _calcVisualX(
+        selectionOriginRow!,
+        selectionOriginCol!,
+      );
+      int cursorVisualX = _calcVisualX(cursorRow, cursorCol);
+      int minVisualX = min(originVisualX, cursorVisualX);
+      int maxVisualX = max(originVisualX, cursorVisualX);
+
+      // 罫線文字 (全角)
+      final String tl = useHalfWidth ? '+' : '┌';
+      final String tr = useHalfWidth ? '+' : '┐';
+      final String bl = useHalfWidth ? '+' : '└';
+      final String br = useHalfWidth ? '+' : '┘';
+      final String h = useHalfWidth ? '-' : '─';
+      final String hHalf = '-';
+      final String v = useHalfWidth ? '|' : '│';
+      final int lineWidth = useHalfWidth ? 1 : 2;
+
+      // ★追加: 描画スペースの自動確保
+      // 1. 上端の拡張 (0行目の場合、上に行を挿入)
+      if (startRow == 0) {
+        lines.insert(0, "");
+        startRow++;
+        endRow++;
+      }
+
+      // 2. 左端の拡張 (左端に枠を描く幅がない場合、全行にスペース挿入)
+      if (minVisualX < lineWidth) {
+        int shiftAmount = lineWidth - minVisualX;
+        for (int i = 0; i < lines.length; i++) {
+          lines[i] = (' ' * shiftAmount) + lines[i];
+        }
+        minVisualX += shiftAmount;
+        maxVisualX += shiftAmount;
+      }
+
+      // 描画位置の計算（選択範囲の1つ外側）
+      int topRow = startRow - 1;
+      int bottomRow = endRow + 1;
+      int leftVisualX = minVisualX - lineWidth;
+      int rightVisualX = maxVisualX;
+
+      // 1. 上下の水平線を描画
+      // 左枠の内側(leftVisualX + lineWidth) から 右枠の手前(rightVisualX) まで
+      int hStart = leftVisualX + lineWidth;
+      int hEnd = rightVisualX;
+
+      // 上辺 (0行目以上の場合のみ)
+      if (topRow >= 0) {
+        int vx = hStart;
+        while (vx < hEnd) {
+          if (vx + lineWidth <= hEnd) {
+            if (vx >= 0) _writeCharToVisualLine(topRow, vx, h);
+            vx += lineWidth;
+          } else {
+            if (vx >= 0) _writeCharToVisualLine(topRow, vx, hHalf);
+            vx += 1;
+          }
+        }
+      }
+
+      // 下辺 (常に描画可能)
+      int vx = hStart;
+      while (vx < hEnd) {
+        if (vx + lineWidth <= hEnd) {
+          if (vx >= 0) _writeCharToVisualLine(bottomRow, vx, h);
+          vx += lineWidth;
+        } else {
+          if (vx >= 0) _writeCharToVisualLine(bottomRow, vx, hHalf);
+          vx += 1;
+        }
+      }
+
+      // 2. 左右の垂直線を描画
+      for (int r = startRow; r <= endRow; r++) {
+        // 左辺 (0列目以上の場合のみ)
+        if (leftVisualX >= 0) {
+          _writeCharToVisualLine(r, leftVisualX, v);
+        }
+        // 右辺
+        _writeCharToVisualLine(r, rightVisualX, v);
+      }
+
+      // 3. 四隅を描画 (最後に描くことで角を優先)
+      // 左上
+      if (topRow >= 0 && leftVisualX >= 0) {
+        _writeCharToVisualLine(topRow, leftVisualX, tl);
+      }
+      // 右上
+      if (topRow >= 0) {
+        _writeCharToVisualLine(topRow, rightVisualX, tr);
+      }
+      // 左下
+      if (leftVisualX >= 0) {
+        _writeCharToVisualLine(bottomRow, leftVisualX, bl);
+      }
+      // 右下
+      _writeCharToVisualLine(bottomRow, rightVisualX, br);
+
+      // 選択解除
+      clearSelection();
+      isDirty = true;
+      notifyListeners();
+    } catch (e, stackTrace) {
+      debugPrint('Error in drawBox: $e\n$stackTrace');
+    }
+  }
+
+  /// 選択範囲のテキストを表形式（罫線付き）に変換する
+  void formatTable({bool useHalfWidth = false}) {
+    try {
+      if (!hasSelection) return;
+      saveHistory();
+
+      // 選択範囲の行全体を対象とする
+      int startRow = min(selectionOriginRow!, cursorRow);
+      int endRow = max(selectionOriginRow!, cursorRow);
+      int originVisualX = _calcVisualX(
+        selectionOriginRow!,
+        selectionOriginCol!,
+      );
+      int cursorVisualX = _calcVisualX(cursorRow, cursorCol);
+      int minVisualX = min(originVisualX, cursorVisualX);
+      int maxVisualX = max(originVisualX, cursorVisualX);
+
+      // 範囲外ガード
+      if (startRow >= lines.length) return;
+      if (endRow >= lines.length) endRow = lines.length - 1;
+
+      // 1. テキスト抽出 (矩形範囲のみ)
+      List<String> extractedLines = [];
+      for (int i = startRow; i <= endRow; i++) {
+        String line = lines[i];
+        int startCol = TextUtils.getColFromVisualX(line, minVisualX);
+        int endCol = TextUtils.getColFromVisualX(line, maxVisualX);
+        if (startCol > endCol) {
+          int t = startCol;
+          startCol = endCol;
+          endCol = t;
+        }
+
+        String text = "";
+        if (startCol < line.length) {
+          int safeEnd = min(endCol, line.length);
+          text = line.substring(startCol, safeEnd);
+        }
+        extractedLines.add(text);
+      }
+      if (extractedLines.isEmpty) return;
+
+      // 2. 区切り文字の推定 (タブが含まれていればタブ優先、なければカンマ)
+      String separator = ',';
+      if (extractedLines.any((line) => line.contains('\t'))) {
+        separator = '\t';
+      }
+
+      // 3. データをパースして最大列幅を計算
+      List<List<String>> tableData = [];
+      int maxCols = 0;
+      for (var line in extractedLines) {
+        var cols = line.split(separator);
+        if (cols.length > maxCols) maxCols = cols.length;
+        tableData.add(cols);
+      }
+
+      List<int> colWidths = List.filled(maxCols, 0);
+      for (var row in tableData) {
+        for (int i = 0; i < row.length; i++) {
+          // 前後の空白を除去して幅計算
+          int w = TextUtils.calcTextWidth(row[i].trim());
+          if (w > colWidths[i]) colWidths[i] = w;
+        }
+      }
+
+      // 4. 罫線文字定義
+      final String tl = useHalfWidth ? '+' : '┌';
+      final String tm = useHalfWidth ? '+' : '┬';
+      final String tr = useHalfWidth ? '+' : '┐';
+      final String ml = useHalfWidth ? '+' : '├';
+      final String mm = useHalfWidth ? '+' : '┼';
+      final String mr = useHalfWidth ? '+' : '┤';
+      final String bl = useHalfWidth ? '+' : '└';
+      final String bm = useHalfWidth ? '+' : '┴';
+      final String br = useHalfWidth ? '+' : '┘';
+      final String h = useHalfWidth ? '-' : '─';
+      final String v = useHalfWidth ? '|' : '│';
+      final String hHalf = '-'; // 全角モード時の端数調整用
+      final int lineWidth = useHalfWidth ? 1 : 2;
+
+      // 行構築ヘルパー
+      String buildSeparatorLine(String left, String mid, String right) {
+        StringBuffer sb = StringBuffer();
+        sb.write(left);
+        for (int i = 0; i < maxCols; i++) {
+          int w = colWidths[i];
+          // 幅に合わせて水平線を引く
+          int currentW = 0;
+          while (currentW < w) {
+            if (currentW + lineWidth <= w) {
+              sb.write(h);
+              currentW += lineWidth;
+            } else {
+              sb.write(hHalf);
+              currentW += 1;
+            }
+          }
+          if (i < maxCols - 1) sb.write(mid);
+        }
+        sb.write(right);
+        return sb.toString();
+      }
+
+      String buildDataLine(List<String> rowData) {
+        StringBuffer sb = StringBuffer();
+        sb.write(v);
+        for (int i = 0; i < maxCols; i++) {
+          String cell = (i < rowData.length) ? rowData[i].trim() : "";
+          int cellW = TextUtils.calcTextWidth(cell);
+          int targetW = colWidths[i];
+          sb.write(cell);
+          sb.write(' ' * (targetW - cellW)); // パディング
+          if (i < maxCols - 1) sb.write(v);
+        }
+        sb.write(v);
+        return sb.toString();
+      }
+
+      // 5. 新しい行リストを生成
+      List<String> newLines = [];
+      newLines.add(buildSeparatorLine(tl, tm, tr)); // Top
+      for (int i = 0; i < tableData.length; i++) {
+        newLines.add(buildDataLine(tableData[i])); // Data
+        if (i < tableData.length - 1) {
+          newLines.add(buildSeparatorLine(ml, mm, mr)); // Middle
+        } else {
+          newLines.add(buildSeparatorLine(bl, bm, br)); // Bottom
+        }
+      }
+
+      // 6. 元の矩形範囲を削除
+      for (int i = startRow; i <= endRow; i++) {
+        String line = lines[i];
+        int startCol = TextUtils.getColFromVisualX(line, minVisualX);
+        int endCol = TextUtils.getColFromVisualX(line, maxVisualX);
+        if (startCol > endCol) {
+          int t = startCol;
+          startCol = endCol;
+          endCol = t;
+        }
+
+        String part1 = line.substring(0, startCol);
+        String part2 = (endCol < line.length) ? line.substring(endCol) : "";
+        lines[i] = part1 + part2;
+      }
+
+      // 7. 表データを矩形挿入
+      int insertRow = startRow;
+      int targetVisualX = minVisualX;
+
+      for (int i = 0; i < newLines.length; i++) {
+        int targetRow = insertRow + i;
+        String textToInsert = newLines[i];
+
+        if (targetRow >= lines.length) lines.add("");
+
+        // 挿入位置までパディング
+        int currentWidth = TextUtils.calcTextWidth(lines[targetRow]);
+        if (currentWidth < targetVisualX) {
+          lines[targetRow] += ' ' * (targetVisualX - currentWidth);
+        }
+
+        String line = lines[targetRow];
+        int insertCol = TextUtils.getColFromVisualX(line, targetVisualX);
+
+        String part1 = line.substring(0, insertCol);
+        String part2 = line.substring(insertCol);
+        lines[targetRow] = part1 + textToInsert + part2;
+      }
+
+      // 選択解除・カーソル移動
+      cursorRow = insertRow + newLines.length;
+      cursorCol = 0;
+      clearSelection();
+      isDirty = true;
+      notifyListeners();
+    } catch (e, stackTrace) {
+      debugPrint('Error in formatTable: $e\n$stackTrace');
+    }
+  }
+
+  /// 指定行の指定VisualX位置に文字を書き込む（セル展開方式）
+  /// 既存の文字幅を考慮し、必要ならスペースで埋めたり、全角文字を分割したりする
+  void _writeCharToVisualLine(int row, int targetVisualX, String charToPut) {
+    // 行が足りなければ追加
+    while (lines.length <= row) {
+      lines.add("");
+    }
+    String line = lines[row];
+
+    // 1. 文字列をVisualセル（文字の配列、全角の2セル目はnull）に展開
+    List<String?> cells = [];
+    for (int rune in line.runes) {
+      String char = String.fromCharCode(rune);
+      int w = (rune < 128) ? 1 : 2;
+      cells.add(char);
+      if (w == 2) {
+        cells.add(null); // 全角の2セル目
+      }
+    }
+
+    // 2. 必要な長さまでスペースでパディング
+    int putWidth = TextUtils.calcTextWidth(charToPut);
+    int requiredLen = targetVisualX + putWidth;
+    while (cells.length < requiredLen) {
+      cells.add(' ');
+    }
+
+    // 3. 書き込み処理
+    // 書き込み開始位置が null (全角文字の2セル目) だった場合、その全角文字の前半をスペースにする
+    if (cells[targetVisualX] == null) {
+      // 直前の非nullセルを探してスペースにする
+      if (targetVisualX > 0) {
+        cells[targetVisualX - 1] = ' ';
+        cells[targetVisualX] = ' '; // ここは一旦スペースにしておく（後で上書きされる）
+      }
+    }
+
+    // 書き込み範囲にある既存文字をクリア（全角文字の一部にかかる場合への対処）
+    for (int i = 0; i < putWidth; i++) {
+      int idx = targetVisualX + i;
+      if (idx < cells.length) {
+        if (cells[idx] == null) {
+          // 全角の後半を潰す -> 前半もスペースに
+          if (idx > 0) cells[idx - 1] = ' ';
+        } else if (idx + 1 < cells.length && cells[idx + 1] == null) {
+          // 全角の前半を潰す -> 後半をスペースに（nullではなく実体化）
+          cells[idx + 1] = ' ';
+        }
+        cells[idx] = ' '; // とりあえずスペース化
+      }
+    }
+
+    // 文字を配置
+    cells[targetVisualX] = charToPut;
+    // 全角文字なら2セル目をnullにする
+    if (putWidth == 2) {
+      if (targetVisualX + 1 < cells.length) {
+        cells[targetVisualX + 1] = null;
+      } else {
+        cells.add(null);
+      }
+    }
+
+    // 4. 文字列に再構築
+    StringBuffer sb = StringBuffer();
+    for (String? c in cells) {
+      if (c != null) {
+        sb.write(c);
+      }
+    }
+    lines[row] = sb.toString();
+  }
+
   // --- File I/O ---
   Future<void> openFile() async {
     try {
@@ -738,62 +1110,70 @@ class EditorController extends ChangeNotifier {
   }
 
   Future<void> pasteRectangular() async {
-    final data = await Clipboard.getData(Clipboard.kTextPlain);
-    if (data == null || data.text == null || data.text!.isEmpty) return;
+    try {
+      final data = await Clipboard.getData(Clipboard.kTextPlain);
+      if (data == null || data.text == null || data.text!.isEmpty) return;
 
-    final List<String> pasteLines = const LineSplitter().convert(data.text!);
-    if (pasteLines.isEmpty) return;
+      final List<String> pasteLines = const LineSplitter().convert(data.text!);
+      if (pasteLines.isEmpty) return;
 
-    int startRow = cursorRow;
-    String currentLine = (cursorRow < lines.length) ? lines[cursorRow] : "";
-    String textBefore = "";
-    if (cursorCol <= currentLine.length) {
-      textBefore = currentLine.substring(0, cursorCol);
-    } else {
-      textBefore = currentLine + (' ' * (cursorCol - currentLine.length));
-    }
-    int targetVisualX = TextUtils.calcTextWidth(textBefore);
-
-    for (int i = 0; i < pasteLines.length; i++) {
-      int targetRow = startRow + i;
-      String textToPaste = pasteLines[i].replaceAll(RegExp(r'[\r\n]'), '');
-      int pasteWidth = TextUtils.calcTextWidth(textToPaste);
-
-      ensureVirtualSpace(targetRow, 0);
-      String line = lines[targetRow];
-      int insertIndex = TextUtils.getColFromVisualX(line, targetVisualX);
-
-      if (insertIndex > line.length) {
-        ensureVirtualSpace(targetRow, insertIndex);
-        line = lines[targetRow];
-      }
-
-      if (!isOverwriteMode) {
-        String part1 = line.substring(0, insertIndex);
-        String part2 = line.substring(insertIndex);
-        lines[targetRow] = part1 + textToPaste + part2;
+      int startRow = cursorRow;
+      String currentLine = (cursorRow < lines.length) ? lines[cursorRow] : "";
+      String textBefore = "";
+      if (cursorCol <= currentLine.length) {
+        textBefore = currentLine.substring(0, cursorCol);
       } else {
-        int endVisualX = targetVisualX + pasteWidth;
-        int endIndex = TextUtils.getColFromVisualX(line, endVisualX);
-        if (endIndex > line.length) endIndex = line.length;
-        String part1 = line.substring(0, insertIndex);
-        String part2 = line.substring(endIndex);
-        lines[targetRow] = part1 + textToPaste + part2;
+        textBefore = currentLine + (' ' * (cursorCol - currentLine.length));
       }
+      int targetVisualX = TextUtils.calcTextWidth(textBefore);
+
+      for (int i = 0; i < pasteLines.length; i++) {
+        int targetRow = startRow + i;
+        String textToPaste = pasteLines[i].replaceAll(RegExp(r'[\r\n]'), '');
+        int pasteWidth = TextUtils.calcTextWidth(textToPaste);
+
+        ensureVirtualSpace(targetRow, 0);
+        String line = lines[targetRow];
+
+        // ★修正: VisualX基準でパディングを行う
+        int currentLineWidth = TextUtils.calcTextWidth(line);
+        if (currentLineWidth < targetVisualX) {
+          int spacesNeeded = targetVisualX - currentLineWidth;
+          lines[targetRow] += ' ' * spacesNeeded;
+          line = lines[targetRow];
+        }
+
+        int insertIndex = TextUtils.getColFromVisualX(line, targetVisualX);
+
+        if (!isOverwriteMode) {
+          String part1 = line.substring(0, insertIndex);
+          String part2 = line.substring(insertIndex);
+          lines[targetRow] = part1 + textToPaste + part2;
+        } else {
+          int endVisualX = targetVisualX + pasteWidth;
+          int endIndex = TextUtils.getColFromVisualX(line, endVisualX);
+          if (endIndex > line.length) endIndex = line.length;
+          String part1 = line.substring(0, insertIndex);
+          String part2 = line.substring(endIndex);
+          lines[targetRow] = part1 + textToPaste + part2;
+        }
+      }
+      cursorRow = startRow + pasteLines.length - 1;
+      String lastPasted = pasteLines.last.replaceAll(RegExp(r'[\r\n]'), '');
+      int lastWidth = TextUtils.calcTextWidth(lastPasted);
+      preferredVisualX = targetVisualX + lastWidth;
+      if (cursorRow < lines.length) {
+        cursorCol = TextUtils.getColFromVisualX(
+          lines[cursorRow],
+          preferredVisualX,
+        );
+      }
+      selectionOriginRow = null;
+      selectionOriginCol = null;
+      notifyListeners();
+    } catch (e, stackTrace) {
+      debugPrint('Error in pasteRectangular: $e\n$stackTrace');
     }
-    cursorRow = startRow + pasteLines.length - 1;
-    String lastPasted = pasteLines.last.replaceAll(RegExp(r'[\r\n]'), '');
-    int lastWidth = TextUtils.calcTextWidth(lastPasted);
-    preferredVisualX = targetVisualX + lastWidth;
-    if (cursorRow < lines.length) {
-      cursorCol = TextUtils.getColFromVisualX(
-        lines[cursorRow],
-        preferredVisualX,
-      );
-    }
-    selectionOriginRow = null;
-    selectionOriginCol = null;
-    notifyListeners();
   }
 
   // ヘルパー: VisualX計算
@@ -985,6 +1365,10 @@ class EditorController extends ChangeNotifier {
       case PhysicalKeyboardKey.enter:
         saveHistory();
         deleteSelection();
+
+        // ★修正: 虚空(行データがない場所)での改行対策
+        ensureVirtualSpace(cursorRow, cursorCol);
+
         final currentLine = lines[cursorRow];
         final part1 = currentLine.substring(0, cursorCol);
         final part2 = currentLine.substring(cursorCol);

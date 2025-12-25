@@ -48,6 +48,21 @@ class AppLocalizationsEn extends AppLocalizations {
   String get menuReplace => 'Replace';
 
   @override
+  String get menuFormat => 'Format';
+
+  @override
+  String get menuDrawBoxDouble => 'Draw Box (Double/Full)';
+
+  @override
+  String get menuDrawBoxSingle => 'Draw Box (Single/Half)';
+
+  @override
+  String get menuFormatTableDouble => 'Convert to Table (Double/Full)';
+
+  @override
+  String get menuFormatTableSingle => 'Convert to Table (Single/Half)';
+
+  @override
   String get menuView => 'View';
 
   @override

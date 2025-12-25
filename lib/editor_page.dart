@@ -617,6 +617,29 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
               ],
               child: MenuAcceleratorLabel(s.menuEdit),
             ),
+            // Format (新規追加)
+            SubmenuButton(
+              menuChildren: [
+                MenuItemButton(
+                  onPressed: () => _controller.drawBox(useHalfWidth: false),
+                  child: MenuAcceleratorLabel(s.menuDrawBoxDouble),
+                ),
+                MenuItemButton(
+                  onPressed: () => _controller.drawBox(useHalfWidth: true),
+                  child: MenuAcceleratorLabel(s.menuDrawBoxSingle),
+                ),
+                const Divider(),
+                MenuItemButton(
+                  onPressed: () => _controller.formatTable(useHalfWidth: false),
+                  child: MenuAcceleratorLabel(s.menuFormatTableDouble),
+                ),
+                MenuItemButton(
+                  onPressed: () => _controller.formatTable(useHalfWidth: true),
+                  child: MenuAcceleratorLabel(s.menuFormatTableSingle),
+                ),
+              ],
+              child: MenuAcceleratorLabel(s.menuFormat),
+            ),
             // View
             SubmenuButton(
               menuChildren: [

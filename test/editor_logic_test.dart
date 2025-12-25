@@ -3,19 +3,39 @@ import 'dart:io'; // ファイル操作用
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 //
 import 'package:free_memo_editor/editor_page.dart';
 import 'package:free_memo_editor/file_io_helper.dart'; // 追加
 import 'package:free_memo_editor/editor_controller.dart'; // 追加
 import 'package:free_memo_editor/memo_painter.dart'; // LineNumberPainter用
+import 'package:free_memo_editor/l10n/app_localizations.dart';
+
+/// テスト用のラッパーウィジェット（多言語対応設定を含む）
+Widget createTestWidget(Widget home) {
+  return MaterialApp(
+    localizationsDelegates: const [
+      AppLocalizations.delegate,
+      GlobalMaterialLocalizations.delegate,
+      GlobalWidgetsLocalizations.delegate,
+      GlobalCupertinoLocalizations.delegate,
+    ],
+    supportedLocales: const [Locale('en', ''), Locale('ja', '')],
+    locale: const Locale('ja', ''),
+    home: home,
+  );
+}
 
 void main() {
+  // テスト実行中はカーソル点滅タイマーを無効化して、ハングを防ぐ
+  EditorPage.disableCursorBlink = true;
+
   testWidgets('矢印キー操作 (上、下、左、右) 動作確認', (WidgetTester tester) async {
     // 1. アプリ起動と設定
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1.0;
     // エディタを起動(ポンプ)する
-    await tester.pumpWidget(const MaterialApp(home: EditorPage()));
+    await tester.pumpWidget(createTestWidget(const EditorPage()));
     // 画面完了を待つ
     await tester.pump();
 
@@ -118,7 +138,7 @@ void main() {
     // 1. アプリ起動
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1.0;
-    await tester.pumpWidget(const MaterialApp(home: EditorPage()));
+    await tester.pumpWidget(createTestWidget(const EditorPage()));
     await tester.pump();
 
     final state = tester.state(find.byType(EditorPage)) as dynamic;
@@ -232,7 +252,7 @@ void main() {
     // 2. アプリ起動
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1.0;
-    await tester.pumpWidget(const MaterialApp(home: EditorPage()));
+    await tester.pumpWidget(createTestWidget(const EditorPage()));
     await tester.pump();
 
     final state = tester.state(find.byType(EditorPage)) as dynamic;
@@ -357,7 +377,7 @@ void main() {
     // 2. アプリ起動
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1.0;
-    await tester.pumpWidget(const MaterialApp(home: EditorPage()));
+    await tester.pumpWidget(createTestWidget(const EditorPage()));
     await tester.pump();
 
     final state = tester.state(find.byType(EditorPage)) as dynamic;
@@ -490,7 +510,7 @@ void main() {
     // 1. アプリ起動
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1.0;
-    await tester.pumpWidget(const MaterialApp(home: EditorPage()));
+    await tester.pumpWidget(createTestWidget(const EditorPage()));
     await tester.pump();
 
     final state = tester.state(find.byType(EditorPage)) as dynamic;
@@ -590,7 +610,7 @@ void main() {
     // 1. アプリ起動
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1.0;
-    await tester.pumpWidget(const MaterialApp(home: EditorPage()));
+    await tester.pumpWidget(createTestWidget(const EditorPage()));
     await tester.pump();
 
     // 2. テキスト入力 "abc"
@@ -655,7 +675,7 @@ void main() {
     // 1. アプリ起動
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1.0;
-    await tester.pumpWidget(const MaterialApp(home: EditorPage()));
+    await tester.pumpWidget(createTestWidget(const EditorPage()));
     await tester.pump();
 
     final state = tester.state(find.byType(EditorPage)) as dynamic;
@@ -713,7 +733,7 @@ void main() {
     // 1. アプリ起動
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1.0;
-    await tester.pumpWidget(const MaterialApp(home: EditorPage()));
+    await tester.pumpWidget(createTestWidget(const EditorPage()));
     await tester.pump();
 
     // 2. テキスト入力 "abc\nde"
@@ -782,7 +802,7 @@ void main() {
     FileIOHelper.instance = mockHelper;
 
     // 3. アプリ起動
-    await tester.pumpWidget(const MaterialApp(home: EditorPage()));
+    await tester.pumpWidget(createTestWidget(const EditorPage()));
     await tester.pump();
     final state = tester.state(find.byType(EditorPage)) as dynamic;
 
@@ -832,7 +852,7 @@ void main() {
     // 1. アプリ起動
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1.0;
-    await tester.pumpWidget(const MaterialApp(home: EditorPage()));
+    await tester.pumpWidget(createTestWidget(const EditorPage()));
     await tester.pumpAndSettle();
 
     final state = tester.state(find.byType(EditorPage)) as dynamic;
@@ -874,7 +894,7 @@ void main() {
     // 1. アプリ起動
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1.0;
-    await tester.pumpWidget(const MaterialApp(home: EditorPage()));
+    await tester.pumpWidget(createTestWidget(const EditorPage()));
     await tester.pumpAndSettle();
 
     final state = tester.state(find.byType(EditorPage)) as dynamic;
@@ -940,7 +960,7 @@ void main() {
 
     // --- Test 3: 行内虚空での Delete (行結合) ---
     // リセットして再構築
-    await tester.pumpWidget(MaterialApp(home: EditorPage(key: UniqueKey())));
+    await tester.pumpWidget(createTestWidget(EditorPage(key: UniqueKey())));
     await tester.pumpAndSettle();
     final state2 = tester.state(find.byType(EditorPage)) as dynamic;
 
@@ -1010,7 +1030,7 @@ void main() {
     // 1. アプリ起動
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1.0;
-    await tester.pumpWidget(const MaterialApp(home: EditorPage()));
+    await tester.pumpWidget(createTestWidget(const EditorPage()));
     await tester.pump();
 
     final state = tester.state(find.byType(EditorPage)) as dynamic;
@@ -1048,7 +1068,9 @@ void main() {
 
     // 検索ワード "abc" を入力
     // 検索バーのTextFieldを探して入力
-    final searchField = find.widgetWithText(TextField, '検索');
+    final searchField = find.byWidgetPredicate((widget) {
+      return widget is TextField && widget.decoration?.labelText == '検索';
+    });
     expect(searchField, findsOneWidget);
     await tester.enterText(searchField, "abc");
     await tester.pump();
@@ -1065,6 +1087,11 @@ void main() {
     expect(controller.currentSearchIndex, 1, reason: "次へボタンでインデックスが進むこと");
 
     // --- Test: 置換 (Replace) ---
+    // 検索バーにフォーカスがあるとエディタのショートカットが効かないため、
+    // エディタ領域(画面中央)を直接タップして確実にフォーカスを戻す
+    await tester.tapAt(const Offset(600, 400));
+    await tester.pump();
+
     // Ctrl + H で置換モードへ
     await tester.sendKeyDownEvent(LogicalKeyboardKey.control);
     await tester.sendKeyEvent(LogicalKeyboardKey.keyH);
@@ -1072,14 +1099,16 @@ void main() {
     await tester.pumpAndSettle();
 
     // 置換ワード "def" を入力
-    final replaceField = find.widgetWithText(TextField, '置換');
+    final replaceField = find.byWidgetPredicate((widget) {
+      return widget is TextField && widget.decoration?.labelText == '置換';
+    });
     expect(replaceField, findsOneWidget);
     await tester.enterText(replaceField, "def");
     await tester.pump();
 
     // 「置換」ボタンを押す (現在の選択箇所のみ置換)
     // 現在のインデックスは 1 (真ん中の "abc")
-    await tester.tap(find.text('置換'));
+    await tester.tap(find.widgetWithText(TextButton, '置換'));
     await tester.pump();
 
     // 検証: 真ん中だけ "def" になっているか -> "abc def abc"
