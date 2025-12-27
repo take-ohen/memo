@@ -554,6 +554,25 @@ class EditorController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 行末の空白を一括削除
+  void trimTrailingWhitespace() {
+    saveHistory();
+    bool changed = false;
+    for (int i = 0; i < lines.length; i++) {
+      String original = lines[i];
+      // trimRightは全角スペースも削除対象に含まれる
+      String trimmed = original.trimRight();
+      if (original != trimmed) {
+        lines[i] = trimmed;
+        changed = true;
+      }
+    }
+    if (changed) {
+      isDirty = true;
+      notifyListeners();
+    }
+  }
+
   // --- Formatting ---
   void drawBox({bool useHalfWidth = false}) {
     try {
@@ -580,24 +599,6 @@ class EditorController extends ChangeNotifier {
       final String hHalf = '-';
       final String v = useHalfWidth ? '|' : '│';
       final int lineWidth = useHalfWidth ? 1 : 2;
-
-      // ★追加: 描画スペースの自動確保
-      // 1. 上端の拡張 (0行目の場合、上に行を挿入)
-      if (startRow == 0) {
-        lines.insert(0, "");
-        startRow++;
-        endRow++;
-      }
-
-      // 2. 左端の拡張 (左端に枠を描く幅がない場合、全行にスペース挿入)
-      if (minVisualX < lineWidth) {
-        int shiftAmount = lineWidth - minVisualX;
-        for (int i = 0; i < lines.length; i++) {
-          lines[i] = (' ' * shiftAmount) + lines[i];
-        }
-        minVisualX += shiftAmount;
-        maxVisualX += shiftAmount;
-      }
 
       // 描画位置の計算（選択範囲の1つ外側）
       int topRow = startRow - 1;
@@ -851,6 +852,258 @@ class EditorController extends ChangeNotifier {
     } catch (e, stackTrace) {
       debugPrint('Error in formatTable: $e\n$stackTrace');
     }
+  }
+
+  // --- Line Drawing ---
+
+  /// 選択範囲の始点と終点を結ぶ直線を引く
+  void drawLine({bool useHalfWidth = false}) {
+    if (!hasSelection) return;
+    saveHistory();
+
+    // 始点と終点の座標（Visual座標系）
+    int x1 = _calcVisualX(selectionOriginRow!, selectionOriginCol!);
+    int y1 = selectionOriginRow!;
+    int x2 = _calcVisualX(cursorRow, cursorCol);
+    int y2 = cursorRow;
+
+    // --- 座標補正 (はみ出し防止 & グリッド合わせ) ---
+    // 右・下方向へのドラッグ時、カーソルは選択範囲の「外側」にあるため、1つ戻す
+    if (x2 > x1) x2 -= 1;
+
+    // クリッピング用の制限範囲を記録 (補正後の x2, y2 を基準にする)
+    // スナップ計算で座標が大きく移動しても、この範囲内に収める
+    int limitMinX = min(x1, x2);
+    int limitMaxX = max(x1, x2);
+    int limitMinY = min(y1, y2);
+    int limitMaxY = max(y1, y2);
+
+    // --- Debug Log (Start) ---
+    debugPrint('drawLine Start: ($x1, $y1) -> ($x2, $y2)');
+    debugPrint('Limit: X[$limitMinX, $limitMaxX], Y[$limitMinY, $limitMaxY]');
+
+    // 全角モード時はX座標を偶数(グリッド)に合わせる
+    if (!useHalfWidth) {
+      if (x1 % 2 != 0) x1 -= 1;
+      if (x2 % 2 != 0) x2 -= 1;
+      // limitもグリッドに合わせる（切り捨て）
+      if (limitMinX % 2 != 0) limitMinX -= 1;
+      if (limitMaxX % 2 != 0) limitMaxX -= 1;
+    }
+
+    // --- 座標補正 (スナップ処理) ---
+    // 水平・垂直・45度（アスペクト比考慮）のいずれかに補正する
+    int dx = x2 - x1;
+    int dy = y2 - y1;
+
+    // 全角モードなら横幅2倍で「見た目の45度」とする
+    double aspect = useHalfWidth ? 1.0 : 2.0;
+
+    // 直線(水平・垂直)以外はすべて斜め(45度)にする
+    if (dx == 0) {
+      // 垂直 (x2 = x1 なので何もしない)
+    } else if (dy == 0) {
+      // 水平 (y2 = y1 なので何もしない)
+    } else {
+      // 斜め (45度)
+      int signX = dx >= 0 ? 1 : -1;
+      int signY = dy >= 0 ? 1 : -1;
+
+      // 移動量が大きい軸を基準に合わせて、他方を調整する
+      if (dx.abs() / aspect > dy.abs()) {
+        // 横移動が大きい -> xに合わせてyを決める
+        if (!useHalfWidth) {
+          // 全角の場合、x移動量は2の倍数が望ましい(全角文字幅に合わせる)
+          int dist = dx.abs();
+          if (dist % 2 != 0) dist++;
+          x2 = x1 + dist * signX;
+          dx = x2 - x1; // dx更新
+        }
+        int newDy = (dx.abs() / aspect).round();
+        y2 = y1 + newDy * signY;
+      } else {
+        // 縦移動が大きい -> yに合わせてxを決める
+        int newDx = (dy.abs() * aspect).round();
+        x2 = x1 + newDx * signX;
+      }
+    }
+
+    // --- Debug Log (Snapped) ---
+    debugPrint('Snapped: ($x2, $y2)');
+
+    // --- クリッピング処理 (範囲外への飛び出し防止) ---
+    // 計算された (x2, y2) が limit 範囲外なら、直線の式に従って短縮する
+    if (x1 == x2) {
+      // 垂直
+      y2 = y2.clamp(limitMinY, limitMaxY);
+    } else if (y1 == y2) {
+      // 水平
+      x2 = x2.clamp(limitMinX, limitMaxX);
+      if (!useHalfWidth && x2 % 2 != 0) x2 -= 1;
+    } else {
+      // 斜め: 比率を維持しつつ範囲内に収める
+      double vecX = (x2 - x1).toDouble();
+      double vecY = (y2 - y1).toDouble();
+      double t = 1.0;
+
+      // X軸方向の制限チェック
+      if (x2 < limitMinX) {
+        double tX = (limitMinX - x1) / vecX;
+        if (tX < t) t = tX;
+      } else if (x2 > limitMaxX) {
+        double tX = (limitMaxX - x1) / vecX;
+        if (tX < t) t = tX;
+      }
+
+      // Y軸方向の制限チェック
+      if (y2 < limitMinY) {
+        double tY = (limitMinY - y1) / vecY;
+        if (tY < t) t = tY;
+      } else if (y2 > limitMaxY) {
+        double tY = (limitMaxY - y1) / vecY;
+        if (tY < t) t = tY;
+      }
+
+      // 短縮適用
+      x2 = (x1 + vecX * t).round();
+      y2 = (y1 + vecY * t).round();
+
+      if (!useHalfWidth && x2 % 2 != 0) x2 -= 1;
+    }
+
+    // --- Debug Log (Clipped) ---
+    debugPrint('Clipped: ($x2, $y2)');
+
+    // --- 経路計算 (単純ループ) ---
+    List<Point<int>> points = [];
+    // 再計算
+    dx = x2 - x1;
+    dy = y2 - y1;
+    int stepX = useHalfWidth ? 1 : 2; // X方向の増分単位
+
+    // 方向判定
+    int signX = (dx == 0) ? 0 : (dx > 0 ? 1 : -1);
+    int signY = (dy == 0) ? 0 : (dy > 0 ? 1 : -1);
+
+    // ループ回数の決定 (距離 / ステップ)
+    // 斜め・垂直の場合はYの距離、水平の場合はXの距離(ステップ考慮)を採用
+    int steps = (dy == 0) ? (dx.abs() / stepX).round() : dy.abs();
+
+    for (int i = 0; i <= steps; i++) {
+      points.add(Point(x1 + (i * stepX * signX), y1 + (i * signY)));
+    }
+
+    if (points.isEmpty) return;
+
+    // 線の種類を決定
+    String lineChar;
+    bool isVertical = (x1 == x2);
+    bool isHorizontal = (y1 == y2);
+
+    if (useHalfWidth) {
+      if (isVertical) {
+        lineChar = '|';
+      } else if (isHorizontal) {
+        lineChar = '-';
+      } else if ((x2 - x1) * (y2 - y1) > 0) {
+        lineChar = '\\';
+      } else {
+        lineChar = '/';
+      }
+    } else {
+      if (isVertical) {
+        lineChar = '│';
+      } else if (isHorizontal) {
+        lineChar = '─';
+      } else if ((x2 - x1) * (y2 - y1) > 0) {
+        lineChar = '╲';
+      } else {
+        lineChar = '╱';
+      }
+    }
+
+    // 描画
+    for (int i = 0; i < points.length; i++) {
+      Point<int> p = points[i];
+      String charToPut = lineChar;
+
+      // 垂直・水平の場合、全ての点で接続処理を行う（交差対応）
+      if (isVertical || isHorizontal) {
+        int newDir = 0;
+        // 接続方向フラグ: Top=1, Bottom=2, Left=4, Right=8
+
+        // 前の点からの接続 (自分が終点側、相手が始点側)
+        if (i > 0) {
+          Point<int> prev = points[i - 1];
+          if (prev.y < p.y) newDir |= 1; // Top (prev is above)
+          if (prev.y > p.y) newDir |= 2; // Bottom (prev is below)
+          if (prev.x < p.x) newDir |= 4; // Left (prev is left)
+          if (prev.x > p.x) newDir |= 8; // Right (prev is right)
+        }
+
+        // 次の点への接続 (自分が始点側、相手が終点側)
+        if (i < points.length - 1) {
+          Point<int> next = points[i + 1];
+          if (next.y < p.y) newDir |= 1; // Top (next is above)
+          if (next.y > p.y) newDir |= 2; // Bottom (next is below)
+          if (next.x < p.x) newDir |= 4; // Left (next is left)
+          if (next.x > p.x) newDir |= 8; // Right (next is right)
+        }
+
+        // 既存文字との合成
+        charToPut = _resolveConnector(p.y, p.x, newDir, useHalfWidth);
+      }
+
+      _writeCharToVisualLine(p.y, p.x, charToPut);
+    }
+
+    // カーソルを線の終点に移動し、内部座標を更新する
+    cursorRow = y2;
+
+    // 右方向へ描画した場合、カーソルを「描画した文字の右側」へ移動させる
+    int finalVisualX = x2;
+    if (dx > 0) {
+      finalVisualX += (useHalfWidth ? 1 : 2);
+    }
+
+    if (cursorRow < lines.length) {
+      cursorCol = TextUtils.getColFromVisualX(lines[cursorRow], finalVisualX);
+    }
+    preferredVisualX = finalVisualX;
+
+    clearSelection();
+    isDirty = true;
+    notifyListeners();
+  }
+
+  /// 接続文字を解決する
+  String _resolveConnector(
+    int row,
+    int col,
+    int newDirections,
+    bool useHalfWidth,
+  ) {
+    // 既存の文字を取得
+    String current = " ";
+    if (row < lines.length) {
+      String line = lines[row];
+      int idx = TextUtils.getColFromVisualX(line, col);
+      if (idx < line.length) {
+        current = line.substring(idx, idx + 1);
+      }
+    }
+
+    // 既存文字の接続方向を取得
+    int currentDirs = TextUtils.getConnectionFlags(current);
+
+    // 方向を合成
+    int mergedDirs = currentDirs | newDirections;
+
+    // 合成後の方向から文字を取得
+    // 何も接続がない(0)なら、元の文字ではなく今回の線を引くべきなので newDirections を使う
+    return TextUtils.getCharFromConnectionFlags(mergedDirs, useHalfWidth) ??
+        TextUtils.getCharFromConnectionFlags(newDirections, useHalfWidth) ??
+        (useHalfWidth ? '+' : '┼');
   }
 
   /// 指定行の指定VisualX位置に文字を書き込む（セル展開方式）
@@ -1354,6 +1607,12 @@ class EditorController extends ChangeNotifier {
         selectAll();
         return KeyEventResult.handled;
       }
+      if (physicalKey == PhysicalKeyboardKey.keyD) {
+        if (isAlt) {
+          trimTrailingWhitespace();
+          return KeyEventResult.handled;
+        }
+      }
     }
 
     // --- Other Special Keys ---
@@ -1493,7 +1752,7 @@ class EditorController extends ChangeNotifier {
   void handleTap(Offset localPosition, double charWidth, double lineHeight) {
     if (charWidth == 0 || lineHeight == 0) return;
 
-    int clickedVisualX = (localPosition.dx / charWidth).round();
+    int clickedVisualX = (localPosition.dx / charWidth).floor();
     int clickedRow = (localPosition.dy / lineHeight).floor();
 
     cursorRow = max(0, clickedRow);

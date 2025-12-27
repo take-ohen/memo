@@ -583,6 +583,16 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                 ),
                 const Divider(),
                 MenuItemButton(
+                  onPressed: () => _controller.trimTrailingWhitespace(),
+                  shortcut: const SingleActivator(
+                    LogicalKeyboardKey.keyD,
+                    control: true,
+                    alt: true,
+                  ),
+                  child: MenuAcceleratorLabel(s.menuTrimTrailingWhitespace),
+                ),
+                const Divider(),
+                MenuItemButton(
                   onPressed: () {
                     setState(() {
                       _showSearchBar = true;
@@ -636,6 +646,15 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                 MenuItemButton(
                   onPressed: () => _controller.formatTable(useHalfWidth: true),
                   child: MenuAcceleratorLabel(s.menuFormatTableSingle),
+                ),
+                const Divider(),
+                MenuItemButton(
+                  onPressed: () => _controller.drawLine(useHalfWidth: false),
+                  child: MenuAcceleratorLabel(s.menuDrawLineDouble),
+                ),
+                MenuItemButton(
+                  onPressed: () => _controller.drawLine(useHalfWidth: true),
+                  child: MenuAcceleratorLabel(s.menuDrawLineSingle),
                 ),
               ],
               child: MenuAcceleratorLabel(s.menuFormat),

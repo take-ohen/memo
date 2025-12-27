@@ -31,4 +31,87 @@ class TextUtils {
     }
     return line.length;
   }
+
+  // --- Connection Logic ---
+  // Top: 1, Bottom: 2, Left: 4, Right: 8
+
+  static int getConnectionFlags(String char) {
+    switch (char) {
+      case '│':
+      case '|':
+        return 1 | 2; // Top | Bottom
+      case '─':
+      case '-':
+        return 4 | 8; // Left | Right
+      case '┌':
+        return 2 | 8; // Bottom | Right
+      case '┐':
+        return 2 | 4; // Bottom | Left
+      case '└':
+        return 1 | 8; // Top | Right
+      case '┘':
+        return 1 | 4; // Top | Left
+      case '├':
+        return 1 | 2 | 8; // Top | Bottom | Right
+      case '┤':
+        return 1 | 2 | 4; // Top | Bottom | Left
+      case '┬':
+        return 2 | 4 | 8; // Bottom | Left | Right
+      case '┴':
+        return 1 | 4 | 8; // Top | Left | Right
+      case '┼':
+      case '+':
+        return 1 | 2 | 4 | 8; // All
+      default:
+        return 0;
+    }
+  }
+
+  static String? getCharFromConnectionFlags(int flags, bool useHalfWidth) {
+    if (useHalfWidth) {
+      // 垂直方向のみ (Top, Bottom, Top|Bottom) -> '|'
+      if (flags != 0 && (flags & (4 | 8)) == 0) return '|';
+      // 水平方向のみ (Left, Right, Left|Right) -> '-'
+      if (flags != 0 && (flags & (1 | 2)) == 0) return '-';
+      // それ以外 (曲がり角、T字、十字など) -> '+'
+      return '+';
+    }
+
+    switch (flags) {
+      // 単方向 (始点・終点用)
+      case 1:
+        return '│'; // Top only
+      case 2:
+        return '│'; // Bottom only
+      case 4:
+        return '─'; // Left only
+      case 8:
+        return '─'; // Right only
+      // 接続
+      case const (1 | 2):
+        return '│';
+      case const (4 | 8):
+        return '─';
+      case const (2 | 8):
+        return '┌';
+      case const (2 | 4):
+        return '┐';
+      case const (1 | 8):
+        return '└';
+      case const (1 | 4):
+        return '┘';
+      case const (1 | 2 | 8):
+        return '├';
+      case const (1 | 2 | 4):
+        return '┤';
+      case const (2 | 4 | 8):
+        return '┬';
+      case const (1 | 4 | 8):
+        return '┴';
+      case const (1 | 2 | 4 | 8):
+        return '┼';
+      default:
+        return null;
+    }
+  }
 }

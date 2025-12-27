@@ -45,6 +45,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get menuFind => '検索';
 
   @override
+  String get menuTrimTrailingWhitespace => '行末の空白を削除';
+
+  @override
   String get menuReplace => '置換';
 
   @override
@@ -61,6 +64,12 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get menuFormatTableSingle => '表に変換 (半角)';
+
+  @override
+  String get menuDrawLineDouble => '直線を引く (全角)';
+
+  @override
+  String get menuDrawLineSingle => '直線を引く (半角)';
 
   @override
   String get menuView => '表示';

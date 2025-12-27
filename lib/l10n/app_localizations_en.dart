@@ -45,6 +45,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get menuFind => 'Find';
 
   @override
+  String get menuTrimTrailingWhitespace => 'Trim Trailing Whitespace';
+
+  @override
   String get menuReplace => 'Replace';
 
   @override
@@ -61,6 +64,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get menuFormatTableSingle => 'Convert to Table (Single/Half)';
+
+  @override
+  String get menuDrawLineDouble => 'Draw Line (Double/Full)';
+
+  @override
+  String get menuDrawLineSingle => 'Draw Line (Single/Half)';
 
   @override
   String get menuView => 'View';

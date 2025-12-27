@@ -170,6 +170,12 @@ abstract class AppLocalizations {
   /// **'Find'**
   String get menuFind;
 
+  /// No description provided for @menuTrimTrailingWhitespace.
+  ///
+  /// In en, this message translates to:
+  /// **'Trim Trailing Whitespace'**
+  String get menuTrimTrailingWhitespace;
+
   /// No description provided for @menuReplace.
   ///
   /// In en, this message translates to:
@@ -205,6 +211,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Convert to Table (Single/Half)'**
   String get menuFormatTableSingle;
+
+  /// No description provided for @menuDrawLineDouble.
+  ///
+  /// In en, this message translates to:
+  /// **'Draw Line (Double/Full)'**
+  String get menuDrawLineDouble;
+
+  /// No description provided for @menuDrawLineSingle.
+  ///
+  /// In en, this message translates to:
+  /// **'Draw Line (Single/Half)'**
+  String get menuDrawLineSingle;
 
   /// No description provided for @menuView.
   ///
