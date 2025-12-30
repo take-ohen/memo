@@ -72,6 +72,30 @@ class AppLocalizationsJa extends AppLocalizations {
   String get menuDrawLineSingle => '直線を引く (半角)';
 
   @override
+  String get menuArrowEndDouble => '矢印 (終点・全角)';
+
+  @override
+  String get menuArrowEndSingle => '矢印 (終点・半角)';
+
+  @override
+  String get menuArrowBothDouble => '矢印 (両端・全角)';
+
+  @override
+  String get menuArrowBothSingle => '矢印 (両端・半角)';
+
+  @override
+  String get menuElbowUpperDouble => 'L字線 (上折れ・全角)';
+
+  @override
+  String get menuElbowUpperSingle => 'L字線 (上折れ・半角)';
+
+  @override
+  String get menuElbowLowerDouble => 'L字線 (下折れ・全角)';
+
+  @override
+  String get menuElbowLowerSingle => 'L字線 (下折れ・半角)';
+
+  @override
   String get menuView => '表示';
 
   @override

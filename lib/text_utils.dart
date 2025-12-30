@@ -114,4 +114,23 @@ class TextUtils {
         return null;
     }
   }
+
+  /// 方向ベクトルから矢印文字を取得する
+  static String? getArrowChar(int dx, int dy, bool useHalfWidth) {
+    if (dx == 0 && dy == 0) return null;
+
+    if (useHalfWidth) {
+      // 半角モード (斜めは対応なし)
+      if (dx == 0) return dy > 0 ? 'v' : '^';
+      if (dy == 0) return dx > 0 ? '>' : '<';
+      return null;
+    }
+
+    // 全角モード
+    if (dx == 0) return dy > 0 ? '↓' : '↑';
+    if (dy == 0) return dx > 0 ? '→' : '←';
+
+    if (dx > 0) return dy > 0 ? '↘' : '↗';
+    return dy > 0 ? '↙' : '↖';
+  }
 }

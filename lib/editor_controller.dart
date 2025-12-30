@@ -857,7 +857,11 @@ class EditorController extends ChangeNotifier {
   // --- Line Drawing ---
 
   /// 選択範囲の始点と終点を結ぶ直線を引く
-  void drawLine({bool useHalfWidth = false}) {
+  void drawLine({
+    bool useHalfWidth = false,
+    bool arrowStart = false,
+    bool arrowEnd = false,
+  }) {
     if (!hasSelection) return;
     saveHistory();
 
@@ -868,8 +872,8 @@ class EditorController extends ChangeNotifier {
     int y2 = cursorRow;
 
     // --- 座標補正 (はみ出し防止 & グリッド合わせ) ---
-    // 右・下方向へのドラッグ時、カーソルは選択範囲の「外側」にあるため、1つ戻す
-    if (x2 > x1) x2 -= 1;
+    // カーソル位置(x2)をそのまま終点とするため、x2 -= 1 は行わない。
+    // これを行ってしまうと、特に全角モードでグリッドスナップと合わさり短くなりすぎる。
 
     // クリッピング用の制限範囲を記録 (補正後の x2, y2 を基準にする)
     // スナップ計算で座標が大きく移動しても、この範囲内に収める
@@ -877,10 +881,6 @@ class EditorController extends ChangeNotifier {
     int limitMaxX = max(x1, x2);
     int limitMinY = min(y1, y2);
     int limitMaxY = max(y1, y2);
-
-    // --- Debug Log (Start) ---
-    debugPrint('drawLine Start: ($x1, $y1) -> ($x2, $y2)');
-    debugPrint('Limit: X[$limitMinX, $limitMaxX], Y[$limitMinY, $limitMaxY]');
 
     // 全角モード時はX座標を偶数(グリッド)に合わせる
     if (!useHalfWidth) {
@@ -905,31 +905,32 @@ class EditorController extends ChangeNotifier {
     } else if (dy == 0) {
       // 水平 (y2 = y1 なので何もしない)
     } else {
-      // 斜め (45度)
-      int signX = dx >= 0 ? 1 : -1;
-      int signY = dy >= 0 ? 1 : -1;
-
-      // 移動量が大きい軸を基準に合わせて、他方を調整する
-      if (dx.abs() / aspect > dy.abs()) {
-        // 横移動が大きい -> xに合わせてyを決める
-        if (!useHalfWidth) {
-          // 全角の場合、x移動量は2の倍数が望ましい(全角文字幅に合わせる)
-          int dist = dx.abs();
-          if (dist % 2 != 0) dist++;
-          x2 = x1 + dist * signX;
-          dx = x2 - x1; // dx更新
+      if (!useHalfWidth) {
+        // 全角モード: 斜め線を廃止し、水平または垂直に強制する
+        if ((dx.abs() / aspect) >= dy.abs()) {
+          // 横移動が大きい -> 水平線
+          y2 = y1;
+        } else {
+          // 縦移動が大きい -> 垂直線
+          x2 = x1;
         }
-        int newDy = (dx.abs() / aspect).round();
-        y2 = y1 + newDy * signY;
       } else {
-        // 縦移動が大きい -> yに合わせてxを決める
-        int newDx = (dy.abs() * aspect).round();
-        x2 = x1 + newDx * signX;
+        // 半角モード: 斜め (45度)
+        int signX = dx >= 0 ? 1 : -1;
+        int signY = dy >= 0 ? 1 : -1;
+
+        // 移動量が大きい軸を基準に合わせて、他方を調整する
+        if (dx.abs() / aspect > dy.abs()) {
+          // 横移動が大きい -> xに合わせてyを決める
+          int newDy = (dx.abs() / aspect).round();
+          y2 = y1 + newDy * signY;
+        } else {
+          // 縦移動が大きい -> yに合わせてxを決める
+          int newDx = (dy.abs() * aspect).round();
+          x2 = x1 + newDx * signX;
+        }
       }
     }
-
-    // --- Debug Log (Snapped) ---
-    debugPrint('Snapped: ($x2, $y2)');
 
     // --- クリッピング処理 (範囲外への飛び出し防止) ---
     // 計算された (x2, y2) が limit 範囲外なら、直線の式に従って短縮する
@@ -971,14 +972,141 @@ class EditorController extends ChangeNotifier {
       if (!useHalfWidth && x2 % 2 != 0) x2 -= 1;
     }
 
-    // --- Debug Log (Clipped) ---
-    debugPrint('Clipped: ($x2, $y2)');
+    // 描画実行
+    _drawLineSegment(x1, y1, x2, y2, useHalfWidth, arrowStart, arrowEnd);
+
+    // カーソルを線の終点に移動し、内部座標を更新する
+    cursorRow = y2;
+
+    // 右方向へ描画した場合、カーソルを「描画した文字の右側」へ移動させる
+    int finalVisualX = x2;
+    int finalDx = x2 - x1;
+    if (finalDx > 0) {
+      finalVisualX += (useHalfWidth ? 1 : 2);
+    }
+
+    if (cursorRow < lines.length) {
+      cursorCol = TextUtils.getColFromVisualX(lines[cursorRow], finalVisualX);
+    }
+    preferredVisualX = finalVisualX;
+
+    clearSelection();
+    isDirty = true;
+    notifyListeners();
+  }
+
+  /// L字線（折れ線）を描画する
+  void drawElbowLine({
+    bool useHalfWidth = false,
+    bool isUpperRoute = true, // true: 上/左優先, false: 下/右優先
+    bool arrowStart = false,
+    bool arrowEnd = false,
+  }) {
+    if (!hasSelection) return;
+    // 履歴保存などは drawLine 側ではなくここでやるべきだが、
+    // 内部で呼ぶ _drawLineSegment は履歴保存しないため、ここで保存する
+    saveHistory();
+
+    // 始点・終点の計算（drawLineと同じ補正ロジックが必要）
+    // ※コード重複を避けるため、補正ロジックをメソッド化するのが理想だが、
+    // ここでは簡易的に再実装する
+    int x1 = _calcVisualX(selectionOriginRow!, selectionOriginCol!);
+    int y1 = selectionOriginRow!;
+    int x2 = _calcVisualX(cursorRow, cursorCol);
+    int y2 = cursorRow;
+
+    // drawLine同様、x2 -= 1 は削除
+
+    if (!useHalfWidth) {
+      if (x1 % 2 != 0) x1 -= 1;
+      if (x2 % 2 != 0) x2 -= 1;
+    }
+
+    // 中継点（角）の計算
+    // UpperRoute: Y座標が小さい方（画面上側）を通る
+    // LowerRoute: Y座標が大きい方（画面下側）を通る
+    int cornerY = isUpperRoute ? min(y1, y2) : max(y1, y2);
+
+    // 角のX座標は、Y移動を先にするか後でにするかで決まる
+    // (x1, y1) -> (cornerX, cornerY) -> (x2, y2)
+    // cornerY が y1 と同じなら、まずは水平移動（cornerX = x2）
+    // cornerY が y2 と同じなら、まずは垂直移動（cornerX = x1）
+    int cornerX = (cornerY == y1) ? x2 : x1;
+
+    // 1本目: 始点 -> 角 (矢印は始点のみ)
+    _drawLineSegment(x1, y1, cornerX, cornerY, useHalfWidth, arrowStart, false);
+
+    // 2本目: 角 -> 終点 (矢印は終点のみ)
+    _drawLineSegment(cornerX, cornerY, x2, y2, useHalfWidth, false, arrowEnd);
+
+    // --- 角の形状修正 ---
+    // _drawLineSegment は接続ロジックにより角を '├' や '┼' にしてしまうことがあるため、
+    // L字線の角として正しい文字(┌, ┐, └, ┘)で上書きする。
+
+    // 1本目の進入方向 (角から見てどちらから来たか)
+    // 始点(x1, y1) -> 角(cornerX, cornerY)
+    int fromDir = 0;
+    if (x1 < cornerX)
+      fromDir = 4; // Left (左から来た)
+    else if (x1 > cornerX)
+      fromDir = 8; // Right (右から来た)
+    else if (y1 < cornerY)
+      fromDir = 1; // Top (上から来た)
+    else if (y1 > cornerY)
+      fromDir = 2; // Bottom (下から来た)
+
+    // 2本目の脱出方向 (角から見てどちらへ行くか)
+    // 角(cornerX, cornerY) -> 終点(x2, y2)
+    int toDir = 0;
+    if (x2 < cornerX)
+      toDir = 4; // Left (左へ行く)
+    else if (x2 > cornerX)
+      toDir = 8; // Right (右へ行く)
+    else if (y2 < cornerY)
+      toDir = 1; // Top (上へ行く)
+    else if (y2 > cornerY)
+      toDir = 2; // Bottom (下へ行く)
+
+    // 角の接続フラグ (進入方向 + 脱出方向)
+    int cornerFlags = fromDir | toDir;
+    String? cornerChar = TextUtils.getCharFromConnectionFlags(
+      cornerFlags,
+      useHalfWidth,
+    );
+    if (cornerChar != null) {
+      _writeCharToVisualLine(cornerY, cornerX, cornerChar);
+    }
+
+    // カーソル移動
+    cursorRow = y2;
+    int finalVisualX = x2;
+    if (x2 > cornerX) finalVisualX += (useHalfWidth ? 1 : 2); // 最後の移動が右向きなら
+
+    if (cursorRow < lines.length) {
+      cursorCol = TextUtils.getColFromVisualX(lines[cursorRow], finalVisualX);
+    }
+    preferredVisualX = finalVisualX;
+
+    clearSelection();
+    isDirty = true;
+    notifyListeners();
+  }
+
+  /// 実際の線描画処理 (内部用)
+  void _drawLineSegment(
+    int x1,
+    int y1,
+    int x2,
+    int y2,
+    bool useHalfWidth,
+    bool arrowStart,
+    bool arrowEnd,
+  ) {
+    int dx = x2 - x1;
+    int dy = y2 - y1;
 
     // --- 経路計算 (単純ループ) ---
     List<Point<int>> points = [];
-    // 再計算
-    dx = x2 - x1;
-    dy = y2 - y1;
     int stepX = useHalfWidth ? 1 : 2; // X方向の増分単位
 
     // 方向判定
@@ -1026,9 +1154,29 @@ class EditorController extends ChangeNotifier {
     for (int i = 0; i < points.length; i++) {
       Point<int> p = points[i];
       String charToPut = lineChar;
+      bool isArrow = false;
+
+      // --- 矢印描画ロジック ---
+      // 始点かつ矢印ありの場合 (線と逆方向の矢印)
+      if (arrowStart && i == 0) {
+        String? arrow = TextUtils.getArrowChar(-signX, -signY, useHalfWidth);
+        if (arrow != null) {
+          charToPut = arrow;
+          isArrow = true;
+        }
+      }
+      // 終点かつ矢印ありの場合 (線と同じ方向の矢印)
+      else if (arrowEnd && i == points.length - 1) {
+        String? arrow = TextUtils.getArrowChar(signX, signY, useHalfWidth);
+        if (arrow != null) {
+          charToPut = arrow;
+          isArrow = true;
+        }
+      }
 
       // 垂直・水平の場合、全ての点で接続処理を行う（交差対応）
-      if (isVertical || isHorizontal) {
+      // ただし、矢印部分は接続処理を行わない
+      if (!isArrow && (isVertical || isHorizontal)) {
         int newDir = 0;
         // 接続方向フラグ: Top=1, Bottom=2, Left=4, Right=8
 

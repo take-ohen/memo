@@ -224,6 +224,54 @@ abstract class AppLocalizations {
   /// **'Draw Line (Single/Half)'**
   String get menuDrawLineSingle;
 
+  /// No description provided for @menuArrowEndDouble.
+  ///
+  /// In en, this message translates to:
+  /// **'Arrow (End/Full)'**
+  String get menuArrowEndDouble;
+
+  /// No description provided for @menuArrowEndSingle.
+  ///
+  /// In en, this message translates to:
+  /// **'Arrow (End/Half)'**
+  String get menuArrowEndSingle;
+
+  /// No description provided for @menuArrowBothDouble.
+  ///
+  /// In en, this message translates to:
+  /// **'Arrow (Both/Full)'**
+  String get menuArrowBothDouble;
+
+  /// No description provided for @menuArrowBothSingle.
+  ///
+  /// In en, this message translates to:
+  /// **'Arrow (Both/Half)'**
+  String get menuArrowBothSingle;
+
+  /// No description provided for @menuElbowUpperDouble.
+  ///
+  /// In en, this message translates to:
+  /// **'Elbow Line (Upper/Full)'**
+  String get menuElbowUpperDouble;
+
+  /// No description provided for @menuElbowUpperSingle.
+  ///
+  /// In en, this message translates to:
+  /// **'Elbow Line (Upper/Half)'**
+  String get menuElbowUpperSingle;
+
+  /// No description provided for @menuElbowLowerDouble.
+  ///
+  /// In en, this message translates to:
+  /// **'Elbow Line (Lower/Full)'**
+  String get menuElbowLowerDouble;
+
+  /// No description provided for @menuElbowLowerSingle.
+  ///
+  /// In en, this message translates to:
+  /// **'Elbow Line (Lower/Half)'**
+  String get menuElbowLowerSingle;
+
   /// No description provided for @menuView.
   ///
   /// In en, this message translates to:

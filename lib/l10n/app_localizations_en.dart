@@ -72,6 +72,30 @@ class AppLocalizationsEn extends AppLocalizations {
   String get menuDrawLineSingle => 'Draw Line (Single/Half)';
 
   @override
+  String get menuArrowEndDouble => 'Arrow (End/Full)';
+
+  @override
+  String get menuArrowEndSingle => 'Arrow (End/Half)';
+
+  @override
+  String get menuArrowBothDouble => 'Arrow (Both/Full)';
+
+  @override
+  String get menuArrowBothSingle => 'Arrow (Both/Half)';
+
+  @override
+  String get menuElbowUpperDouble => 'Elbow Line (Upper/Full)';
+
+  @override
+  String get menuElbowUpperSingle => 'Elbow Line (Upper/Half)';
+
+  @override
+  String get menuElbowLowerDouble => 'Elbow Line (Lower/Full)';
+
+  @override
+  String get menuElbowLowerSingle => 'Elbow Line (Lower/Half)';
+
+  @override
   String get menuView => 'View';
 
   @override

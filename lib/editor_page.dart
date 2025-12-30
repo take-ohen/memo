@@ -59,12 +59,22 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     fontWeight: _controller.editorBold ? FontWeight.bold : FontWeight.normal,
     fontStyle: _controller.editorItalic ? FontStyle.italic : FontStyle.normal,
     color: Colors.black,
+    // フォールバックフォントを指定して、記号などが意図しない幅で表示されるのを防ぐ
+    fontFamilyFallback: const [
+      'Meiryo',
+      'Yu Gothic',
+      'MS Gothic',
+      'Consolas',
+      'Courier New',
+      'monospace',
+    ],
   );
 
   TextStyle get _lineNumberStyle => TextStyle(
     fontFamily: _controller.fontFamily,
     fontSize: _controller.fontSize,
     color: Colors.grey,
+    fontFamilyFallback: const ['Meiryo', 'Yu Gothic', 'MS Gothic', 'monospace'],
   );
 
   // テスト専用のゲッター(抜け道)
@@ -655,6 +665,65 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                 MenuItemButton(
                   onPressed: () => _controller.drawLine(useHalfWidth: true),
                   child: MenuAcceleratorLabel(s.menuDrawLineSingle),
+                ),
+                const Divider(),
+                MenuItemButton(
+                  onPressed: () =>
+                      _controller.drawLine(useHalfWidth: false, arrowEnd: true),
+                  child: MenuAcceleratorLabel(s.menuArrowEndDouble),
+                ),
+                MenuItemButton(
+                  onPressed: () =>
+                      _controller.drawLine(useHalfWidth: true, arrowEnd: true),
+                  child: MenuAcceleratorLabel(s.menuArrowEndSingle),
+                ),
+                MenuItemButton(
+                  onPressed: () => _controller.drawLine(
+                    useHalfWidth: false,
+                    arrowStart: true,
+                    arrowEnd: true,
+                  ),
+                  child: MenuAcceleratorLabel(s.menuArrowBothDouble),
+                ),
+                MenuItemButton(
+                  onPressed: () => _controller.drawLine(
+                    useHalfWidth: true,
+                    arrowStart: true,
+                    arrowEnd: true,
+                  ),
+                  child: MenuAcceleratorLabel(s.menuArrowBothSingle),
+                ),
+                MenuItemButton(
+                  onPressed: () => _controller.drawElbowLine(
+                    isUpperRoute: true,
+                    useHalfWidth: false,
+                    arrowEnd: true,
+                  ),
+                  child: MenuAcceleratorLabel(s.menuElbowUpperDouble),
+                ),
+                MenuItemButton(
+                  onPressed: () => _controller.drawElbowLine(
+                    isUpperRoute: true,
+                    useHalfWidth: true,
+                    arrowEnd: true,
+                  ),
+                  child: MenuAcceleratorLabel(s.menuElbowUpperSingle),
+                ),
+                MenuItemButton(
+                  onPressed: () => _controller.drawElbowLine(
+                    isUpperRoute: false,
+                    useHalfWidth: false,
+                    arrowEnd: true,
+                  ),
+                  child: MenuAcceleratorLabel(s.menuElbowLowerDouble),
+                ),
+                MenuItemButton(
+                  onPressed: () => _controller.drawElbowLine(
+                    isUpperRoute: false,
+                    useHalfWidth: true,
+                    arrowEnd: true,
+                  ),
+                  child: MenuAcceleratorLabel(s.menuElbowLowerSingle),
                 ),
               ],
               child: MenuAcceleratorLabel(s.menuFormat),
