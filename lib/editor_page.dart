@@ -335,6 +335,58 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     await _controller.saveAsFile();
   }
 
+  // タブを閉じる処理（未保存チェック付き）
+  Future<void> _handleCloseTab(int index) async {
+    final doc = _controller.documents[index];
+    if (doc.isDirty) {
+      // 未保存の変更がある場合、ダイアログを表示
+      final result = await showDialog<int>(
+        context: context,
+        builder: (context) {
+          // ファイル名を取得
+          final fileName =
+              doc.currentFilePath?.split(Platform.pathSeparator).last ??
+              'Untitled';
+          return AlertDialog(
+            title: const Text('確認'),
+            content: Text('"$fileName" への変更を保存しますか？'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(0), // キャンセル
+                child: const Text('キャンセル'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(1), // 保存しない
+                child: const Text('保存しない'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(2), // 保存する
+                child: const Text('保存する'),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (result == null || result == 0) {
+        // キャンセル
+        return;
+      } else if (result == 1) {
+        // 保存せずに閉じる
+        _controller.closeTab(index);
+      } else if (result == 2) {
+        // 保存して閉じる
+        final savedPath = await doc.saveFile();
+        if (savedPath != null) {
+          _controller.closeTab(index);
+        }
+      }
+    } else {
+      // 変更なし -> そのまま閉じる
+      _controller.closeTab(index);
+    }
+  }
+
   void _activateIme(BuildContext context) {
     if (_inputConnection == null || !_inputConnection!.attached) {
       final viewId = View.of(context).viewId;
@@ -522,6 +574,63 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
               ],
             ),
           ],
+        ],
+      ),
+    );
+  }
+
+  // タブバーの構築
+  Widget _buildTabBar() {
+    return Container(
+      height: 32,
+      color: Colors.grey.shade300,
+      child: Row(
+        children: [
+          Expanded(
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: _controller.documents.length,
+              itemBuilder: (context, index) {
+                final doc = _controller.documents[index];
+                final isActive = index == _controller.activeDocumentIndex;
+                final fileName =
+                    doc.currentFilePath?.split(Platform.pathSeparator).last ??
+                    'Untitled';
+                final title = fileName + (doc.isDirty ? ' *' : '');
+
+                return InkWell(
+                  onTap: () => _controller.switchTab(index),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    alignment: Alignment.center,
+                    color: isActive ? Colors.white : Colors.grey.shade300,
+                    child: Row(
+                      children: [
+                        Text(
+                          title,
+                          style: TextStyle(
+                            fontWeight: isActive
+                                ? FontWeight.bold
+                                : FontWeight.normal,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        InkWell(
+                          onTap: () => _handleCloseTab(index),
+                          child: const Icon(Icons.close, size: 16),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.add, size: 20),
+            onPressed: () => _controller.newTab(),
+            tooltip: 'New Tab',
+          ),
         ],
       ),
     );
@@ -922,6 +1031,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
         children: [
           _buildMenuBar(), // メニューバー
           _buildToolbar(), // ツールバー
+          _buildTabBar(), // タブバー
           _buildSearchBar(),
           // --- 列ルーラーエリア ---
           Container(

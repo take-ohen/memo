@@ -1124,6 +1124,90 @@ void main() {
     expect(state.debugLines[0], "def def def", reason: "全て置換されること");
     expect(controller.searchResults.length, 0, reason: "'abc' はもう無いはず");
   });
+
+  testWidgets('Tab Close Confirmation Logic', (WidgetTester tester) async {
+    // 1. モックの設定
+    final tempDir = Directory.systemTemp.createTempSync('memo_tab_test');
+    final savePath = '${tempDir.path}/saved_tab.txt';
+    final mockHelper = MockFileIOHelper();
+    mockHelper.mockSavePath = savePath;
+    FileIOHelper.instance = mockHelper;
+
+    // 2. アプリ起動
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1.0;
+    await tester.pumpWidget(createTestWidget(const EditorPage()));
+    await tester.pumpAndSettle();
+
+    final state = tester.state(find.byType(EditorPage)) as dynamic;
+    final EditorController controller = state.debugController;
+
+    // --- ケース1: キャンセル (Cancel) ---
+    // 変更を加える (キー入力シミュレーションの代わりに直接入力メソッドを呼ぶ)
+    controller.input('a');
+    await tester.pump(); // 描画更新
+
+    expect(controller.isDirty, isTrue, reason: "入力により変更フラグが立つこと");
+
+    // タブの閉じるボタンをタップ
+    // 検索バーは非表示なので、Icons.close はタブのものだけのはず
+    await tester.tap(find.byIcon(Icons.close).first);
+    await tester.pumpAndSettle();
+
+    // ダイアログが表示されているか
+    expect(find.text('確認'), findsOneWidget);
+    expect(find.text('キャンセル'), findsOneWidget);
+
+    // キャンセルをタップ
+    await tester.tap(find.text('キャンセル'));
+    await tester.pumpAndSettle();
+
+    // ダイアログが消え、タブが残っていること
+    expect(find.text('確認'), findsNothing);
+    expect(controller.documents.length, 1);
+    expect(controller.lines[0], contains('a'));
+
+    // --- ケース2: 保存しない (Don't Save) ---
+    // 再度閉じるボタン
+    await tester.tap(find.byIcon(Icons.close).first);
+    await tester.pumpAndSettle();
+
+    // 「保存しない」をタップ
+    await tester.tap(find.text('保存しない'));
+    await tester.pumpAndSettle();
+
+    // タブが閉じられ、新しい空のタブ（Untitled, isDirty=false）になっているはず
+    expect(controller.documents.length, 1);
+    expect(controller.isDirty, isFalse);
+    expect(controller.lines[0], isEmpty); // "a" は消えている
+
+    // --- ケース3: 保存する (Save) ---
+    // 再度変更を加える ("b")
+    controller.input('b');
+    await tester.pump(); // 描画更新
+    expect(controller.isDirty, isTrue);
+
+    // 閉じるボタン
+    await tester.tap(find.byIcon(Icons.close).first);
+    await tester.pumpAndSettle();
+
+    // 「保存する」をタップ
+    await tester.tap(find.text('保存する'));
+    await tester.pumpAndSettle(); // 保存ダイアログ -> 保存処理 -> タブ閉じる -> 新規タブ作成
+
+    // ファイルが保存されたか確認
+    final file = File(savePath);
+    expect(file.existsSync(), isTrue, reason: "ファイルが保存されていること");
+    expect(file.readAsStringSync(), contains('b'), reason: "保存内容が正しいこと");
+
+    // タブの状態確認 (保存して閉じたので、新規タブになっている)
+    expect(controller.documents.length, 1);
+    expect(controller.isDirty, isFalse);
+    expect(controller.lines[0], isEmpty);
+
+    // 後始末
+    tempDir.deleteSync(recursive: true);
+  });
 }
 
 // --- Mock Class ---
