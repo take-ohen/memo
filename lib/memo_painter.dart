@@ -371,3 +371,71 @@ class LineNumberPainter extends CustomPainter {
         oldDelegate.textStyle != textStyle;
   }
 }
+
+class ColumnRulerPainter extends CustomPainter {
+  final double charWidth;
+  final double lineHeight;
+  final TextStyle textStyle;
+  final double editorWidth;
+
+  ColumnRulerPainter({
+    required this.charWidth,
+    required this.lineHeight,
+    required this.textStyle,
+    required this.editorWidth,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.grey
+      ..strokeWidth = 1.0;
+
+    // 描画範囲の計算 (画面に見える範囲だけでなく、全体を描画してスクロールさせる)
+    // editorWidth は十分な大きさを持っている前提
+    int maxCols = (editorWidth / charWidth).ceil();
+
+    for (int i = 1; i <= maxCols; i++) {
+      double x = i * charWidth;
+
+      if (i % 10 == 0) {
+        // 10列ごと: 長い線と数値
+        canvas.drawLine(
+          Offset(x, size.height),
+          Offset(x, size.height - 8),
+          paint,
+        );
+
+        final textSpan = TextSpan(
+          text: '$i',
+          style: textStyle, // サイズ調整を削除し、渡されたスタイルをそのまま使う
+        );
+        final textPainter = TextPainter(
+          text: textSpan,
+          textDirection: TextDirection.ltr,
+        );
+        textPainter.layout();
+        // 数値を線の左側に寄せて表示
+        textPainter.paint(
+          canvas,
+          Offset(x - textPainter.width / 2, size.height - 20),
+        );
+      } else if (i % 5 == 0) {
+        // 5列ごと: 短い線
+        canvas.drawLine(
+          Offset(x, size.height),
+          Offset(x, size.height - 5),
+          paint,
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant ColumnRulerPainter oldDelegate) {
+    return oldDelegate.charWidth != charWidth ||
+        oldDelegate.lineHeight != lineHeight ||
+        oldDelegate.textStyle != textStyle ||
+        oldDelegate.editorWidth != editorWidth;
+  }
+}

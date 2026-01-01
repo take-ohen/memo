@@ -49,6 +49,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
   final ScrollController _horizontalScrollController = ScrollController();
   final ScrollController _verticalScrollController = ScrollController();
+  final ScrollController _rulerScrollController = ScrollController(); // ルーラー用
   final FocusNode _focusNode = FocusNode();
   final GlobalKey _painterKey = GlobalKey();
 
@@ -72,8 +73,8 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
   TextStyle get _lineNumberStyle => TextStyle(
     fontFamily: _controller.fontFamily,
-    fontSize: _controller.fontSize,
-    color: Colors.grey,
+    fontSize: _controller.lineNumberFontSize, // 設定値を使用
+    color: Color(_controller.lineNumberColor), // 設定値を使用
     fontFamilyFallback: const ['Meiryo', 'Yu Gothic', 'MS Gothic', 'monospace'],
   );
 
@@ -118,6 +119,9 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
     _verticalScrollController.addListener(_updateImeWindowPosition);
     _horizontalScrollController.addListener(_updateImeWindowPosition);
+
+    // スクロール同期の設定
+    _setupScrollSync();
   }
 
   @override
@@ -129,8 +133,35 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     _focusNode.dispose();
     _horizontalScrollController.dispose();
     _verticalScrollController.dispose();
+    _rulerScrollController.dispose();
     _cursorBlinkTimer?.cancel(); // カーソル点滅用
     super.dispose();
+  }
+
+  // スクロール同期ロジック
+  bool _isSyncing = false;
+  void _setupScrollSync() {
+    _horizontalScrollController.addListener(() {
+      if (_isSyncing) return;
+      if (_horizontalScrollController.hasClients &&
+          _rulerScrollController.hasClients) {
+        _isSyncing = true;
+        _rulerScrollController.jumpTo(_horizontalScrollController.offset);
+        _isSyncing = false;
+      }
+    });
+
+    _rulerScrollController.addListener(() {
+      if (_isSyncing) return;
+      if (_horizontalScrollController.hasClients &&
+          _rulerScrollController.hasClients) {
+        _isSyncing = true;
+        _horizontalScrollController.jumpTo(_rulerScrollController.offset);
+        _isSyncing = false;
+        // ルーラー操作時もIME位置更新が必要かもしれない
+        _updateImeWindowPosition();
+      }
+    });
   }
 
   void _calculateGlyphMetrics() {
@@ -892,6 +923,38 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
           _buildMenuBar(), // メニューバー
           _buildToolbar(), // ツールバー
           _buildSearchBar(),
+          // --- 列ルーラーエリア ---
+          Container(
+            height: 24,
+            color: Colors.grey.shade200,
+            child: Row(
+              children: [
+                // 行番号エリアの上部（空白）
+                SizedBox(width: lineNumberAreaWidth),
+                // ルーラー本体
+                Expanded(
+                  child: SingleChildScrollView(
+                    controller: _rulerScrollController,
+                    scrollDirection: Axis.horizontal,
+                    child: CustomPaint(
+                      size: Size(editorWidth, 24),
+                      painter: ColumnRulerPainter(
+                        charWidth: _charWidth,
+                        lineHeight: 24, // ルーラーの高さ固定
+                        textStyle: _lineNumberStyle.copyWith(
+                          // ルーラー用の設定を適用
+                          fontSize: _controller.rulerFontSize,
+                          color: Color(_controller.rulerColor),
+                        ),
+                        editorWidth: editorWidth,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // --- エディタ本体 ---
           Expanded(
             child: Scrollbar(
               controller: _verticalScrollController,

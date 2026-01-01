@@ -38,6 +38,12 @@ class EditorController extends ChangeNotifier {
   bool _editorBold = false;
   bool _editorItalic = false;
 
+  // --- 行番号・ルーラー設定 ---
+  int lineNumberColor = 0xFF9E9E9E; // Colors.grey
+  double lineNumberFontSize = 12.0;
+  int rulerColor = 0xFF9E9E9E; // Colors.grey
+  double rulerFontSize = 12.0;
+
   // Getters
   String get uiFontFamily => _uiFontFamily;
   double get uiFontSize => _uiFontSize;
@@ -78,6 +84,10 @@ class EditorController extends ChangeNotifier {
     _uiItalic = prefs.getBool('uiItalic') ?? false;
     _editorBold = prefs.getBool('editorBold') ?? false;
     _editorItalic = prefs.getBool('editorItalic') ?? false;
+    lineNumberColor = prefs.getInt('lineNumberColor') ?? 0xFF9E9E9E;
+    lineNumberFontSize = prefs.getDouble('lineNumberFontSize') ?? 12.0;
+    rulerColor = prefs.getInt('rulerColor') ?? 0xFF9E9E9E;
+    rulerFontSize = prefs.getDouble('rulerFontSize') ?? 12.0;
     notifyListeners();
   }
 
@@ -143,6 +153,25 @@ class EditorController extends ChangeNotifier {
     _saveBool('editorBold', bold);
     _saveBool('editorItalic', italic);
 
+    notifyListeners();
+  }
+
+  // 行番号・ルーラー設定の更新
+  void setViewSettings({
+    required int lnColor,
+    required double lnSize,
+    required int rColor,
+    required double rSize,
+  }) {
+    lineNumberColor = lnColor;
+    lineNumberFontSize = lnSize;
+    rulerColor = rColor;
+    rulerFontSize = rSize;
+
+    _saveInt('lineNumberColor', lnColor);
+    _saveDouble('lineNumberFontSize', lnSize);
+    _saveInt('rulerColor', rColor);
+    _saveDouble('rulerFontSize', rSize);
     notifyListeners();
   }
 

@@ -30,10 +30,25 @@ class _SettingsDialogState extends State<SettingsDialog>
   late bool _uiBold;
   late bool _uiItalic;
 
+  // View Settings (Line Number & Ruler)
+  late int _lineNumberColor;
+  late double _lineNumberFontSize;
+  late int _rulerColor;
+  late double _rulerFontSize;
+
+  // カラープリセット
+  final Map<String, int> _colorPresets = {
+    'Grey': 0xFF9E9E9E,
+    'Black': 0xFF000000,
+    'Red': 0xFFF44336,
+    'Blue': 0xFF2196F3,
+    'Green': 0xFF4CAF50,
+  };
+
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this); // タブを3つに増やす
 
     // 初期値のロード
     _editorFontController = TextEditingController(
@@ -49,6 +64,11 @@ class _SettingsDialogState extends State<SettingsDialog>
     _uiFontSize = widget.controller.uiFontSize;
     _uiBold = widget.controller.uiBold;
     _uiItalic = widget.controller.uiItalic;
+
+    _lineNumberColor = widget.controller.lineNumberColor;
+    _lineNumberFontSize = widget.controller.lineNumberFontSize;
+    _rulerColor = widget.controller.rulerColor;
+    _rulerFontSize = widget.controller.rulerFontSize;
 
     // フォントリストのロード開始
     _loadFonts();
@@ -86,6 +106,12 @@ class _SettingsDialogState extends State<SettingsDialog>
       _uiFontSize,
       _uiBold,
       _uiItalic,
+    );
+    widget.controller.setViewSettings(
+      lnColor: _lineNumberColor,
+      lnSize: _lineNumberFontSize,
+      rColor: _rulerColor,
+      rSize: _rulerFontSize,
     );
     Navigator.of(context).pop();
   }
@@ -190,6 +216,105 @@ class _SettingsDialogState extends State<SettingsDialog>
     );
   }
 
+  Widget _buildViewTab(BuildContext context) {
+    // 行番号とルーラーの設定UI
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionTitle('Line Numbers'),
+          _buildColorPicker(
+            label: 'Color',
+            value: _lineNumberColor,
+            onChanged: (v) => setState(() => _lineNumberColor = v),
+          ),
+          _buildSlider(
+            label: 'Font Size',
+            value: _lineNumberFontSize,
+            onChanged: (v) => setState(() => _lineNumberFontSize = v),
+          ),
+          const Divider(height: 32),
+          _buildSectionTitle('Column Ruler'),
+          _buildColorPicker(
+            label: 'Color',
+            value: _rulerColor,
+            onChanged: (v) => setState(() => _rulerColor = v),
+          ),
+          _buildSlider(
+            label: 'Font Size',
+            value: _rulerFontSize,
+            onChanged: (v) => setState(() => _rulerFontSize = v),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSectionTitle(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8.0),
+      child: Text(
+        title,
+        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+
+  Widget _buildColorPicker({
+    required String label,
+    required int value,
+    required ValueChanged<int> onChanged,
+  }) {
+    return Row(
+      children: [
+        SizedBox(width: 80, child: Text(label)),
+        DropdownButton<int>(
+          value: _colorPresets.containsValue(value) ? value : null,
+          hint: const Text('Custom'),
+          items: _colorPresets.entries.map((e) {
+            return DropdownMenuItem(
+              value: e.value,
+              child: Row(
+                children: [
+                  Container(width: 16, height: 16, color: Color(e.value)),
+                  const SizedBox(width: 8),
+                  Text(e.key),
+                ],
+              ),
+            );
+          }).toList(),
+          onChanged: (v) {
+            if (v != null) onChanged(v);
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSlider({
+    required String label,
+    required double value,
+    required ValueChanged<double> onChanged,
+  }) {
+    return Row(
+      children: [
+        SizedBox(width: 80, child: Text(label)),
+        Expanded(
+          child: Slider(
+            value: value,
+            min: 8.0,
+            max: 32.0,
+            divisions: 48,
+            label: value.toStringAsFixed(1),
+            onChanged: onChanged,
+          ),
+        ),
+        SizedBox(width: 40, child: Text(value.toStringAsFixed(1))),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = AppLocalizations.of(context)!;
@@ -204,6 +329,7 @@ class _SettingsDialogState extends State<SettingsDialog>
               tabs: [
                 Tab(text: s.settingsTabEditor),
                 Tab(text: s.settingsTabUi),
+                const Tab(text: 'View'), // 新しいタブ
               ],
             ),
             Expanded(
@@ -245,6 +371,8 @@ class _SettingsDialogState extends State<SettingsDialog>
                           onBoldChanged: (v) => _uiBold = v ?? false,
                           onItalicChanged: (v) => _uiItalic = v ?? false,
                         ),
+                        // 表示設定タブ
+                        _buildViewTab(context),
                       ],
                     ),
             ),
