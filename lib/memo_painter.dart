@@ -439,3 +439,86 @@ class ColumnRulerPainter extends CustomPainter {
         oldDelegate.editorWidth != editorWidth;
   }
 }
+
+class MinimapPainter extends CustomPainter {
+  final List<String> lines;
+  final Size docSize; // ドキュメント全体のサイズ
+  final Rect viewportRect; // 現在の表示範囲 (ドキュメント座標系)
+  final double charWidth;
+  final double lineHeight;
+  final TextStyle textStyle; // エディタ本体のテキストスタイル
+
+  MinimapPainter({
+    required this.lines,
+    required this.docSize,
+    required this.viewportRect,
+    required this.charWidth,
+    required this.lineHeight,
+    required this.textStyle,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // 背景
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, size.width, size.height),
+      Paint()..color = const Color(0xFFF5F5F5),
+    );
+
+    // スケール計算: ドキュメント全体をミニマップ領域(size)に収める
+    // アスペクト比を維持しつつ、全体が入るように min(scaleX, scaleY) を採用
+    double scaleX = size.width / docSize.width;
+    double scaleY = size.height / docSize.height;
+    double scale = min(scaleX, scaleY);
+
+    // 座標系を縮小
+    canvas.save();
+    canvas.scale(scale);
+
+    // テキスト描画設定
+    // 縮小されるので、フォントサイズは元のままでOK（scaleで小さくなる）
+    // ただし、あまりに小さいと描画負荷が高いので、簡易描画に切り替える手もあるが、
+    // ここでは要望通り文字を描画する。
+    final minimapStyle = textStyle.copyWith(
+      color: Colors.grey.shade600,
+      fontSize: lineHeight, // 元の高さ
+      height: 1.0,
+    );
+
+    final textPainter = TextPainter(textDirection: TextDirection.ltr);
+
+    for (int i = 0; i < lines.length; i++) {
+      if (lines[i].isEmpty) continue;
+
+      textPainter.text = TextSpan(text: lines[i], style: minimapStyle);
+      // layoutの幅制限は解除（縮小して全体を表示するため）
+      textPainter.layout();
+
+      textPainter.paint(canvas, Offset(0, i * lineHeight));
+    }
+
+    // ビューポート枠（現在の表示範囲）
+    final viewportPaint = Paint()
+      ..color = Colors.blue.withOpacity(0.1)
+      ..style = PaintingStyle.fill;
+
+    // 枠線
+    final viewportBorderPaint = Paint()
+      ..color = Colors.blue.withOpacity(0.3)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.0 / scale; // 縮小されても線幅を保つ
+
+    canvas.drawRect(viewportRect, viewportPaint);
+    canvas.drawRect(viewportRect, viewportBorderPaint);
+
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant MinimapPainter oldDelegate) {
+    return oldDelegate.lines != lines ||
+        oldDelegate.docSize != docSize ||
+        oldDelegate.viewportRect != viewportRect ||
+        oldDelegate.textStyle != textStyle;
+  }
+}

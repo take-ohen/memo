@@ -53,7 +53,8 @@ class EditorController extends ChangeNotifier {
   int tabWidth = 4; // タブ幅 (初期値4)
   String fontFamily = "BIZ UDゴシック"; // フォント名
   double fontSize = 16.0; // フォントサイズ
-  double minCanvasSize = 2000.0; // 最小キャンバスサイズ
+  int minColumns = 300; // 最小列数 (広大に)
+  int minLines = 200; // 最小行数 (広大に)
 
   // --- UIフォント設定 ---
   String _uiFontFamily = 'Segoe UI'; // Windows標準など
@@ -151,7 +152,8 @@ class EditorController extends ChangeNotifier {
     isOverwriteMode = prefs.getBool('isOverwriteMode') ?? false;
     fontFamily = prefs.getString('fontFamily') ?? "BIZ UDゴシック";
     fontSize = prefs.getDouble('fontSize') ?? 16.0;
-    minCanvasSize = prefs.getDouble('minCanvasSize') ?? 2000.0;
+    minColumns = prefs.getInt('minColumns') ?? 300;
+    minLines = prefs.getInt('minLines') ?? 200;
     _uiFontFamily = prefs.getString('uiFontFamily') ?? 'Segoe UI';
     _uiFontSize = prefs.getDouble('uiFontSize') ?? 14.0;
     _uiBold = prefs.getBool('uiBold') ?? false;
@@ -199,9 +201,11 @@ class EditorController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setMinCanvasSize(double size) {
-    minCanvasSize = size;
-    _saveDouble('minCanvasSize', size);
+  void setCanvasSize(int cols, int lines) {
+    minColumns = cols;
+    minLines = lines;
+    _saveInt('minColumns', cols);
+    _saveInt('minLines', lines);
     notifyListeners();
   }
 

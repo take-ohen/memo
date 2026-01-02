@@ -3,10 +3,17 @@ import 'editor_controller.dart';
 import 'font_manager.dart';
 import 'l10n/app_localizations.dart';
 
+enum SettingsTab { editor, ui, view }
+
 class SettingsDialog extends StatefulWidget {
   final EditorController controller;
+  final SettingsTab initialTab;
 
-  const SettingsDialog({super.key, required this.controller});
+  const SettingsDialog({
+    super.key,
+    required this.controller,
+    this.initialTab = SettingsTab.editor,
+  });
 
   @override
   State<SettingsDialog> createState() => _SettingsDialogState();
@@ -23,6 +30,8 @@ class _SettingsDialogState extends State<SettingsDialog>
   late double _editorFontSize;
   late bool _editorBold;
   late bool _editorItalic;
+  late int _minColumns;
+  late int _minLines;
 
   // UI Settings
   late TextEditingController _uiFontController;
@@ -48,7 +57,11 @@ class _SettingsDialogState extends State<SettingsDialog>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this); // タブを3つに増やす
+    _tabController = TabController(
+      length: 3,
+      vsync: this,
+      initialIndex: widget.initialTab.index,
+    );
 
     // 初期値のロード
     _editorFontController = TextEditingController(
@@ -57,6 +70,8 @@ class _SettingsDialogState extends State<SettingsDialog>
     _editorFontSize = widget.controller.fontSize;
     _editorBold = widget.controller.editorBold;
     _editorItalic = widget.controller.editorItalic;
+    _minColumns = widget.controller.minColumns;
+    _minLines = widget.controller.minLines;
 
     _uiFontController = TextEditingController(
       text: widget.controller.uiFontFamily,
@@ -101,6 +116,7 @@ class _SettingsDialogState extends State<SettingsDialog>
       _editorBold,
       _editorItalic,
     );
+    widget.controller.setCanvasSize(_minColumns, _minLines);
     widget.controller.setUiFont(
       _uiFontController.text,
       _uiFontSize,
@@ -116,7 +132,8 @@ class _SettingsDialogState extends State<SettingsDialog>
     Navigator.of(context).pop();
   }
 
-  Widget _buildFontTab({
+  // --- 共通パーツ: フォント設定セクション ---
+  Widget _buildFontSection({
     required BuildContext context,
     required List<String> fontList,
     required TextEditingController fontController,
@@ -128,88 +145,209 @@ class _SettingsDialogState extends State<SettingsDialog>
     required Function(bool?) onItalicChanged,
   }) {
     final s = AppLocalizations.of(context)!;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionTitle('Font Settings'),
+        // フォント選択
+        LayoutBuilder(
+          builder: (context, constraints) {
+            return DropdownMenu<String>(
+              width: constraints.maxWidth,
+              controller: fontController,
+              enableFilter: true,
+              requestFocusOnTap: true,
+              label: Text(s.labelFontFamily),
+              dropdownMenuEntries: fontList.map((f) {
+                return DropdownMenuEntry<String>(value: f, label: f);
+              }).toList(),
+              onSelected: (value) {
+                if (value != null) {
+                  setState(() {
+                    fontController.text = value;
+                  });
+                }
+              },
+            );
+          },
+        ),
+        const SizedBox(height: 16),
+        // サイズ
+        Row(
+          children: [
+            Text("${s.labelFontSize}: ${fontSize.toStringAsFixed(1)}"),
+            Expanded(
+              child: Slider(
+                value: fontSize,
+                min: 8.0,
+                max: 72.0,
+                divisions: 128,
+                onChanged: (v) => setState(() => onSizeChanged(v)),
+              ),
+            ),
+          ],
+        ),
+        // スタイル
+        Row(
+          children: [
+            Checkbox(
+              value: isBold,
+              onChanged: (v) => setState(() => onBoldChanged(v)),
+            ),
+            Text(s.labelBold),
+            const SizedBox(width: 16),
+            Checkbox(
+              value: isItalic,
+              onChanged: (v) => setState(() => onItalicChanged(v)),
+            ),
+            Text(s.labelItalic),
+          ],
+        ),
+      ],
+    );
+  }
 
-    return Padding(
+  // --- 共通パーツ: キャンバス設定セクション ---
+  Widget _buildCanvasSection({
+    required int minColumns,
+    required int minLines,
+    required Function(int, int) onCanvasSizeChanged,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionTitle("Canvas Size (Minimum)"),
+        // Columns
+        Row(
+          children: [
+            SizedBox(width: 60, child: Text("Cols: $minColumns")),
+            Expanded(
+              child: Slider(
+                value: minColumns.toDouble(),
+                min: 80,
+                max: 1000,
+                divisions: 920,
+                onChanged: (v) =>
+                    setState(() => onCanvasSizeChanged(v.toInt(), minLines)),
+              ),
+            ),
+          ],
+        ),
+        // Lines
+        Row(
+          children: [
+            SizedBox(width: 60, child: Text("Lines: $minLines")),
+            Expanded(
+              child: Slider(
+                value: minLines.toDouble(),
+                min: 40,
+                max: 1000,
+                divisions: 960,
+                onChanged: (v) =>
+                    setState(() => onCanvasSizeChanged(minColumns, v.toInt())),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // --- 共通パーツ: プレビュー ---
+  Widget _buildPreviewSection({
+    required BuildContext context,
+    required TextEditingController fontController,
+    required double fontSize,
+    required bool isBold,
+    required bool isItalic,
+  }) {
+    final s = AppLocalizations.of(context)!;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(height: 32),
+        Text("Preview", style: TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        SizedBox(
+          height: 100, // 高さを固定してオーバーフローを防ぐ
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: SingleChildScrollView(
+              child: Text(
+                s.previewText,
+                style: TextStyle(
+                  fontFamily: fontController.text,
+                  fontSize: fontSize,
+                  fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+                  fontStyle: isItalic ? FontStyle.italic : FontStyle.normal,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // --- Editorタブの構築 ---
+  Widget _buildEditorTab(BuildContext context) {
+    return SingleChildScrollView(
       padding: const EdgeInsets.all(16.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // フォント選択 (入力も可能)
-          LayoutBuilder(
-            builder: (context, constraints) {
-              return DropdownMenu<String>(
-                width: constraints.maxWidth,
-                controller: fontController,
-                enableFilter: true, // 入力してフィルタリング可能
-                requestFocusOnTap: true, // タップで入力可能にする
-                label: Text(s.labelFontFamily),
-                dropdownMenuEntries: fontList.map((f) {
-                  return DropdownMenuEntry<String>(value: f, label: f);
-                }).toList(),
-                onSelected: (value) {
-                  if (value != null) {
-                    setState(() {
-                      fontController.text = value;
-                    });
-                  }
-                },
-              );
-            },
+          _buildFontSection(
+            context: context,
+            fontList: _fontManager.monospaceFonts,
+            fontController: _editorFontController,
+            fontSize: _editorFontSize,
+            isBold: _editorBold,
+            isItalic: _editorItalic,
+            onSizeChanged: (v) => _editorFontSize = v,
+            onBoldChanged: (v) => _editorBold = v ?? false,
+            onItalicChanged: (v) => _editorItalic = v ?? false,
           ),
-          const SizedBox(height: 16),
-          // サイズ
-          Row(
-            children: [
-              Text("${s.labelFontSize}: ${fontSize.toStringAsFixed(1)}"),
-              Expanded(
-                child: Slider(
-                  value: fontSize,
-                  min: 8.0,
-                  max: 72.0,
-                  divisions: 128,
-                  onChanged: (v) => setState(() => onSizeChanged(v)),
-                ),
-              ),
-            ],
+          _buildPreviewSection(
+            context: context,
+            fontController: _editorFontController,
+            fontSize: _editorFontSize,
+            isBold: _editorBold,
+            isItalic: _editorItalic,
           ),
-          // スタイル
-          Row(
-            children: [
-              Checkbox(
-                value: isBold,
-                onChanged: (v) => setState(() => onBoldChanged(v)),
-              ),
-              Text(s.labelBold),
-              const SizedBox(width: 16),
-              Checkbox(
-                value: isItalic,
-                onChanged: (v) => setState(() => onItalicChanged(v)),
-              ),
-              Text(s.labelItalic),
-            ],
+        ],
+      ),
+    );
+  }
+
+  // --- UIタブの構築 ---
+  Widget _buildUiTab(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildFontSection(
+            context: context,
+            fontList: _fontManager.allFonts,
+            fontController: _uiFontController,
+            fontSize: _uiFontSize,
+            isBold: _uiBold,
+            isItalic: _uiItalic,
+            onSizeChanged: (v) => _uiFontSize = v,
+            onBoldChanged: (v) => _uiBold = v ?? false,
+            onItalicChanged: (v) => _uiItalic = v ?? false,
           ),
-          const Divider(height: 32),
-          // プレビュー
-          Expanded(
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: SingleChildScrollView(
-                child: Text(
-                  s.previewText,
-                  style: TextStyle(
-                    fontFamily: fontController.text,
-                    fontSize: fontSize,
-                    fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
-                    fontStyle: isItalic ? FontStyle.italic : FontStyle.normal,
-                  ),
-                ),
-              ),
-            ),
+          _buildPreviewSection(
+            context: context,
+            fontController: _uiFontController,
+            fontSize: _uiFontSize,
+            isBold: _uiBold,
+            isItalic: _uiItalic,
           ),
         ],
       ),
@@ -223,6 +361,15 @@ class _SettingsDialogState extends State<SettingsDialog>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _buildCanvasSection(
+            minColumns: _minColumns,
+            minLines: _minLines,
+            onCanvasSizeChanged: (c, l) {
+              _minColumns = c;
+              _minLines = l;
+            },
+          ),
+          const Divider(height: 32),
           _buildSectionTitle('Line Numbers'),
           _buildColorPicker(
             label: 'Color',
@@ -329,7 +476,7 @@ class _SettingsDialogState extends State<SettingsDialog>
               tabs: [
                 Tab(text: s.settingsTabEditor),
                 Tab(text: s.settingsTabUi),
-                const Tab(text: 'View'), // 新しいタブ
+                const Tab(text: 'View'),
               ],
             ),
             Expanded(
@@ -348,29 +495,9 @@ class _SettingsDialogState extends State<SettingsDialog>
                       controller: _tabController,
                       children: [
                         // エディタ設定タブ
-                        _buildFontTab(
-                          context: context,
-                          fontList: _fontManager.monospaceFonts,
-                          fontController: _editorFontController,
-                          fontSize: _editorFontSize,
-                          isBold: _editorBold,
-                          isItalic: _editorItalic,
-                          onSizeChanged: (v) => _editorFontSize = v,
-                          onBoldChanged: (v) => _editorBold = v ?? false,
-                          onItalicChanged: (v) => _editorItalic = v ?? false,
-                        ),
+                        _buildEditorTab(context),
                         // UI設定タブ
-                        _buildFontTab(
-                          context: context,
-                          fontList: _fontManager.allFonts,
-                          fontController: _uiFontController,
-                          fontSize: _uiFontSize,
-                          isBold: _uiBold,
-                          isItalic: _uiItalic,
-                          onSizeChanged: (v) => _uiFontSize = v,
-                          onBoldChanged: (v) => _uiBold = v ?? false,
-                          onItalicChanged: (v) => _uiItalic = v ?? false,
-                        ),
+                        _buildUiTab(context),
                         // 表示設定タブ
                         _buildViewTab(context),
                       ],

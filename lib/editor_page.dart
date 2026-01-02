@@ -50,7 +50,15 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   final ScrollController _horizontalScrollController = ScrollController();
   final ScrollController _verticalScrollController = ScrollController();
   final ScrollController _rulerScrollController = ScrollController(); // ルーラー用
+  final ScrollController _scrollbarScrollController =
+      ScrollController(); // 固定スクロールバー用
   final FocusNode _focusNode = FocusNode();
+
+  // ミニマップ用
+  static const double _minimapLineHeight = 3.0;
+  static const double _minimapCharWidth = 2.0;
+  static const double _minimapWidth = 100.0;
+
   final GlobalKey _painterKey = GlobalKey();
 
   // コントローラーの設定値を使用するように変更
@@ -134,6 +142,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     _horizontalScrollController.dispose();
     _verticalScrollController.dispose();
     _rulerScrollController.dispose();
+    _scrollbarScrollController.dispose();
     _cursorBlinkTimer?.cancel(); // カーソル点滅用
     super.dispose();
   }
@@ -141,26 +150,66 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   // スクロール同期ロジック
   bool _isSyncing = false;
   void _setupScrollSync() {
+    // エディタ本体 -> ルーラー & スクロールバー
     _horizontalScrollController.addListener(() {
       if (_isSyncing) return;
-      if (_horizontalScrollController.hasClients &&
-          _rulerScrollController.hasClients) {
+      if (_horizontalScrollController.hasClients) {
         _isSyncing = true;
-        _rulerScrollController.jumpTo(_horizontalScrollController.offset);
+        final offset = _horizontalScrollController.offset;
+        if (_rulerScrollController.hasClients) {
+          _rulerScrollController.jumpTo(offset);
+        }
+        if (_scrollbarScrollController.hasClients) {
+          _scrollbarScrollController.jumpTo(offset);
+        }
         _isSyncing = false;
       }
     });
 
+    // ルーラー -> エディタ本体 & スクロールバー
     _rulerScrollController.addListener(() {
       if (_isSyncing) return;
-      if (_horizontalScrollController.hasClients &&
-          _rulerScrollController.hasClients) {
+      if (_rulerScrollController.hasClients) {
         _isSyncing = true;
-        _horizontalScrollController.jumpTo(_rulerScrollController.offset);
+        final offset = _rulerScrollController.offset;
+        if (_horizontalScrollController.hasClients) {
+          _horizontalScrollController.jumpTo(offset);
+        }
+        if (_scrollbarScrollController.hasClients) {
+          _scrollbarScrollController.jumpTo(offset);
+        }
         _isSyncing = false;
         // ルーラー操作時もIME位置更新が必要かもしれない
         _updateImeWindowPosition();
       }
+    });
+
+    // スクロールバー -> エディタ本体 & ルーラー
+    _scrollbarScrollController.addListener(() {
+      if (_isSyncing) return;
+      if (_scrollbarScrollController.hasClients) {
+        _isSyncing = true;
+        final offset = _scrollbarScrollController.offset;
+        if (_horizontalScrollController.hasClients) {
+          _horizontalScrollController.jumpTo(offset);
+        }
+        if (_rulerScrollController.hasClients) {
+          _rulerScrollController.jumpTo(offset);
+        }
+        _isSyncing = false;
+        _updateImeWindowPosition();
+      }
+    });
+
+    // 垂直スクロール同期 (エディタ -> ミニマップ)
+    _verticalScrollController.addListener(() {
+      if (_isSyncing) return;
+      // setStateを呼んでMinimapPainterのviewportYを更新させる
+      setState(() {});
+
+      // ミニマップは固定表示なのでスクロール同期は不要
+      // IME位置更新のみ行う
+      _updateImeWindowPosition();
     });
   }
 
@@ -400,27 +449,27 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
       );
 
       _inputConnection = TextInput.attach(this, config);
-      _inputConnection!.show();
+      _inputConnection?.show();
       print("IME接続開始！");
     }
   }
 
   void _updateImeWindowPosition() {
-    if (_inputConnection == null ||
-        !_inputConnection!.attached ||
-        _painterKey.currentContext == null) {
+    final input = _inputConnection;
+    final context = _painterKey.currentContext;
+
+    if (input == null || !input.attached || context == null) {
       return;
     }
 
-    final RenderBox? renderBox =
-        _painterKey.currentContext!.findRenderObject() as RenderBox?;
+    final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
     if (renderBox == null) return;
 
     final double safeCharWidth = _charWidth > 0 ? _charWidth : 16.0;
     final double safeLineHeight = _lineHeight > 0 ? _lineHeight : 24.0;
 
     final Matrix4 transform = renderBox.getTransformTo(null);
-    _inputConnection!.setEditableSizeAndTransform(renderBox.size, transform);
+    input.setEditableSizeAndTransform(renderBox.size, transform);
 
     String currentLine = "";
     if (_controller.cursorRow < _controller.lines.length) {
@@ -440,7 +489,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     final double localPixelX = visualX * safeCharWidth;
     final double localPixelY = _controller.cursorRow * safeLineHeight;
 
-    _inputConnection!.setComposingRect(
+    input.setComposingRect(
       Rect.fromLTWH(localPixelX, localPixelY, safeCharWidth, safeLineHeight),
     );
   }
@@ -634,6 +683,118 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
         ],
       ),
     );
+  }
+
+  // ミニマップの構築
+  Widget _buildMinimap(double editorWidth, double editorHeight) {
+    // 現在のビューポート情報
+    double viewportOffsetY = 0;
+    double viewportHeight = 0;
+    double viewportOffsetX = 0;
+    double viewportWidth = 0;
+
+    if (_verticalScrollController.hasClients &&
+        _horizontalScrollController.hasClients) {
+      try {
+        viewportOffsetY = _verticalScrollController.offset;
+        viewportHeight = _verticalScrollController.position.viewportDimension;
+        viewportOffsetX = _horizontalScrollController.offset;
+        viewportWidth = _horizontalScrollController.position.viewportDimension;
+      } catch (e) {
+        // 取得失敗時は無視 (初期値0のまま)
+      }
+    }
+
+    // エディタ全体のサイズ (docSize)
+    Size docSize = Size(editorWidth, editorHeight);
+
+    return Container(
+      width: _minimapWidth,
+      // 高さは親(Column -> Expanded -> Row)によって決まるため、指定しないかdouble.infinity
+      height: double.infinity,
+      decoration: BoxDecoration(
+        border: Border(left: BorderSide(color: Colors.grey.shade300)),
+        color: const Color(0xFFF5F5F5),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return GestureDetector(
+            onTapDown: (details) => _handleMinimapInput(
+              details.localPosition,
+              constraints.maxHeight,
+              docSize,
+            ),
+            onPanUpdate: (details) => _handleMinimapInput(
+              details.localPosition,
+              constraints.maxHeight,
+              docSize,
+            ),
+            child: CustomPaint(
+              size: Size(_minimapWidth, constraints.maxHeight),
+              painter: MinimapPainter(
+                lines: _controller.lines,
+                docSize: docSize,
+                viewportRect: Rect.fromLTWH(
+                  viewportOffsetX,
+                  viewportOffsetY,
+                  viewportWidth,
+                  viewportHeight,
+                ),
+                charWidth: _charWidth,
+                lineHeight: _lineHeight,
+                textStyle: _textStyle,
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  void _handleMinimapInput(
+    Offset localPos,
+    double minimapHeight,
+    Size docSize,
+  ) {
+    if (!_verticalScrollController.hasClients ||
+        !_horizontalScrollController.hasClients)
+      return;
+
+    // スケール計算 (Painterと同じロジック)
+    double scaleX = _minimapWidth / docSize.width;
+    double scaleY = minimapHeight / docSize.height;
+    double scale = min(scaleX, scaleY);
+    if (scale == 0) return;
+
+    // クリック位置をドキュメント座標へ逆変換
+    double targetEditorY = localPos.dy / scale;
+    double targetEditorX = localPos.dx / scale;
+
+    // ビューポートの中心に合わせる
+    double viewportHeight = 0;
+    double viewportWidth = 0;
+    try {
+      viewportHeight = _verticalScrollController.position.viewportDimension;
+      viewportWidth = _horizontalScrollController.position.viewportDimension;
+    } catch (e) {
+      return;
+    }
+
+    double finalScrollY = targetEditorY - viewportHeight / 2;
+    double finalScrollX = targetEditorX - viewportWidth / 2;
+
+    // 範囲制限 (Y)
+    double maxScrollY = _verticalScrollController.position.maxScrollExtent;
+    if (finalScrollY < 0) finalScrollY = 0;
+    if (finalScrollY > maxScrollY) finalScrollY = maxScrollY;
+
+    // 範囲制限 (X)
+    double maxScrollX = _horizontalScrollController.position.maxScrollExtent;
+    if (finalScrollX < 0) finalScrollX = 0;
+    if (finalScrollX > maxScrollX) finalScrollX = maxScrollX;
+
+    _verticalScrollController.jumpTo(finalScrollY);
+    _horizontalScrollController.jumpTo(finalScrollX);
   }
 
   // メニューバーの構築
@@ -896,11 +1057,37 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                   onPressed: () {
                     showDialog(
                       context: context,
-                      builder: (context) =>
-                          SettingsDialog(controller: _controller),
+                      builder: (context) => SettingsDialog(
+                        controller: _controller,
+                        initialTab: SettingsTab.editor,
+                      ),
                     );
                   },
                   child: MenuAcceleratorLabel(s.menuFont),
+                ),
+                MenuItemButton(
+                  onPressed: () {
+                    showDialog(
+                      context: context,
+                      builder: (context) => SettingsDialog(
+                        controller: _controller,
+                        initialTab: SettingsTab.ui,
+                      ),
+                    );
+                  },
+                  child: MenuAcceleratorLabel(s.settingsTabUi),
+                ),
+                MenuItemButton(
+                  onPressed: () {
+                    showDialog(
+                      context: context,
+                      builder: (context) => SettingsDialog(
+                        controller: _controller,
+                        initialTab: SettingsTab.view,
+                      ),
+                    );
+                  },
+                  child: MenuAcceleratorLabel(s.menuView),
                 ),
               ],
               child: MenuAcceleratorLabel(s.menuSettings),
@@ -1013,14 +1200,15 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
     // 2. エディタ領域のサイズ決定 (画面サイズ以上の余白を持たせる)
     Size screenSize = MediaQuery.of(context).size;
-    double minCanvasSize = _controller.minCanvasSize; // 設定値を使用
+    double minCanvasWidth = _controller.minColumns * _charWidth;
+    double minCanvasHeight = _controller.minLines * _lineHeight;
 
     double editorWidth = max(
-      minCanvasSize,
+      minCanvasWidth,
       textContentWidth + screenSize.width / 2,
     );
     double editorHeight = max(
-      minCanvasSize,
+      minCanvasHeight,
       textContentHeight + screenSize.height / 2,
     );
 
@@ -1061,138 +1249,159 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                     ),
                   ),
                 ),
+                // ミニマップの幅分だけ余白を空ける（レイアウト合わせ）
+                Container(width: _minimapWidth, color: Colors.grey.shade200),
               ],
             ),
           ),
           // --- エディタ本体 ---
           Expanded(
-            child: Scrollbar(
-              controller: _verticalScrollController,
-              thumbVisibility: true,
-              trackVisibility: true,
-              child: Scrollbar(
-                controller: _horizontalScrollController,
-                thumbVisibility: true,
-                trackVisibility: true,
-                notificationPredicate: (notif) => notif.depth == 1,
-                child: SingleChildScrollView(
-                  controller: _verticalScrollController,
-                  scrollDirection: Axis.vertical,
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // メインエリア (行番号 + エディタ)
+                Expanded(
+                  child: Stack(
                     children: [
-                      // --- 行番号エリア ---
-                      Container(
-                        width: lineNumberAreaWidth,
-                        height: editorHeight, // エディタの高さに合わせる
-                        color: Colors.grey.shade200,
-                        child: CustomPaint(
-                          size: Size(lineNumberAreaWidth, editorHeight),
-                          painter: LineNumberPainter(
-                            lineCount: _controller.lines.length,
-                            lineHeight: _lineHeight,
-                            textStyle: _lineNumberStyle,
-                          ),
-                        ),
-                      ),
-                      // --- エディタエリア ---
-                      Expanded(
-                        child: Focus(
-                          focusNode: _focusNode,
-                          onKeyEvent: (FocusNode node, KeyEvent event) {
-                            final result = _handleKeyPress(event);
-                            return result;
-                          },
-                          child: SingleChildScrollView(
-                            controller: _horizontalScrollController,
-                            scrollDirection: Axis.horizontal,
-                            child: GestureDetector(
-                              // タップダウン； カーソル移動＆選択解除
-                              onTapDown: (details) {
-                                _resetCursorBlink();
-                                _controller.clearSelection();
-                                _controller.handleTap(
-                                  details.localPosition,
-                                  _charWidth,
-                                  _lineHeight,
-                                );
-                                _focusNode.requestFocus();
-                                WidgetsBinding.instance.addPostFrameCallback((
-                                  _,
-                                ) {
-                                  _updateImeWindowPosition();
-                                });
-                              },
-                              //ドラッグ開始 (選択範囲の始点を記録)
-                              onPanStart: (details) {
-                                _resetCursorBlink();
-                                _controller.handlePanStart(
-                                  details.localPosition,
-                                  _charWidth,
-                                  _lineHeight,
-                                  HardwareKeyboard.instance.isAltPressed,
-                                );
-                                _focusNode.requestFocus();
-                                WidgetsBinding.instance.addPostFrameCallback((
-                                  _,
-                                ) {
-                                  _updateImeWindowPosition();
-                                });
-                              },
-                              // ドラッグ中(カーソル位置を更新=選択範囲の最終位置が変わる)
-                              onPanUpdate: (details) {
-                                _resetCursorBlink();
-                                _controller.handleTap(
-                                  details.localPosition,
-                                  _charWidth,
-                                  _lineHeight,
-                                );
-                                // ドラッグ中はフォーカス要求は不要だが、IME位置更新は必要かもしれない
-                                WidgetsBinding.instance.addPostFrameCallback((
-                                  _,
-                                ) {
-                                  _updateImeWindowPosition();
-                                });
-                              },
-                              onPanEnd: (details) {
-                                //                    _isDragging = false;
-                              },
-                              child: Container(
-                                width: editorWidth,
+                      // 1. コンテンツ (垂直スクロール + 水平スクロール)
+                      Scrollbar(
+                        controller: _verticalScrollController,
+                        thumbVisibility: true,
+                        trackVisibility: true,
+                        child: SingleChildScrollView(
+                          controller: _verticalScrollController,
+                          scrollDirection: Axis.vertical,
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // 行番号エリア
+                              Container(
+                                width: lineNumberAreaWidth,
                                 height: editorHeight,
+                                color: Colors.grey.shade200,
                                 child: CustomPaint(
-                                  key: _painterKey,
-                                  painter: MemoPainter(
-                                    lines: _controller.lines,
-                                    charWidth: _charWidth,
-                                    charHeight: _charHeight,
-                                    showGrid: _controller.showGrid,
-                                    isOverwriteMode:
-                                        _controller.isOverwriteMode,
-                                    cursorRow: _controller.cursorRow,
-                                    cursorCol: _controller.cursorCol,
+                                  size: Size(lineNumberAreaWidth, editorHeight),
+                                  painter: LineNumberPainter(
+                                    lineCount: _controller.lines.length,
                                     lineHeight: _lineHeight,
-                                    textStyle: _textStyle,
-                                    composingText: _controller.composingText,
-                                    selectionOriginRow:
-                                        _controller.selectionOriginRow,
-                                    selectionOriginCol:
-                                        _controller.selectionOriginCol,
-                                    showCursor: _showCursor,
-                                    isRectangularSelection:
-                                        _controller.isRectangularSelection,
-                                    searchResults:
-                                        _controller.searchResults, // ★追加
-                                    currentSearchIndex:
-                                        _controller.currentSearchIndex, // ★追加
-                                  ),
-                                  size: Size.infinite,
-                                  child: Container(
-                                    // 画面全体のタッチ判定を有効にするため、透明または白の色を指定
-                                    color: Colors.transparent,
+                                    textStyle: _lineNumberStyle,
                                   ),
                                 ),
                               ),
+                              // エディタエリア
+                              Expanded(
+                                child: Focus(
+                                  focusNode: _focusNode,
+                                  onKeyEvent: (FocusNode node, KeyEvent event) {
+                                    final result = _handleKeyPress(event);
+                                    return result;
+                                  },
+                                  child: SingleChildScrollView(
+                                    controller: _horizontalScrollController,
+                                    scrollDirection: Axis.horizontal,
+                                    child: GestureDetector(
+                                      onTapDown: (details) {
+                                        _resetCursorBlink();
+                                        _controller.clearSelection();
+                                        _controller.handleTap(
+                                          details.localPosition,
+                                          _charWidth,
+                                          _lineHeight,
+                                        );
+                                        _focusNode.requestFocus();
+                                        WidgetsBinding.instance
+                                            .addPostFrameCallback((_) {
+                                              _updateImeWindowPosition();
+                                            });
+                                      },
+                                      onPanStart: (details) {
+                                        _resetCursorBlink();
+                                        _controller.handlePanStart(
+                                          details.localPosition,
+                                          _charWidth,
+                                          _lineHeight,
+                                          HardwareKeyboard
+                                              .instance
+                                              .isAltPressed,
+                                        );
+                                        _focusNode.requestFocus();
+                                        WidgetsBinding.instance
+                                            .addPostFrameCallback((_) {
+                                              _updateImeWindowPosition();
+                                            });
+                                      },
+                                      onPanUpdate: (details) {
+                                        _resetCursorBlink();
+                                        _controller.handleTap(
+                                          details.localPosition,
+                                          _charWidth,
+                                          _lineHeight,
+                                        );
+                                        WidgetsBinding.instance
+                                            .addPostFrameCallback((_) {
+                                              _updateImeWindowPosition();
+                                            });
+                                      },
+                                      child: Container(
+                                        width: editorWidth,
+                                        height: editorHeight,
+                                        child: CustomPaint(
+                                          key: _painterKey,
+                                          painter: MemoPainter(
+                                            lines: _controller.lines,
+                                            charWidth: _charWidth,
+                                            charHeight: _charHeight,
+                                            showGrid: _controller.showGrid,
+                                            isOverwriteMode:
+                                                _controller.isOverwriteMode,
+                                            cursorRow: _controller.cursorRow,
+                                            cursorCol: _controller.cursorCol,
+                                            lineHeight: _lineHeight,
+                                            textStyle: _textStyle,
+                                            composingText:
+                                                _controller.composingText,
+                                            selectionOriginRow:
+                                                _controller.selectionOriginRow,
+                                            selectionOriginCol:
+                                                _controller.selectionOriginCol,
+                                            showCursor: _showCursor,
+                                            isRectangularSelection: _controller
+                                                .isRectangularSelection,
+                                            searchResults:
+                                                _controller.searchResults,
+                                            currentSearchIndex:
+                                                _controller.currentSearchIndex,
+                                          ),
+                                          size: Size.infinite,
+                                          child: Container(
+                                            color: Colors.transparent,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      // 2. 水平スクロールバー (固定表示・エディタ幅のみ)
+                      Positioned(
+                        left: lineNumberAreaWidth, // 行番号の右から
+                        right: 0, // 右端まで
+                        bottom: 0, // 下端固定
+                        child: Scrollbar(
+                          controller: _scrollbarScrollController, // 専用コントローラー
+                          thumbVisibility: true,
+                          trackVisibility: true,
+                          // ダミーのスクロールビュー (コントローラーを共有して同期)
+                          child: SingleChildScrollView(
+                            controller: _scrollbarScrollController, // 専用コントローラー
+                            scrollDirection: Axis.horizontal,
+                            child: SizedBox(
+                              width: editorWidth,
+                              height: 16, // 操作しやすい高さに設定
                             ),
                           ),
                         ),
@@ -1200,7 +1409,9 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                     ],
                   ),
                 ),
-              ),
+                // --- ミニマップエリア (固定) ---
+                _buildMinimap(editorWidth, editorHeight),
+              ],
             ),
           ),
           // --- ステータスバー ---
