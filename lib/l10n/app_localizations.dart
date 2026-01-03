@@ -284,6 +284,24 @@ abstract class AppLocalizations {
   /// **'Show Grid'**
   String get menuShowGrid;
 
+  /// No description provided for @menuShowLineNumbers.
+  ///
+  /// In en, this message translates to:
+  /// **'Show Line Numbers'**
+  String get menuShowLineNumbers;
+
+  /// No description provided for @menuShowRuler.
+  ///
+  /// In en, this message translates to:
+  /// **'Show Column Ruler'**
+  String get menuShowRuler;
+
+  /// No description provided for @menuShowMinimap.
+  ///
+  /// In en, this message translates to:
+  /// **'Show Minimap'**
+  String get menuShowMinimap;
+
   /// No description provided for @menuSettings.
   ///
   /// In en, this message translates to:

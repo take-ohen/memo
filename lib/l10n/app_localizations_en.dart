@@ -102,6 +102,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get menuShowGrid => 'Show Grid';
 
   @override
+  String get menuShowLineNumbers => 'Show Line Numbers';
+
+  @override
+  String get menuShowRuler => 'Show Column Ruler';
+
+  @override
+  String get menuShowMinimap => 'Show Minimap';
+
+  @override
   String get menuSettings => 'Settings';
 
   @override

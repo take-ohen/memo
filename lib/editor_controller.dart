@@ -50,6 +50,9 @@ class EditorController extends ChangeNotifier {
   Encoding get currentEncoding => activeDocument.currentEncoding;
 
   bool showGrid = false; // グリッド表示フラグ
+  bool showLineNumber = true;
+  bool showRuler = true;
+  bool showMinimap = true;
   int tabWidth = 4; // タブ幅 (初期値4)
   String fontFamily = "BIZ UDゴシック"; // フォント名
   double fontSize = 16.0; // フォントサイズ
@@ -148,6 +151,9 @@ class EditorController extends ChangeNotifier {
   Future<void> loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
     showGrid = prefs.getBool('showGrid') ?? false;
+    showLineNumber = prefs.getBool('showLineNumber') ?? true;
+    showRuler = prefs.getBool('showRuler') ?? true;
+    showMinimap = prefs.getBool('showMinimap') ?? true;
     tabWidth = prefs.getInt('tabWidth') ?? 4;
     isOverwriteMode = prefs.getBool('isOverwriteMode') ?? false;
     fontFamily = prefs.getString('fontFamily') ?? "BIZ UDゴシック";
@@ -1701,6 +1707,24 @@ class EditorController extends ChangeNotifier {
   void toggleGrid() {
     showGrid = !showGrid;
     _saveBool('showGrid', showGrid);
+    notifyListeners();
+  }
+
+  void toggleLineNumber() {
+    showLineNumber = !showLineNumber;
+    _saveBool('showLineNumber', showLineNumber);
+    notifyListeners();
+  }
+
+  void toggleRuler() {
+    showRuler = !showRuler;
+    _saveBool('showRuler', showRuler);
+    notifyListeners();
+  }
+
+  void toggleMinimap() {
+    showMinimap = !showMinimap;
+    _saveBool('showMinimap', showMinimap);
     notifyListeners();
   }
 

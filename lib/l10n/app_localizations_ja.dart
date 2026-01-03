@@ -102,6 +102,15 @@ class AppLocalizationsJa extends AppLocalizations {
   String get menuShowGrid => 'グリッド表示';
 
   @override
+  String get menuShowLineNumbers => '行番号を表示';
+
+  @override
+  String get menuShowRuler => '列ルーラーを表示';
+
+  @override
+  String get menuShowMinimap => 'ミニマップを表示';
+
+  @override
   String get menuSettings => '設定';
 
   @override

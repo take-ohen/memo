@@ -1047,6 +1047,51 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                     ],
                   ),
                 ),
+                MenuItemButton(
+                  onPressed: () => _controller.toggleLineNumber(),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _controller.showLineNumber
+                            ? Icons.check_box
+                            : Icons.check_box_outline_blank,
+                        size: 16,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(s.menuShowLineNumbers),
+                    ],
+                  ),
+                ),
+                MenuItemButton(
+                  onPressed: () => _controller.toggleRuler(),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _controller.showRuler
+                            ? Icons.check_box
+                            : Icons.check_box_outline_blank,
+                        size: 16,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(s.menuShowRuler),
+                    ],
+                  ),
+                ),
+                MenuItemButton(
+                  onPressed: () => _controller.toggleMinimap(),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _controller.showMinimap
+                            ? Icons.check_box
+                            : Icons.check_box_outline_blank,
+                        size: 16,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(s.menuShowMinimap),
+                    ],
+                  ),
+                ),
               ],
               child: MenuAcceleratorLabel(s.menuView),
             ),
@@ -1222,38 +1267,40 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
           _buildTabBar(), // タブバー
           _buildSearchBar(),
           // --- 列ルーラーエリア ---
-          Container(
-            height: 24,
-            color: Colors.grey.shade200,
-            child: Row(
-              children: [
-                // 行番号エリアの上部（空白）
-                SizedBox(width: lineNumberAreaWidth),
-                // ルーラー本体
-                Expanded(
-                  child: SingleChildScrollView(
-                    controller: _rulerScrollController,
-                    scrollDirection: Axis.horizontal,
-                    child: CustomPaint(
-                      size: Size(editorWidth, 24),
-                      painter: ColumnRulerPainter(
-                        charWidth: _charWidth,
-                        lineHeight: 24, // ルーラーの高さ固定
-                        textStyle: _lineNumberStyle.copyWith(
-                          // ルーラー用の設定を適用
-                          fontSize: _controller.rulerFontSize,
-                          color: Color(_controller.rulerColor),
+          if (_controller.showRuler)
+            Container(
+              key: const Key('rulerArea'),
+              height: 24,
+              color: Colors.grey.shade200,
+              child: Row(
+                children: [
+                  // 行番号エリアの上部（空白）
+                  SizedBox(width: lineNumberAreaWidth),
+                  // ルーラー本体
+                  Expanded(
+                    child: SingleChildScrollView(
+                      controller: _rulerScrollController,
+                      scrollDirection: Axis.horizontal,
+                      child: CustomPaint(
+                        size: Size(editorWidth, 24),
+                        painter: ColumnRulerPainter(
+                          charWidth: _charWidth,
+                          lineHeight: 24, // ルーラーの高さ固定
+                          textStyle: _lineNumberStyle.copyWith(
+                            // ルーラー用の設定を適用
+                            fontSize: _controller.rulerFontSize,
+                            color: Color(_controller.rulerColor),
+                          ),
+                          editorWidth: editorWidth,
                         ),
-                        editorWidth: editorWidth,
                       ),
                     ),
                   ),
-                ),
-                // ミニマップの幅分だけ余白を空ける（レイアウト合わせ）
-                Container(width: _minimapWidth, color: Colors.grey.shade200),
-              ],
+                  // ミニマップの幅分だけ余白を空ける（レイアウト合わせ）
+                  Container(width: _minimapWidth, color: Colors.grey.shade200),
+                ],
+              ),
             ),
-          ),
           // --- エディタ本体 ---
           Expanded(
             child: Row(
@@ -1275,19 +1322,24 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               // 行番号エリア
-                              Container(
-                                width: lineNumberAreaWidth,
-                                height: editorHeight,
-                                color: Colors.grey.shade200,
-                                child: CustomPaint(
-                                  size: Size(lineNumberAreaWidth, editorHeight),
-                                  painter: LineNumberPainter(
-                                    lineCount: _controller.lines.length,
-                                    lineHeight: _lineHeight,
-                                    textStyle: _lineNumberStyle,
+                              if (_controller.showLineNumber)
+                                Container(
+                                  key: const Key('lineNumberArea'),
+                                  width: lineNumberAreaWidth,
+                                  height: editorHeight,
+                                  color: Colors.grey.shade200,
+                                  child: CustomPaint(
+                                    size: Size(
+                                      lineNumberAreaWidth,
+                                      editorHeight,
+                                    ),
+                                    painter: LineNumberPainter(
+                                      lineCount: _controller.lines.length,
+                                      lineHeight: _lineHeight,
+                                      textStyle: _lineNumberStyle,
+                                    ),
                                   ),
                                 ),
-                              ),
                               // エディタエリア
                               Expanded(
                                 child: Focus(
@@ -1410,7 +1462,11 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                   ),
                 ),
                 // --- ミニマップエリア (固定) ---
-                _buildMinimap(editorWidth, editorHeight),
+                if (_controller.showMinimap)
+                  Container(
+                    key: const Key('minimapArea'),
+                    child: _buildMinimap(editorWidth, editorHeight),
+                  ),
               ],
             ),
           ),
