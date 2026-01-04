@@ -13,6 +13,7 @@ import 'text_utils.dart';
 import 'history_manager.dart';
 import 'editor_controller.dart'; // コントローラーをインポート
 import 'package:free_memo_editor/file_io_helper.dart'; // 相対パスからpackageパスへ変更
+import 'editor_document.dart'; // NewLineTypeのためにインポート
 import 'settings_dialog.dart'; // 設定ダイアログをインポート
 
 class EditorPage extends StatefulWidget {
@@ -1501,6 +1502,25 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                 Text(
                   _controller.currentEncoding.name,
                   style: const TextStyle(fontSize: 12),
+                ),
+                const SizedBox(width: 16),
+                // 改行コード
+                PopupMenuButton<NewLineType>(
+                  tooltip: '改行コード',
+                  child: Text(
+                    _controller.newLineType.label,
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  onSelected: (value) {
+                    _controller.setNewLineType(value);
+                  },
+                  itemBuilder: (context) => NewLineType.values.map((type) {
+                    return CheckedPopupMenuItem<NewLineType>(
+                      value: type,
+                      checked: _controller.newLineType == type,
+                      child: Text(type.label),
+                    );
+                  }).toList(),
                 ),
               ],
             ),

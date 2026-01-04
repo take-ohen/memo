@@ -48,6 +48,7 @@ class EditorController extends ChangeNotifier {
   set isDirty(bool value) => activeDocument.isDirty = value;
 
   Encoding get currentEncoding => activeDocument.currentEncoding;
+  NewLineType get newLineType => activeDocument.newLineType;
 
   bool showGrid = false; // グリッド表示フラグ
   bool showLineNumber = true;
@@ -334,6 +335,11 @@ class EditorController extends ChangeNotifier {
   // --- Indentation ---
   void indent() {
     activeDocument.indent();
+  }
+
+  void setNewLineType(NewLineType type) {
+    activeDocument.newLineType = type;
+    notifyListeners();
   }
 
   void setTabWidth(int width) {

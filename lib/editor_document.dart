@@ -8,6 +8,23 @@ import 'text_utils.dart';
 import 'search_result.dart';
 import 'file_io_helper.dart';
 
+enum NewLineType {
+  lf,
+  crlf,
+  cr;
+
+  String get label {
+    switch (this) {
+      case NewLineType.lf:
+        return 'LF';
+      case NewLineType.crlf:
+        return 'CRLF';
+      case NewLineType.cr:
+        return 'CR';
+    }
+  }
+}
+
 /// 1つのドキュメント（ファイル）の状態と編集ロジックを管理するクラス
 class EditorDocument extends ChangeNotifier {
   // --- 状態変数 ---
@@ -20,6 +37,7 @@ class EditorDocument extends ChangeNotifier {
   String composingText = "";
   bool isDirty = false;
   Encoding currentEncoding = utf8;
+  NewLineType newLineType = NewLineType.lf;
 
   // 検索・置換
   List<SearchResult> searchResults = [];
@@ -594,6 +612,15 @@ class EditorDocument extends ChangeNotifier {
         String content = await FileIOHelper.instance.readFileAsString(path);
         saveHistory();
         currentFilePath = path;
+
+        if (content.contains('\r\n')) {
+          newLineType = NewLineType.crlf;
+        } else if (content.contains('\r')) {
+          newLineType = NewLineType.cr;
+        } else {
+          newLineType = NewLineType.lf;
+        }
+
         content = content.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
         lines = content.split('\n');
         if (lines.isEmpty) {
@@ -617,7 +644,19 @@ class EditorDocument extends ChangeNotifier {
       return await saveAsFile();
     }
     try {
-      String content = lines.join('\n');
+      String separator;
+      switch (newLineType) {
+        case NewLineType.crlf:
+          separator = '\r\n';
+          break;
+        case NewLineType.cr:
+          separator = '\r';
+          break;
+        case NewLineType.lf:
+        default:
+          separator = '\n';
+      }
+      String content = lines.join(separator);
       await FileIOHelper.instance.writeStringToFile(currentFilePath!, content);
       isDirty = false;
       notifyListeners();
@@ -633,7 +672,19 @@ class EditorDocument extends ChangeNotifier {
       String? outputFile = await FileIOHelper.instance.saveFilePath();
       if (outputFile != null) {
         currentFilePath = outputFile;
-        String content = lines.join('\n');
+        String separator;
+        switch (newLineType) {
+          case NewLineType.crlf:
+            separator = '\r\n';
+            break;
+          case NewLineType.cr:
+            separator = '\r';
+            break;
+          case NewLineType.lf:
+          default:
+            separator = '\n';
+        }
+        String content = lines.join(separator);
         await FileIOHelper.instance.writeStringToFile(outputFile, content);
         isDirty = false;
         notifyListeners();
