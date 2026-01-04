@@ -68,7 +68,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     fontSize: _controller.fontSize,
     fontWeight: _controller.editorBold ? FontWeight.bold : FontWeight.normal,
     fontStyle: _controller.editorItalic ? FontStyle.italic : FontStyle.normal,
-    color: Colors.black,
+    color: Color(_controller.editorTextColor), // 設定値を適用
     // フォールバックフォントを指定して、記号などが意図しない幅で表示されるのを防ぐ
     fontFamilyFallback: const [
       'Meiryo',
@@ -1396,6 +1396,9 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                                             });
                                       },
                                       child: Container(
+                                        color: Color(
+                                          _controller.editorBackgroundColor,
+                                        ), // 背景色を適用
                                         width: editorWidth,
                                         height: editorHeight,
                                         child: CustomPaint(
@@ -1424,6 +1427,9 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                                                 _controller.searchResults,
                                             currentSearchIndex:
                                                 _controller.currentSearchIndex,
+                                            gridColor: Color(
+                                              _controller.gridColor,
+                                            ),
                                           ),
                                           size: Size.infinite,
                                           child: Container(

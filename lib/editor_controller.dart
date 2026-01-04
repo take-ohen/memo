@@ -70,11 +70,16 @@ class EditorController extends ChangeNotifier {
   bool _editorBold = false;
   bool _editorItalic = false;
 
+  // --- エディタカラー設定 ---
+  int editorBackgroundColor = 0xFFFFFFFF; // 白
+  int editorTextColor = 0xFF000000; // 黒
+
   // --- 行番号・ルーラー設定 ---
   int lineNumberColor = 0xFF9E9E9E; // Colors.grey
   double lineNumberFontSize = 12.0;
   int rulerColor = 0xFF9E9E9E; // Colors.grey
   double rulerFontSize = 12.0;
+  int gridColor = 0x4D9E9E9E; // デフォルト (Colors.grey with alpha ~0.3)
 
   // Getters
   String get uiFontFamily => _uiFontFamily;
@@ -168,6 +173,9 @@ class EditorController extends ChangeNotifier {
     _editorBold = prefs.getBool('editorBold') ?? false;
     _editorItalic = prefs.getBool('editorItalic') ?? false;
 
+    editorBackgroundColor = prefs.getInt('editorBackgroundColor') ?? 0xFFFFFFFF;
+    editorTextColor = prefs.getInt('editorTextColor') ?? 0xFF000000;
+
     // 全ドキュメントに設定を反映
     for (var doc in documents) doc.tabWidth = tabWidth;
 
@@ -175,6 +183,7 @@ class EditorController extends ChangeNotifier {
     lineNumberFontSize = prefs.getDouble('lineNumberFontSize') ?? 12.0;
     rulerColor = prefs.getInt('rulerColor') ?? 0xFF9E9E9E;
     rulerFontSize = prefs.getDouble('rulerFontSize') ?? 12.0;
+    gridColor = prefs.getInt('gridColor') ?? 0x4D9E9E9E;
     notifyListeners();
   }
 
@@ -245,22 +254,34 @@ class EditorController extends ChangeNotifier {
     notifyListeners();
   }
 
+  // カラー設定の更新
+  void setEditorColors(int bgColor, int textColor) {
+    editorBackgroundColor = bgColor;
+    editorTextColor = textColor;
+    _saveInt('editorBackgroundColor', bgColor);
+    _saveInt('editorTextColor', textColor);
+    notifyListeners();
+  }
+
   // 行番号・ルーラー設定の更新
   void setViewSettings({
     required int lnColor,
     required double lnSize,
     required int rColor,
     required double rSize,
+    required int gColor,
   }) {
     lineNumberColor = lnColor;
     lineNumberFontSize = lnSize;
     rulerColor = rColor;
     rulerFontSize = rSize;
+    gridColor = gColor;
 
     _saveInt('lineNumberColor', lnColor);
     _saveDouble('lineNumberFontSize', lnSize);
     _saveInt('rulerColor', rColor);
     _saveDouble('rulerFontSize', rSize);
+    _saveInt('gridColor', gColor);
     notifyListeners();
   }
 

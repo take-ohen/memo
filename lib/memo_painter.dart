@@ -21,6 +21,7 @@ class MemoPainter extends CustomPainter {
   final bool showCursor;
   final List<SearchResult> searchResults; // ★検索結果リスト
   final int currentSearchIndex; // ★現在の検索結果インデックス
+  final Color gridColor; // ★グリッド色
 
   MemoPainter({
     required this.lines,
@@ -39,6 +40,7 @@ class MemoPainter extends CustomPainter {
     this.isRectangularSelection = false, // 矩形選択 defalutはfalse
     this.searchResults = const [], // ★初期値は空
     this.currentSearchIndex = -1, // ★初期値は-1
+    required this.gridColor,
   });
 
   @override
@@ -61,6 +63,24 @@ class MemoPainter extends CustomPainter {
     // --------------------------------------------------------
     if (searchResults.isNotEmpty) {
       _drawSearchResults(canvas);
+    }
+
+    // --------------------------------------------------------
+    // 0.6 グリッド線 (showGrid時) - テキストの下に描画
+    // --------------------------------------------------------
+    if (showGrid) {
+      final gridpaint = Paint()
+        ..color = gridColor
+        ..strokeWidth = 1.0;
+
+      // 縦線
+      for (double x = 0; x < size.width; x += charWidth) {
+        canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridpaint);
+      }
+      // 横線
+      for (double y = 0; y < size.height; y += lineHeight) {
+        canvas.drawLine(Offset(0, y), Offset(size.width, y), gridpaint);
+      }
     }
 
     // --------------------------------------------------------
@@ -149,23 +169,6 @@ class MemoPainter extends CustomPainter {
           Offset(cursorPixelX, cursorPixelY + lineHeight),
           cursorPaint,
         );
-      }
-    }
-    // --------------------------------------------------------
-    // 5. グリッド線 (showGrid時)
-    // --------------------------------------------------------
-    if (showGrid) {
-      final gridpaint = Paint()
-        ..color = Colors.grey.withValues(alpha: 0.3)
-        ..strokeWidth = 1.0;
-
-      // 縦線
-      for (double x = 0; x < size.width; x += charWidth) {
-        canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridpaint);
-      }
-      // 横線
-      for (double y = 0; y < size.height; y += lineHeight) {
-        canvas.drawLine(Offset(0, y), Offset(size.width, y), gridpaint);
       }
     }
   }
@@ -335,7 +338,8 @@ class MemoPainter extends CustomPainter {
         oldDelegate.isRectangularSelection != isRectangularSelection ||
         oldDelegate.composingText != composingText ||
         oldDelegate.searchResults != searchResults || // ★変更検知に追加
-        oldDelegate.currentSearchIndex != currentSearchIndex; // ★変更検知に追加
+        oldDelegate.currentSearchIndex != currentSearchIndex || // ★変更検知に追加
+        oldDelegate.gridColor != gridColor;
   }
 }
 

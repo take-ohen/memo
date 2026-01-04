@@ -2,8 +2,12 @@ import 'package:flutter/material.dart';
 import 'editor_controller.dart';
 import 'font_manager.dart';
 import 'l10n/app_localizations.dart';
+import 'color_picker_widget.dart'; // 新規Widgetをインポート
+import 'memo_painter.dart'; // プレビュー描画用
 
 enum SettingsTab { editor, ui, view }
+
+enum ColorTarget { background, text, lineNumber, ruler, grid }
 
 class SettingsDialog extends StatefulWidget {
   final EditorController controller;
@@ -39,20 +43,27 @@ class _SettingsDialogState extends State<SettingsDialog>
   late bool _uiBold;
   late bool _uiItalic;
 
+  // Editor Colors
+  late int _editorBackgroundColor;
+  late int _editorTextColor;
+
   // View Settings (Line Number & Ruler)
   late int _lineNumberColor;
   late double _lineNumberFontSize;
   late int _rulerColor;
   late double _rulerFontSize;
+  late int _gridColor;
 
-  // カラープリセット
-  final Map<String, int> _colorPresets = {
-    'Grey': 0xFF9E9E9E,
-    'Black': 0xFF000000,
-    'Red': 0xFFF44336,
-    'Blue': 0xFF2196F3,
-    'Green': 0xFF4CAF50,
-  };
+  // Viewタブ用状態
+  ColorTarget _activeColorTarget = ColorTarget.background;
+
+  // プレビュー用ダミーデータ
+  final List<String> _previewLines = [
+    'void main() {',
+    '  print("Hello, World!");',
+    '  // Preview Code',
+    '}',
+  ];
 
   @override
   void initState() {
@@ -80,10 +91,14 @@ class _SettingsDialogState extends State<SettingsDialog>
     _uiBold = widget.controller.uiBold;
     _uiItalic = widget.controller.uiItalic;
 
+    _editorBackgroundColor = widget.controller.editorBackgroundColor;
+    _editorTextColor = widget.controller.editorTextColor;
+
     _lineNumberColor = widget.controller.lineNumberColor;
     _lineNumberFontSize = widget.controller.lineNumberFontSize;
     _rulerColor = widget.controller.rulerColor;
     _rulerFontSize = widget.controller.rulerFontSize;
+    _gridColor = widget.controller.gridColor;
 
     // フォントリストのロード開始
     _loadFonts();
@@ -123,11 +138,13 @@ class _SettingsDialogState extends State<SettingsDialog>
       _uiBold,
       _uiItalic,
     );
+    widget.controller.setEditorColors(_editorBackgroundColor, _editorTextColor);
     widget.controller.setViewSettings(
       lnColor: _lineNumberColor,
       lnSize: _lineNumberFontSize,
       rColor: _rulerColor,
       rSize: _rulerFontSize,
+      gColor: _gridColor,
     );
     Navigator.of(context).pop();
   }
@@ -216,7 +233,10 @@ class _SettingsDialogState extends State<SettingsDialog>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildSectionTitle("Canvas Size (Minimum)"),
+        const Text(
+          "Canvas Size (Min)",
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         // Columns
         Row(
           children: [
@@ -355,43 +375,270 @@ class _SettingsDialogState extends State<SettingsDialog>
   }
 
   Widget _buildViewTab(BuildContext context) {
+    // プレビュー用のメトリクス計算
+    final previewTextStyle = TextStyle(
+      fontFamily: _editorFontController.text,
+      fontSize: _editorFontSize,
+    );
+    final textPainter = TextPainter(
+      text: TextSpan(text: 'M', style: previewTextStyle),
+      textDirection: TextDirection.ltr,
+    );
+    textPainter.layout();
+    final charWidth = textPainter.width;
+    final charHeight = textPainter.height;
+    final lineHeight = charHeight * 1.2;
+
+    // 現在選択中の色を取得
+    Color currentColor;
+    switch (_activeColorTarget) {
+      case ColorTarget.background:
+        currentColor = Color(_editorBackgroundColor);
+        break;
+      case ColorTarget.text:
+        currentColor = Color(_editorTextColor);
+        break;
+      case ColorTarget.lineNumber:
+        currentColor = Color(_lineNumberColor);
+        break;
+      case ColorTarget.ruler:
+        currentColor = Color(_rulerColor);
+        break;
+      case ColorTarget.grid:
+        currentColor = Color(_gridColor);
+        break;
+    }
+
     // 行番号とルーラーの設定UI
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
+    return Padding(
+      padding: const EdgeInsets.all(8.0), // 余白を削減
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildCanvasSection(
-            minColumns: _minColumns,
-            minLines: _minLines,
-            onCanvasSizeChanged: (c, l) {
-              _minColumns = c;
-              _minLines = l;
-            },
+          // --- 左側: プレビューエリア (Expanded) ---
+          Expanded(
+            flex: 3,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildSectionTitle('Preview'),
+                Expanded(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey),
+                    ),
+                    child: Column(
+                      children: [
+                        // ルーラー
+                        Container(
+                          height: 24,
+                          color: Colors.grey.shade200,
+                          child: Row(
+                            children: [
+                              const SizedBox(width: 40), // 行番号分のスペース
+                              Expanded(
+                                child: ClipRect(
+                                  child: CustomPaint(
+                                    size: const Size(double.infinity, 24),
+                                    painter: ColumnRulerPainter(
+                                      charWidth: charWidth,
+                                      lineHeight: 24,
+                                      textStyle: TextStyle(
+                                        fontFamily: _editorFontController.text,
+                                        fontSize: _rulerFontSize,
+                                        color: Color(_rulerColor),
+                                      ),
+                                      editorWidth: 500,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        // エディタ本体
+                        Expanded(
+                          child: Row(
+                            children: [
+                              // 行番号
+                              Container(
+                                width: 40,
+                                color: Colors.grey.shade200,
+                                child: CustomPaint(
+                                  size: Size.infinite,
+                                  painter: LineNumberPainter(
+                                    lineCount: _previewLines.length,
+                                    lineHeight: lineHeight,
+                                    textStyle: TextStyle(
+                                      fontFamily: _editorFontController.text,
+                                      fontSize: _lineNumberFontSize,
+                                      color: Color(_lineNumberColor),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              // テキストエリア
+                              Expanded(
+                                child: Container(
+                                  color: Color(_editorBackgroundColor),
+                                  child: ClipRect(
+                                    child: CustomPaint(
+                                      painter: MemoPainter(
+                                        lines: _previewLines,
+                                        charWidth: charWidth,
+                                        charHeight: charHeight,
+                                        lineHeight: lineHeight,
+                                        showGrid: true, // グリッド確認のため常時ON
+                                        isOverwriteMode: false,
+                                        cursorRow: 0,
+                                        cursorCol: 0,
+                                        textStyle: previewTextStyle.copyWith(
+                                          color: Color(_editorTextColor),
+                                          fontWeight: _editorBold
+                                              ? FontWeight.bold
+                                              : FontWeight.normal,
+                                          fontStyle: _editorItalic
+                                              ? FontStyle.italic
+                                              : FontStyle.normal,
+                                        ),
+                                        composingText: "",
+                                        showCursor: true,
+                                        gridColor: Color(_gridColor),
+                                      ),
+                                      size: Size.infinite,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // Canvas Size設定を左下に配置
+                _buildCanvasSection(
+                  minColumns: _minColumns,
+                  minLines: _minLines,
+                  onCanvasSizeChanged: (c, l) {
+                    _minColumns = c;
+                    _minLines = l;
+                  },
+                ),
+              ],
+            ),
           ),
-          const Divider(height: 32),
-          _buildSectionTitle('Line Numbers'),
-          _buildColorPicker(
-            label: 'Color',
-            value: _lineNumberColor,
-            onChanged: (v) => setState(() => _lineNumberColor = v),
-          ),
-          _buildSlider(
-            label: 'Font Size',
-            value: _lineNumberFontSize,
-            onChanged: (v) => setState(() => _lineNumberFontSize = v),
-          ),
-          const Divider(height: 32),
-          _buildSectionTitle('Column Ruler'),
-          _buildColorPicker(
-            label: 'Color',
-            value: _rulerColor,
-            onChanged: (v) => setState(() => _rulerColor = v),
-          ),
-          _buildSlider(
-            label: 'Font Size',
-            value: _rulerFontSize,
-            onChanged: (v) => setState(() => _rulerFontSize = v),
+          const SizedBox(width: 16),
+
+          // --- 右側: 設定コントロール (固定幅) ---
+          SizedBox(
+            width: 300,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildSectionTitle('Settings'),
+                // 編集対象の選択
+                Row(
+                  children: [
+                    const Text("Target:", style: TextStyle(fontSize: 12)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: SizedBox(
+                        height: 30,
+                        child: DropdownButton<ColorTarget>(
+                          isExpanded: true,
+                          value: _activeColorTarget,
+                          underline: Container(height: 1, color: Colors.grey),
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: Colors.black,
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                              value: ColorTarget.background,
+                              child: Text("Background"),
+                            ),
+                            DropdownMenuItem(
+                              value: ColorTarget.text,
+                              child: Text("Text"),
+                            ),
+                            DropdownMenuItem(
+                              value: ColorTarget.lineNumber,
+                              child: Text("Line Number"),
+                            ),
+                            DropdownMenuItem(
+                              value: ColorTarget.ruler,
+                              child: Text("Ruler"),
+                            ),
+                            DropdownMenuItem(
+                              value: ColorTarget.grid,
+                              child: Text("Grid"),
+                            ),
+                          ],
+                          onChanged: (value) {
+                            if (value != null) {
+                              setState(() {
+                                _activeColorTarget = value;
+                              });
+                            }
+                          },
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+
+                // カラーピッカー (埋め込み)
+                Container(
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey.shade300),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: ColorPickerWidget(
+                    color: currentColor,
+                    onColorChanged: (newColor) {
+                      setState(() {
+                        switch (_activeColorTarget) {
+                          case ColorTarget.background:
+                            _editorBackgroundColor = newColor.value;
+                            break;
+                          case ColorTarget.text:
+                            _editorTextColor = newColor.value;
+                            break;
+                          case ColorTarget.lineNumber:
+                            _lineNumberColor = newColor.value;
+                            break;
+                          case ColorTarget.ruler:
+                            _rulerColor = newColor.value;
+                            break;
+                          case ColorTarget.grid:
+                            _gridColor = newColor.value;
+                            break;
+                        }
+                      });
+                    },
+                  ),
+                ),
+
+                const SizedBox(height: 8),
+                // フォントサイズ調整用スライダー (行番号・ルーラー用)
+                if (_activeColorTarget == ColorTarget.lineNumber)
+                  _buildSlider(
+                    label: 'Font Size',
+                    value: _lineNumberFontSize,
+                    onChanged: (v) => setState(() => _lineNumberFontSize = v),
+                  ),
+                if (_activeColorTarget == ColorTarget.ruler)
+                  _buildSlider(
+                    label: 'Font Size',
+                    value: _rulerFontSize,
+                    onChanged: (v) => setState(() => _rulerFontSize = v),
+                  ),
+              ],
+            ),
           ),
         ],
       ),
@@ -405,37 +652,6 @@ class _SettingsDialogState extends State<SettingsDialog>
         title,
         style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
       ),
-    );
-  }
-
-  Widget _buildColorPicker({
-    required String label,
-    required int value,
-    required ValueChanged<int> onChanged,
-  }) {
-    return Row(
-      children: [
-        SizedBox(width: 80, child: Text(label)),
-        DropdownButton<int>(
-          value: _colorPresets.containsValue(value) ? value : null,
-          hint: const Text('Custom'),
-          items: _colorPresets.entries.map((e) {
-            return DropdownMenuItem(
-              value: e.value,
-              child: Row(
-                children: [
-                  Container(width: 16, height: 16, color: Color(e.value)),
-                  const SizedBox(width: 8),
-                  Text(e.key),
-                ],
-              ),
-            );
-          }).toList(),
-          onChanged: (v) {
-            if (v != null) onChanged(v);
-          },
-        ),
-      ],
     );
   }
 
@@ -468,7 +684,10 @@ class _SettingsDialogState extends State<SettingsDialog>
 
     return Dialog(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 600, maxHeight: 500),
+        constraints: const BoxConstraints(
+          maxWidth: 850,
+          maxHeight: 550,
+        ), // 横長に拡張
         child: Column(
           children: [
             TabBar(
