@@ -230,17 +230,18 @@ class _SettingsDialogState extends State<SettingsDialog>
     required int minLines,
     required Function(int, int) onCanvasSizeChanged,
   }) {
+    final s = AppLocalizations.of(context)!;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          "Canvas Size (Min)",
-          style: TextStyle(fontWeight: FontWeight.bold),
+        Text(
+          s.labelCanvasSizeMin,
+          style: const TextStyle(fontWeight: FontWeight.bold),
         ),
         // Columns
         Row(
           children: [
-            SizedBox(width: 60, child: Text("Cols: $minColumns")),
+            SizedBox(width: 80, child: Text("${s.labelColumns}: $minColumns")),
             Expanded(
               child: Slider(
                 value: minColumns.toDouble(),
@@ -256,7 +257,7 @@ class _SettingsDialogState extends State<SettingsDialog>
         // Lines
         Row(
           children: [
-            SizedBox(width: 60, child: Text("Lines: $minLines")),
+            SizedBox(width: 80, child: Text("${s.labelLines}: $minLines")),
             Expanded(
               child: Slider(
                 value: minLines.toDouble(),
@@ -375,6 +376,7 @@ class _SettingsDialogState extends State<SettingsDialog>
   }
 
   Widget _buildViewTab(BuildContext context) {
+    final s = AppLocalizations.of(context)!;
     // プレビュー用のメトリクス計算
     final previewTextStyle = TextStyle(
       fontFamily: _editorFontController.text,
@@ -421,7 +423,7 @@ class _SettingsDialogState extends State<SettingsDialog>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildSectionTitle('Preview'),
+                _buildSectionTitle(s.labelPreview),
                 Expanded(
                   child: Container(
                     decoration: BoxDecoration(
@@ -538,11 +540,14 @@ class _SettingsDialogState extends State<SettingsDialog>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildSectionTitle('Settings'),
+                _buildSectionTitle(s.labelSettings),
                 // 編集対象の選択
                 Row(
                   children: [
-                    const Text("Target:", style: TextStyle(fontSize: 12)),
+                    Text(
+                      "${s.labelEditTarget}:",
+                      style: const TextStyle(fontSize: 12),
+                    ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: SizedBox(
@@ -555,26 +560,26 @@ class _SettingsDialogState extends State<SettingsDialog>
                             fontSize: 13,
                             color: Colors.black,
                           ),
-                          items: const [
+                          items: [
                             DropdownMenuItem(
                               value: ColorTarget.background,
-                              child: Text("Background"),
+                              child: Text(s.labelBackground),
                             ),
                             DropdownMenuItem(
                               value: ColorTarget.text,
-                              child: Text("Text"),
+                              child: Text(s.labelText),
                             ),
                             DropdownMenuItem(
                               value: ColorTarget.lineNumber,
-                              child: Text("Line Number"),
+                              child: Text(s.labelLineNumber),
                             ),
                             DropdownMenuItem(
                               value: ColorTarget.ruler,
-                              child: Text("Ruler"),
+                              child: Text(s.labelRuler),
                             ),
                             DropdownMenuItem(
                               value: ColorTarget.grid,
-                              child: Text("Grid"),
+                              child: Text(s.labelGrid),
                             ),
                           ],
                           onChanged: (value) {
@@ -627,13 +632,13 @@ class _SettingsDialogState extends State<SettingsDialog>
                 // フォントサイズ調整用スライダー (行番号・ルーラー用)
                 if (_activeColorTarget == ColorTarget.lineNumber)
                   _buildSlider(
-                    label: 'Font Size',
+                    label: s.labelFontSize,
                     value: _lineNumberFontSize,
                     onChanged: (v) => setState(() => _lineNumberFontSize = v),
                   ),
                 if (_activeColorTarget == ColorTarget.ruler)
                   _buildSlider(
-                    label: 'Font Size',
+                    label: s.labelFontSize,
                     value: _rulerFontSize,
                     onChanged: (v) => setState(() => _rulerFontSize = v),
                   ),
@@ -695,7 +700,7 @@ class _SettingsDialogState extends State<SettingsDialog>
               tabs: [
                 Tab(text: s.settingsTabEditor),
                 Tab(text: s.settingsTabUi),
-                const Tab(text: 'View'),
+                Tab(text: s.menuView),
               ],
             ),
             Expanded(
@@ -736,12 +741,12 @@ class _SettingsDialogState extends State<SettingsDialog>
                     children: [
                       TextButton(
                         onPressed: () => Navigator.of(context).pop(),
-                        child: const Text('Cancel'),
+                        child: Text(s.labelCancel),
                       ),
                       const SizedBox(width: 8),
                       FilledButton(
                         onPressed: _applySettings,
-                        child: const Text('OK'),
+                        child: Text(s.labelOK),
                       ),
                     ],
                   ),

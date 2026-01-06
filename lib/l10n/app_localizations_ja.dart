@@ -166,4 +166,61 @@ class AppLocalizationsJa extends AppLocalizations {
   @override
   String get previewText =>
       'The quick brown fox jumps over the lazy dog. 0123456789 日本語のテスト';
+
+  @override
+  String get labelCanvasSizeMin => 'キャンバスサイズ (最小)';
+
+  @override
+  String get labelColumns => '列数';
+
+  @override
+  String get labelLines => '行数';
+
+  @override
+  String get labelPreview => 'プレビュー';
+
+  @override
+  String get labelSettings => '設定';
+
+  @override
+  String get labelEditTarget => '編集対象';
+
+  @override
+  String get labelBackground => '背景';
+
+  @override
+  String get labelText => '文字';
+
+  @override
+  String get labelLineNumber => '行番号';
+
+  @override
+  String get labelRuler => 'ルーラー';
+
+  @override
+  String get labelGrid => 'グリッド';
+
+  @override
+  String get labelPresets => 'プリセット';
+
+  @override
+  String get labelCustom => 'カスタム';
+
+  @override
+  String get labelCancel => 'キャンセル';
+
+  @override
+  String get labelOK => 'OK';
+
+  @override
+  String get msgUnsavedFiles => '保存されていない変更があります。終了前に保存しますか？';
+
+  @override
+  String get titleExitConfirmation => '終了の確認';
+
+  @override
+  String get btnSaveAndExit => '保存して終了';
+
+  @override
+  String get btnExitWithoutSave => '保存せずに終了';
 }

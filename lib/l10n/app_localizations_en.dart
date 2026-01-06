@@ -166,4 +166,62 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get previewText =>
       'The quick brown fox jumps over the lazy dog. 0123456789';
+
+  @override
+  String get labelCanvasSizeMin => 'Canvas Size (Min)';
+
+  @override
+  String get labelColumns => 'Cols';
+
+  @override
+  String get labelLines => 'Lines';
+
+  @override
+  String get labelPreview => 'Preview';
+
+  @override
+  String get labelSettings => 'Settings';
+
+  @override
+  String get labelEditTarget => 'Target';
+
+  @override
+  String get labelBackground => 'Background';
+
+  @override
+  String get labelText => 'Text';
+
+  @override
+  String get labelLineNumber => 'Line Number';
+
+  @override
+  String get labelRuler => 'Ruler';
+
+  @override
+  String get labelGrid => 'Grid';
+
+  @override
+  String get labelPresets => 'Presets';
+
+  @override
+  String get labelCustom => 'Custom';
+
+  @override
+  String get labelCancel => 'Cancel';
+
+  @override
+  String get labelOK => 'OK';
+
+  @override
+  String get msgUnsavedFiles =>
+      'You have unsaved changes. Do you want to save them before exiting?';
+
+  @override
+  String get titleExitConfirmation => 'Confirm Exit';
+
+  @override
+  String get btnSaveAndExit => 'Save and Exit';
+
+  @override
+  String get btnExitWithoutSave => 'Exit without Saving';
 }

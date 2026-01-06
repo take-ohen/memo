@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -34,6 +35,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
   // コントローラー (状態保持用)
   late EditorController _controller;
+  late final AppLifecycleListener _listener;
 
   TextInputConnection? _inputConnection;
 
@@ -131,10 +133,14 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
     // スクロール同期の設定
     _setupScrollSync();
+
+    // アプリ終了リスナーの設定
+    _listener = AppLifecycleListener(onExitRequested: _handleExitRequest);
   }
 
   @override
   void dispose() {
+    _listener.dispose();
     _controller.dispose();
     _searchController.dispose();
     _replaceController.dispose();
@@ -356,6 +362,66 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     }
   }
 
+  // アプリ終了リクエストのハンドリング
+  Future<ui.AppExitResponse> _handleExitRequest() async {
+    // 未保存のドキュメントがあるか確認
+    final unsavedDocs = _controller.documents
+        .where((doc) => doc.isDirty)
+        .toList();
+
+    if (unsavedDocs.isEmpty) {
+      return ui.AppExitResponse.exit;
+    }
+
+    final s = AppLocalizations.of(context)!;
+
+    // 1つずつ確認
+    for (final doc in unsavedDocs) {
+      // 対象のタブをアクティブにする
+      final index = _controller.documents.indexOf(doc);
+      _controller.switchTab(index);
+
+      // ダイアログを表示
+      final result = await showDialog<int>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(s.titleExitConfirmation),
+          content: Text("${doc.displayName} への変更を保存しますか？"),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(0), // キャンセル
+              child: Text(s.labelCancel),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(1), // 保存しない
+              child: Text(s.btnExitWithoutSave),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(2), // 保存する
+              child: Text(s.btnSaveAndExit),
+            ),
+          ],
+        ),
+      );
+
+      switch (result) {
+        case 0: // キャンセル
+        case null:
+          return ui.AppExitResponse.cancel;
+        case 1: // 保存しない
+          continue; // 次のファイルへ
+        case 2: // 保存する
+          final savedPath = await _controller.saveFile();
+          if (savedPath == null && doc.isDirty) {
+            return ui.AppExitResponse.cancel; // 保存キャンセル時は終了中断
+          }
+          break;
+      }
+    }
+
+    return ui.AppExitResponse.exit;
+  }
+
   // --- ファイル操作 ---
 
   // ファイルを開く
@@ -393,13 +459,9 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
       final result = await showDialog<int>(
         context: context,
         builder: (context) {
-          // ファイル名を取得
-          final fileName =
-              doc.currentFilePath?.split(Platform.pathSeparator).last ??
-              'Untitled';
           return AlertDialog(
             title: const Text('確認'),
-            content: Text('"$fileName" への変更を保存しますか？'),
+            content: Text('${doc.displayName} への変更を保存しますか？'),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(0), // キャンセル
@@ -643,10 +705,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
               itemBuilder: (context, index) {
                 final doc = _controller.documents[index];
                 final isActive = index == _controller.activeDocumentIndex;
-                final fileName =
-                    doc.currentFilePath?.split(Platform.pathSeparator).last ??
-                    'Untitled';
-                final title = fileName + (doc.isDirty ? ' *' : '');
+                final title = doc.displayName + (doc.isDirty ? ' *' : '');
 
                 return InkWell(
                   onTap: () => _controller.switchTab(index),

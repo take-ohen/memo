@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -39,6 +40,14 @@ class EditorDocument extends ChangeNotifier {
   Encoding currentEncoding = utf8;
   NewLineType newLineType = NewLineType.lf;
 
+  // 自動生成されたタイトル
+  static int _untitledCounter = 1;
+  late final String _defaultTitle;
+
+  EditorDocument() {
+    _defaultTitle = 'Untitled-${_untitledCounter++}';
+  }
+
   // 検索・置換
   List<SearchResult> searchResults = [];
   int currentSearchIndex = -1;
@@ -56,6 +65,14 @@ class EditorDocument extends ChangeNotifier {
 
   bool get hasSelection =>
       selectionOriginRow != null && selectionOriginCol != null;
+
+  // 表示名を取得
+  String get displayName {
+    if (currentFilePath != null) {
+      return currentFilePath!.split(Platform.pathSeparator).last;
+    }
+    return _defaultTitle;
+  }
 
   // --- Search & Replace Logic ---
 
@@ -669,7 +686,9 @@ class EditorDocument extends ChangeNotifier {
 
   Future<String?> saveAsFile() async {
     try {
-      String? outputFile = await FileIOHelper.instance.saveFilePath();
+      String? outputFile = await FileIOHelper.instance.saveFilePath(
+        initialFileName: displayName,
+      );
       if (outputFile != null) {
         currentFilePath = outputFile;
         String separator;

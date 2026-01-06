@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'l10n/app_localizations.dart';
 
 class ColorPickerWidget extends StatefulWidget {
   final Color color;
@@ -73,6 +74,7 @@ class _ColorPickerWidgetState extends State<ColorPickerWidget>
 
   @override
   Widget build(BuildContext context) {
+    final s = AppLocalizations.of(context)!;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -80,14 +82,14 @@ class _ColorPickerWidgetState extends State<ColorPickerWidget>
           height: 36,
           child: TabBar(
             controller: _tabController,
-            tabs: const [
+            tabs: [
               Tab(
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.palette, size: 16),
-                    SizedBox(width: 8),
-                    Text('Presets'),
+                    const Icon(Icons.palette, size: 16),
+                    const SizedBox(width: 8),
+                    Text(s.labelPresets),
                   ],
                 ),
               ),
@@ -95,9 +97,9 @@ class _ColorPickerWidgetState extends State<ColorPickerWidget>
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.tune, size: 16),
-                    SizedBox(width: 8),
-                    Text('Custom'),
+                    const Icon(Icons.tune, size: 16),
+                    const SizedBox(width: 8),
+                    Text(s.labelCustom),
                   ],
                 ),
               ),

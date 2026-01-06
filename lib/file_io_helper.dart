@@ -23,11 +23,11 @@ class FileIOHelper {
   }
 
   /// 名前を付けて保存ダイアログを表示し、パスを返す
-  Future<String?> saveFilePath() async {
+  Future<String?> saveFilePath({String? initialFileName}) async {
     try {
       return await FilePicker.platform.saveFile(
         dialogTitle: '名前を付けて保存',
-        fileName: 'memo.txt',
+        fileName: initialFileName ?? 'memo.txt',
       );
     } catch (e) {
       return null;

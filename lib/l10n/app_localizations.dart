@@ -409,6 +409,120 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'The quick brown fox jumps over the lazy dog. 0123456789'**
   String get previewText;
+
+  /// No description provided for @labelCanvasSizeMin.
+  ///
+  /// In en, this message translates to:
+  /// **'Canvas Size (Min)'**
+  String get labelCanvasSizeMin;
+
+  /// No description provided for @labelColumns.
+  ///
+  /// In en, this message translates to:
+  /// **'Cols'**
+  String get labelColumns;
+
+  /// No description provided for @labelLines.
+  ///
+  /// In en, this message translates to:
+  /// **'Lines'**
+  String get labelLines;
+
+  /// No description provided for @labelPreview.
+  ///
+  /// In en, this message translates to:
+  /// **'Preview'**
+  String get labelPreview;
+
+  /// No description provided for @labelSettings.
+  ///
+  /// In en, this message translates to:
+  /// **'Settings'**
+  String get labelSettings;
+
+  /// No description provided for @labelEditTarget.
+  ///
+  /// In en, this message translates to:
+  /// **'Target'**
+  String get labelEditTarget;
+
+  /// No description provided for @labelBackground.
+  ///
+  /// In en, this message translates to:
+  /// **'Background'**
+  String get labelBackground;
+
+  /// No description provided for @labelText.
+  ///
+  /// In en, this message translates to:
+  /// **'Text'**
+  String get labelText;
+
+  /// No description provided for @labelLineNumber.
+  ///
+  /// In en, this message translates to:
+  /// **'Line Number'**
+  String get labelLineNumber;
+
+  /// No description provided for @labelRuler.
+  ///
+  /// In en, this message translates to:
+  /// **'Ruler'**
+  String get labelRuler;
+
+  /// No description provided for @labelGrid.
+  ///
+  /// In en, this message translates to:
+  /// **'Grid'**
+  String get labelGrid;
+
+  /// No description provided for @labelPresets.
+  ///
+  /// In en, this message translates to:
+  /// **'Presets'**
+  String get labelPresets;
+
+  /// No description provided for @labelCustom.
+  ///
+  /// In en, this message translates to:
+  /// **'Custom'**
+  String get labelCustom;
+
+  /// No description provided for @labelCancel.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get labelCancel;
+
+  /// No description provided for @labelOK.
+  ///
+  /// In en, this message translates to:
+  /// **'OK'**
+  String get labelOK;
+
+  /// No description provided for @msgUnsavedFiles.
+  ///
+  /// In en, this message translates to:
+  /// **'You have unsaved changes. Do you want to save them before exiting?'**
+  String get msgUnsavedFiles;
+
+  /// No description provided for @titleExitConfirmation.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm Exit'**
+  String get titleExitConfirmation;
+
+  /// No description provided for @btnSaveAndExit.
+  ///
+  /// In en, this message translates to:
+  /// **'Save and Exit'**
+  String get btnSaveAndExit;
+
+  /// No description provided for @btnExitWithoutSave.
+  ///
+  /// In en, this message translates to:
+  /// **'Exit without Saving'**
+  String get btnExitWithoutSave;
 }
 
 class _AppLocalizationsDelegate

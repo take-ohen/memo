@@ -1222,7 +1222,7 @@ class MockFileIOHelper extends FileIOHelper {
   }
 
   @override
-  Future<String?> saveFilePath() async {
+  Future<String?> saveFilePath({String? initialFileName}) async {
     return mockSavePath;
   }
 
