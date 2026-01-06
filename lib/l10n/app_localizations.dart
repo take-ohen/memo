@@ -523,6 +523,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Exit without Saving'**
   String get btnExitWithoutSave;
+
+  /// No description provided for @labelRegex.
+  ///
+  /// In en, this message translates to:
+  /// **'Regular Expression'**
+  String get labelRegex;
+
+  /// No description provided for @labelCaseSensitive.
+  ///
+  /// In en, this message translates to:
+  /// **'Case Sensitive'**
+  String get labelCaseSensitive;
+
+  /// No description provided for @labelFindAll.
+  ///
+  /// In en, this message translates to:
+  /// **'Find All'**
+  String get labelFindAll;
+
+  /// No description provided for @labelGrepResults.
+  ///
+  /// In en, this message translates to:
+  /// **'Grep Results'**
+  String get labelGrepResults;
 }
 
 class _AppLocalizationsDelegate

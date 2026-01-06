@@ -69,5 +69,11 @@
   "msgUnsavedFiles": "You have unsaved changes. Do you want to save them before exiting?",
   "titleExitConfirmation": "Confirm Exit",
   "btnSaveAndExit": "Save and Exit",
-  "btnExitWithoutSave": "Exit without Saving"
+  "btnExitWithoutSave": "Exit without Saving",
+  "labelRegex": "Regular Expression",
+  "labelCaseSensitive": "Case Sensitive",
+  "labelRegex": "Regular Expression",
+  "labelCaseSensitive": "Case Sensitive",
+  "labelFindAll": "Find All",
+  "labelGrepResults": "Grep Results"
 }

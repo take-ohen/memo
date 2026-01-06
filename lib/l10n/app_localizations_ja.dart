@@ -223,4 +223,16 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get btnExitWithoutSave => '保存せずに終了';
+
+  @override
+  String get labelRegex => '正規表現';
+
+  @override
+  String get labelCaseSensitive => '大文字小文字を区別';
+
+  @override
+  String get labelFindAll => '全て検索';
+
+  @override
+  String get labelGrepResults => '全体検索結果';
 }

@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'history_manager.dart';
 import 'text_utils.dart';
 import 'search_result.dart';
+import 'grep_result.dart';
 import 'package:free_memo_editor/file_io_helper.dart';
 import 'editor_document.dart'; // Import EditorDocument
 
@@ -92,6 +93,23 @@ class EditorController extends ChangeNotifier {
   // 検索・置換
   List<SearchResult> get searchResults => activeDocument.searchResults;
   int get currentSearchIndex => activeDocument.currentSearchIndex;
+
+  // 全タブ検索
+  List<GrepResult> grepResults = [];
+
+  // 検索オプション
+  bool isRegex = false;
+  bool isCaseSensitive = false;
+
+  void toggleRegex() {
+    isRegex = !isRegex;
+    notifyListeners();
+  }
+
+  void toggleCaseSensitive() {
+    isCaseSensitive = !isCaseSensitive;
+    notifyListeners();
+  }
 
   // 選択範囲
   int? get selectionOriginRow => activeDocument.selectionOriginRow;
@@ -289,7 +307,11 @@ class EditorController extends ChangeNotifier {
 
   /// 検索実行
   void search(String query) {
-    activeDocument.search(query);
+    activeDocument.search(
+      query,
+      isRegex: isRegex,
+      isCaseSensitive: isCaseSensitive,
+    );
   }
 
   void nextMatch() {
@@ -301,15 +323,91 @@ class EditorController extends ChangeNotifier {
   }
 
   void replace(String query, String newText) {
-    activeDocument.replace(query, newText);
+    activeDocument.replace(
+      query,
+      newText,
+      isRegex: isRegex,
+      isCaseSensitive: isCaseSensitive,
+    );
   }
 
   void replaceAll(String query, String newText) {
-    activeDocument.replaceAll(query, newText);
+    activeDocument.replaceAll(
+      query,
+      newText,
+      isRegex: isRegex,
+      isCaseSensitive: isCaseSensitive,
+    );
   }
 
   void clearSearch() {
     activeDocument.clearSearch();
+  }
+
+  /// 全てのドキュメントを対象に検索(Grep)
+  void grep(String query) {
+    grepResults.clear();
+
+    if (query.isEmpty) {
+      notifyListeners();
+      return;
+    }
+
+    try {
+      RegExp regExp;
+      if (isRegex) {
+        regExp = RegExp(query, caseSensitive: isCaseSensitive);
+      } else {
+        regExp = RegExp(RegExp.escape(query), caseSensitive: isCaseSensitive);
+      }
+
+      for (final doc in documents) {
+        for (int i = 0; i < doc.lines.length; i++) {
+          String line = doc.lines[i];
+          final matches = regExp.allMatches(line);
+          for (final match in matches) {
+            if (match.end - match.start > 0) {
+              grepResults.add(
+                GrepResult(
+                  document: doc,
+                  searchResult: SearchResult(
+                    i,
+                    match.start,
+                    match.end - match.start,
+                  ),
+                  line: line,
+                ),
+              );
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Grep error: $e');
+    }
+    notifyListeners();
+  }
+
+  /// Grep結果の指定箇所にジャンプする
+  void jumpToGrepResult(GrepResult result) {
+    final docIndex = documents.indexOf(result.document);
+    if (docIndex == -1) return;
+
+    // 1. タブを切り替える
+    switchTab(docIndex);
+
+    // 2. 検索結果を選択状態にする
+    // activeDocument は switchTab によって更新されている
+    activeDocument.selectionOriginRow = result.searchResult.lineIndex;
+    activeDocument.selectionOriginCol = result.searchResult.startCol;
+    activeDocument.cursorRow = result.searchResult.lineIndex;
+    activeDocument.cursorCol =
+        result.searchResult.startCol + result.searchResult.length;
+    activeDocument.isRectangularSelection = false;
+    activeDocument.preferredVisualX = activeDocument.calcVisualX(
+      activeDocument.cursorRow,
+      activeDocument.cursorCol,
+    );
   }
 
   // --- ロジック (Step 2で追加) ---

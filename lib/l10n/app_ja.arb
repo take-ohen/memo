@@ -69,5 +69,9 @@
   "msgUnsavedFiles": "保存されていない変更があります。終了前に保存しますか？",
   "titleExitConfirmation": "終了の確認",
   "btnSaveAndExit": "保存して終了",
-  "btnExitWithoutSave": "保存せずに終了"
+  "btnExitWithoutSave": "保存せずに終了",
+  "labelRegex": "正規表現",
+  "labelCaseSensitive": "大文字小文字を区別",
+  "labelFindAll": "全て検索",
+  "labelGrepResults": "全体検索結果"
 }

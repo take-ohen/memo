@@ -45,6 +45,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   final TextEditingController _searchController = TextEditingController();
   final TextEditingController _replaceController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
+  bool _showGrepResults = false;
 
   // カーソル点滅処理
   Timer? _cursorBlinkTimer;
@@ -591,101 +592,199 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
   // 検索バーのビルド
   Widget _buildSearchBar() {
-    if (!_showSearchBar) return const SizedBox.shrink();
     final s = AppLocalizations.of(context)!;
 
-    return Container(
-      color: Colors.grey.shade100,
-      padding: const EdgeInsets.all(8.0),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _searchController,
-                  focusNode: _searchFocusNode,
-                  decoration: InputDecoration(
-                    labelText: s.labelSearch,
-                    isDense: true,
-                    border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.all(8),
-                  ),
-                  onChanged: (value) {
-                    _controller.search(value);
-                    _scrollToCursor();
-                  },
-                  onSubmitted: (value) {
-                    _controller.nextMatch();
-                    _scrollToCursor();
-                  },
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.arrow_upward),
-                onPressed: () {
-                  _controller.previousMatch();
-                  _scrollToCursor();
-                },
-                tooltip: '前へ',
-              ),
-              IconButton(
-                icon: const Icon(Icons.arrow_downward),
-                onPressed: () {
-                  _controller.nextMatch();
-                  _scrollToCursor();
-                },
-                tooltip: '次へ',
-              ),
-              IconButton(
-                icon: const Icon(Icons.close),
-                onPressed: () {
-                  setState(() {
-                    _showSearchBar = false;
-                    _controller.clearSearch();
-                    _focusNode.requestFocus();
-                  });
-                },
-                tooltip: '閉じる (Esc)',
-              ),
-            ],
-          ),
-          if (_isReplaceMode) ...[
-            const SizedBox(height: 8),
+    return Card(
+      elevation: 4.0,
+      child: Container(
+        width: 500,
+        padding: const EdgeInsets.all(8.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
             Row(
               children: [
                 Expanded(
                   child: TextField(
-                    controller: _replaceController,
+                    controller: _searchController,
+                    focusNode: _searchFocusNode,
                     decoration: InputDecoration(
-                      labelText: s.labelReplace,
+                      labelText: s.labelSearch,
                       isDense: true,
                       border: OutlineInputBorder(),
                       contentPadding: EdgeInsets.all(8),
                     ),
+                    onChanged: (value) {
+                      _controller.search(value);
+                      _scrollToCursor();
+                    },
+                    onSubmitted: (value) {
+                      _controller.nextMatch();
+                      _scrollToCursor();
+                    },
                   ),
                 ),
-                TextButton(
-                  onPressed: () {
-                    _controller.replace(
-                      _searchController.text,
-                      _replaceController.text,
-                    );
+                const SizedBox(width: 8),
+                // Regex
+                FilterChip(
+                  label: const Text('.*'),
+                  tooltip: s.labelRegex,
+                  selected: _controller.isRegex,
+                  onSelected: (selected) {
+                    _controller.toggleRegex();
+                    _controller.search(_searchController.text);
                   },
-                  child: Text(s.labelReplace),
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.all(2),
+                  showCheckmark: false,
+                ),
+                const SizedBox(width: 4),
+                // Case Sensitive
+                FilterChip(
+                  label: const Text('Aa'),
+                  tooltip: s.labelCaseSensitive,
+                  selected: _controller.isCaseSensitive,
+                  onSelected: (selected) {
+                    _controller.toggleCaseSensitive();
+                    _controller.search(_searchController.text);
+                  },
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.all(2),
+                  showCheckmark: false,
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: const Icon(Icons.arrow_upward),
+                  onPressed: () {
+                    _controller.previousMatch();
+                    _scrollToCursor();
+                  },
+                  tooltip: '前へ',
+                ),
+                IconButton(
+                  icon: const Icon(Icons.arrow_downward),
+                  onPressed: () {
+                    _controller.nextMatch();
+                    _scrollToCursor();
+                  },
+                  tooltip: '次へ',
                 ),
                 TextButton(
                   onPressed: () {
-                    _controller.replaceAll(
-                      _searchController.text,
-                      _replaceController.text,
-                    );
+                    setState(() => _showGrepResults = true);
+                    _controller.grep(_searchController.text);
                   },
-                  child: Text(s.labelReplaceAll),
+                  child: Text(s.labelFindAll),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () {
+                    setState(() {
+                      _showSearchBar = false;
+                      _controller.clearSearch();
+                      _focusNode.requestFocus();
+                    });
+                  },
+                  tooltip: '閉じる (Esc)',
                 ),
               ],
             ),
+            if (_isReplaceMode) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _replaceController,
+                      decoration: InputDecoration(
+                        labelText: s.labelReplace,
+                        isDense: true,
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.all(8),
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      _controller.replace(
+                        _searchController.text,
+                        _replaceController.text,
+                      );
+                    },
+                    child: Text(s.labelReplace),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      _controller.replaceAll(
+                        _searchController.text,
+                        _replaceController.text,
+                      );
+                    },
+                    child: Text(s.labelReplaceAll),
+                  ),
+                ],
+              ),
+            ],
           ],
+        ),
+      ),
+    );
+  }
+
+  // Grep結果パネルのビルド
+  Widget _buildGrepResultsPanel() {
+    if (!_showGrepResults || _controller.grepResults.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final s = AppLocalizations.of(context)!;
+
+    return Container(
+      height: 150,
+      decoration: BoxDecoration(
+        color: Colors.grey.shade100,
+        border: Border(top: BorderSide(color: Colors.grey.shade300)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // パネルヘッダー
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            color: Colors.grey.shade200,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  '${s.labelGrepResults} (${_controller.grepResults.length})',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close, size: 18),
+                  onPressed: () => setState(() => _showGrepResults = false),
+                ),
+              ],
+            ),
+          ),
+          // 結果リスト
+          Expanded(
+            child: ListView.builder(
+              itemCount: _controller.grepResults.length,
+              itemBuilder: (context, index) {
+                final result = _controller.grepResults[index];
+                return ListTile(
+                  dense: true,
+                  title: Text(
+                    '${result.document.displayName}:${result.searchResult.lineIndex + 1}',
+                  ),
+                  subtitle: Text(result.line.trim()),
+                  onTap: () {
+                    _controller.jumpToGrepResult(result);
+                    _scrollToCursor();
+                  },
+                );
+              },
+            ),
+          ),
         ],
       ),
     );
@@ -1325,7 +1424,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
           _buildMenuBar(), // メニューバー
           _buildToolbar(), // ツールバー
           _buildTabBar(), // タブバー
-          _buildSearchBar(),
+          if (_showGrepResults) const Divider(height: 1),
           // --- 列ルーラーエリア ---
           if (_controller.showRuler)
             Container(
@@ -1363,179 +1462,196 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
             ),
           // --- エディタ本体 ---
           Expanded(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Stack(
               children: [
-                // メインエリア (行番号 + エディタ)
-                Expanded(
-                  child: Stack(
-                    children: [
-                      // 1. コンテンツ (垂直スクロール + 水平スクロール)
-                      Scrollbar(
-                        controller: _verticalScrollController,
-                        thumbVisibility: true,
-                        trackVisibility: true,
-                        child: SingleChildScrollView(
-                          controller: _verticalScrollController,
-                          scrollDirection: Axis.vertical,
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // 行番号エリア
-                              if (_controller.showLineNumber)
-                                Container(
-                                  key: const Key('lineNumberArea'),
-                                  width: lineNumberAreaWidth,
-                                  height: editorHeight,
-                                  color: Colors.grey.shade200,
-                                  child: CustomPaint(
-                                    size: Size(
-                                      lineNumberAreaWidth,
-                                      editorHeight,
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // メインエリア (行番号 + エディタ)
+                    Expanded(
+                      child: Stack(
+                        children: [
+                          // 1. コンテンツ (垂直スクロール + 水平スクロール)
+                          Scrollbar(
+                            controller: _verticalScrollController,
+                            thumbVisibility: true,
+                            trackVisibility: true,
+                            child: SingleChildScrollView(
+                              controller: _verticalScrollController,
+                              scrollDirection: Axis.vertical,
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  // 行番号エリア
+                                  if (_controller.showLineNumber)
+                                    Container(
+                                      key: const Key('lineNumberArea'),
+                                      width: lineNumberAreaWidth,
+                                      height: editorHeight,
+                                      color: Colors.grey.shade200,
+                                      child: CustomPaint(
+                                        size: Size(
+                                          lineNumberAreaWidth,
+                                          editorHeight,
+                                        ),
+                                        painter: LineNumberPainter(
+                                          lineCount: _controller.lines.length,
+                                          lineHeight: _lineHeight,
+                                          textStyle: _lineNumberStyle,
+                                        ),
+                                      ),
                                     ),
-                                    painter: LineNumberPainter(
-                                      lineCount: _controller.lines.length,
-                                      lineHeight: _lineHeight,
-                                      textStyle: _lineNumberStyle,
-                                    ),
-                                  ),
-                                ),
-                              // エディタエリア
-                              Expanded(
-                                child: Focus(
-                                  focusNode: _focusNode,
-                                  onKeyEvent: (FocusNode node, KeyEvent event) {
-                                    final result = _handleKeyPress(event);
-                                    return result;
-                                  },
-                                  child: SingleChildScrollView(
-                                    controller: _horizontalScrollController,
-                                    scrollDirection: Axis.horizontal,
-                                    child: GestureDetector(
-                                      onTapDown: (details) {
-                                        _resetCursorBlink();
-                                        _controller.clearSelection();
-                                        _controller.handleTap(
-                                          details.localPosition,
-                                          _charWidth,
-                                          _lineHeight,
-                                        );
-                                        _focusNode.requestFocus();
-                                        WidgetsBinding.instance
-                                            .addPostFrameCallback((_) {
-                                              _updateImeWindowPosition();
-                                            });
-                                      },
-                                      onPanStart: (details) {
-                                        _resetCursorBlink();
-                                        _controller.handlePanStart(
-                                          details.localPosition,
-                                          _charWidth,
-                                          _lineHeight,
-                                          HardwareKeyboard
-                                              .instance
-                                              .isAltPressed,
-                                        );
-                                        _focusNode.requestFocus();
-                                        WidgetsBinding.instance
-                                            .addPostFrameCallback((_) {
-                                              _updateImeWindowPosition();
-                                            });
-                                      },
-                                      onPanUpdate: (details) {
-                                        _resetCursorBlink();
-                                        _controller.handleTap(
-                                          details.localPosition,
-                                          _charWidth,
-                                          _lineHeight,
-                                        );
-                                        WidgetsBinding.instance
-                                            .addPostFrameCallback((_) {
-                                              _updateImeWindowPosition();
-                                            });
-                                      },
-                                      child: Container(
-                                        color: Color(
-                                          _controller.editorBackgroundColor,
-                                        ), // 背景色を適用
-                                        width: editorWidth,
-                                        height: editorHeight,
-                                        child: CustomPaint(
-                                          key: _painterKey,
-                                          painter: MemoPainter(
-                                            lines: _controller.lines,
-                                            charWidth: _charWidth,
-                                            charHeight: _charHeight,
-                                            showGrid: _controller.showGrid,
-                                            isOverwriteMode:
-                                                _controller.isOverwriteMode,
-                                            cursorRow: _controller.cursorRow,
-                                            cursorCol: _controller.cursorCol,
-                                            lineHeight: _lineHeight,
-                                            textStyle: _textStyle,
-                                            composingText:
-                                                _controller.composingText,
-                                            selectionOriginRow:
-                                                _controller.selectionOriginRow,
-                                            selectionOriginCol:
-                                                _controller.selectionOriginCol,
-                                            showCursor: _showCursor,
-                                            isRectangularSelection: _controller
-                                                .isRectangularSelection,
-                                            searchResults:
-                                                _controller.searchResults,
-                                            currentSearchIndex:
-                                                _controller.currentSearchIndex,
-                                            gridColor: Color(
-                                              _controller.gridColor,
-                                            ),
-                                          ),
-                                          size: Size.infinite,
+                                  // エディタエリア
+                                  Expanded(
+                                    child: Focus(
+                                      focusNode: _focusNode,
+                                      onKeyEvent:
+                                          (FocusNode node, KeyEvent event) {
+                                            final result = _handleKeyPress(
+                                              event,
+                                            );
+                                            return result;
+                                          },
+                                      child: SingleChildScrollView(
+                                        controller: _horizontalScrollController,
+                                        scrollDirection: Axis.horizontal,
+                                        child: GestureDetector(
+                                          onTapDown: (details) {
+                                            _resetCursorBlink();
+                                            _controller.clearSelection();
+                                            _controller.handleTap(
+                                              details.localPosition,
+                                              _charWidth,
+                                              _lineHeight,
+                                            );
+                                            _focusNode.requestFocus();
+                                            WidgetsBinding.instance
+                                                .addPostFrameCallback((_) {
+                                                  _updateImeWindowPosition();
+                                                });
+                                          },
+                                          onPanStart: (details) {
+                                            _resetCursorBlink();
+                                            _controller.handlePanStart(
+                                              details.localPosition,
+                                              _charWidth,
+                                              _lineHeight,
+                                              HardwareKeyboard
+                                                  .instance
+                                                  .isAltPressed,
+                                            );
+                                            _focusNode.requestFocus();
+                                            WidgetsBinding.instance
+                                                .addPostFrameCallback((_) {
+                                                  _updateImeWindowPosition();
+                                                });
+                                          },
+                                          onPanUpdate: (details) {
+                                            _resetCursorBlink();
+                                            _controller.handleTap(
+                                              details.localPosition,
+                                              _charWidth,
+                                              _lineHeight,
+                                            );
+                                            WidgetsBinding.instance
+                                                .addPostFrameCallback((_) {
+                                                  _updateImeWindowPosition();
+                                                });
+                                          },
                                           child: Container(
-                                            color: Colors.transparent,
+                                            color: Color(
+                                              _controller.editorBackgroundColor,
+                                            ), // 背景色を適用
+                                            width: editorWidth,
+                                            height: editorHeight,
+                                            child: CustomPaint(
+                                              key: _painterKey,
+                                              painter: MemoPainter(
+                                                lines: _controller.lines,
+                                                charWidth: _charWidth,
+                                                charHeight: _charHeight,
+                                                showGrid: _controller.showGrid,
+                                                isOverwriteMode:
+                                                    _controller.isOverwriteMode,
+                                                cursorRow:
+                                                    _controller.cursorRow,
+                                                cursorCol:
+                                                    _controller.cursorCol,
+                                                lineHeight: _lineHeight,
+                                                textStyle: _textStyle,
+                                                composingText:
+                                                    _controller.composingText,
+                                                selectionOriginRow: _controller
+                                                    .selectionOriginRow,
+                                                selectionOriginCol: _controller
+                                                    .selectionOriginCol,
+                                                showCursor: _showCursor,
+                                                isRectangularSelection:
+                                                    _controller
+                                                        .isRectangularSelection,
+                                                searchResults:
+                                                    _controller.searchResults,
+                                                currentSearchIndex: _controller
+                                                    .currentSearchIndex,
+                                                gridColor: Color(
+                                                  _controller.gridColor,
+                                                ),
+                                              ),
+                                              size: Size.infinite,
+                                              child: Container(
+                                                color: Colors.transparent,
+                                              ),
+                                            ),
                                           ),
                                         ),
                                       ),
                                     ),
                                   ),
-                                ),
+                                ],
                               ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      // 2. 水平スクロールバー (固定表示・エディタ幅のみ)
-                      Positioned(
-                        left: lineNumberAreaWidth, // 行番号の右から
-                        right: 0, // 右端まで
-                        bottom: 0, // 下端固定
-                        child: Scrollbar(
-                          controller: _scrollbarScrollController, // 専用コントローラー
-                          thumbVisibility: true,
-                          trackVisibility: true,
-                          // ダミーのスクロールビュー (コントローラーを共有して同期)
-                          child: SingleChildScrollView(
-                            controller: _scrollbarScrollController, // 専用コントローラー
-                            scrollDirection: Axis.horizontal,
-                            child: SizedBox(
-                              width: editorWidth,
-                              height: 16, // 操作しやすい高さに設定
                             ),
                           ),
-                        ),
+                          // 2. 水平スクロールバー (固定表示・エディタ幅のみ)
+                          Positioned(
+                            left: lineNumberAreaWidth, // 行番号の右から
+                            right: 0, // 右端まで
+                            bottom: 0, // 下端固定
+                            child: Scrollbar(
+                              controller:
+                                  _scrollbarScrollController, // 専用コントローラー
+                              thumbVisibility: true,
+                              trackVisibility: true,
+                              // ダミーのスクロールビュー (コントローラーを共有して同期)
+                              child: SingleChildScrollView(
+                                controller:
+                                    _scrollbarScrollController, // 専用コントローラー
+                                scrollDirection: Axis.horizontal,
+                                child: SizedBox(
+                                  width: editorWidth,
+                                  height: 16, // 操作しやすい高さに設定
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
+                    ),
+                    // --- ミニマップエリア (固定) ---
+                    if (_controller.showMinimap)
+                      Container(
+                        key: const Key('minimapArea'),
+                        child: _buildMinimap(editorWidth, editorHeight),
+                      ),
+                  ],
                 ),
-                // --- ミニマップエリア (固定) ---
-                if (_controller.showMinimap)
-                  Container(
-                    key: const Key('minimapArea'),
-                    child: _buildMinimap(editorWidth, editorHeight),
-                  ),
+                // 検索バー (オーバーレイ表示)
+                if (_showSearchBar)
+                  Positioned(top: 0, right: 24, child: _buildSearchBar()),
               ],
             ),
           ),
+          // Grep結果パネル
+          _buildGrepResultsPanel(),
           // --- ステータスバー ---
           Container(
             height: 24,

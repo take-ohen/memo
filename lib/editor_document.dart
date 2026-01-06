@@ -76,7 +76,11 @@ class EditorDocument extends ChangeNotifier {
 
   // --- Search & Replace Logic ---
 
-  void search(String query) {
+  void search(
+    String query, {
+    bool isRegex = false,
+    bool isCaseSensitive = false,
+  }) {
     searchResults.clear();
     currentSearchIndex = -1;
 
@@ -85,13 +89,27 @@ class EditorDocument extends ChangeNotifier {
       return;
     }
 
-    for (int i = 0; i < lines.length; i++) {
-      String line = lines[i];
-      int index = line.indexOf(query);
-      while (index != -1) {
-        searchResults.add(SearchResult(i, index, query.length));
-        index = line.indexOf(query, index + 1);
+    try {
+      RegExp regExp;
+      if (isRegex) {
+        regExp = RegExp(query, caseSensitive: isCaseSensitive);
+      } else {
+        regExp = RegExp(RegExp.escape(query), caseSensitive: isCaseSensitive);
       }
+
+      for (int i = 0; i < lines.length; i++) {
+        String line = lines[i];
+        final matches = regExp.allMatches(line);
+        for (final match in matches) {
+          if (match.end - match.start > 0) {
+            searchResults.add(
+              SearchResult(i, match.start, match.end - match.start),
+            );
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Search error: $e');
     }
 
     if (searchResults.isNotEmpty) {
@@ -146,10 +164,15 @@ class EditorDocument extends ChangeNotifier {
     cursorCol = result.startCol + result.length;
     isRectangularSelection = false;
 
-    preferredVisualX = _calcVisualX(cursorRow, cursorCol);
+    preferredVisualX = calcVisualX(cursorRow, cursorCol);
   }
 
-  void replace(String query, String newText) {
+  void replace(
+    String query,
+    String newText, {
+    bool isRegex = false,
+    bool isCaseSensitive = false,
+  }) {
     if (searchResults.isEmpty || currentSearchIndex == -1) return;
     final result = searchResults[currentSearchIndex];
 
@@ -163,18 +186,34 @@ class EditorDocument extends ChangeNotifier {
     deleteSelection();
     insertText(newText);
 
-    search(query);
+    search(query, isRegex: isRegex, isCaseSensitive: isCaseSensitive);
   }
 
-  void replaceAll(String query, String newText) {
+  void replaceAll(
+    String query,
+    String newText, {
+    bool isRegex = false,
+    bool isCaseSensitive = false,
+  }) {
     if (query.isEmpty) return;
     saveHistory();
 
-    for (int i = 0; i < lines.length; i++) {
-      lines[i] = lines[i].replaceAll(query, newText);
+    try {
+      RegExp regExp;
+      if (isRegex) {
+        regExp = RegExp(query, caseSensitive: isCaseSensitive);
+      } else {
+        regExp = RegExp(RegExp.escape(query), caseSensitive: isCaseSensitive);
+      }
+
+      for (int i = 0; i < lines.length; i++) {
+        lines[i] = lines[i].replaceAll(regExp, newText);
+      }
+    } catch (e) {
+      debugPrint('ReplaceAll error: $e');
     }
 
-    search(query);
+    search(query, isRegex: isRegex, isCaseSensitive: isCaseSensitive);
   }
 
   void clearSearch() {
@@ -310,8 +349,8 @@ class EditorDocument extends ChangeNotifier {
     int startRow = min(selectionOriginRow!, cursorRow);
     int endRow = max(selectionOriginRow!, cursorRow);
 
-    int originVisualX = _calcVisualX(selectionOriginRow!, selectionOriginCol!);
-    int cursorVisualX = _calcVisualX(cursorRow, cursorCol);
+    int originVisualX = calcVisualX(selectionOriginRow!, selectionOriginCol!);
+    int cursorVisualX = calcVisualX(cursorRow, cursorCol);
 
     int minVisualX = min(originVisualX, cursorVisualX);
     int maxVisualX = max(originVisualX, cursorVisualX);
@@ -351,8 +390,8 @@ class EditorDocument extends ChangeNotifier {
     int startRow = min(selectionOriginRow!, cursorRow);
     int endRow = max(selectionOriginRow!, cursorRow);
 
-    int originVisualX = _calcVisualX(selectionOriginRow!, selectionOriginCol!);
-    int cursorVisualX = _calcVisualX(cursorRow, cursorCol);
+    int originVisualX = calcVisualX(selectionOriginRow!, selectionOriginCol!);
+    int cursorVisualX = calcVisualX(cursorRow, cursorCol);
 
     int minVisualX = min(originVisualX, cursorVisualX);
     int maxVisualX = max(originVisualX, cursorVisualX);
@@ -422,7 +461,7 @@ class EditorDocument extends ChangeNotifier {
     cursorCol = entry.cursorCol;
     selectionOriginRow = null;
     selectionOriginCol = null;
-    preferredVisualX = _calcVisualX(cursorRow, cursorCol);
+    preferredVisualX = calcVisualX(cursorRow, cursorCol);
     notifyListeners();
   }
 
@@ -432,7 +471,7 @@ class EditorDocument extends ChangeNotifier {
     cursorRow = lines.length - 1;
     cursorCol = lines.last.length;
     isRectangularSelection = false;
-    preferredVisualX = _calcVisualX(cursorRow, cursorCol);
+    preferredVisualX = calcVisualX(cursorRow, cursorCol);
     notifyListeners();
   }
 
@@ -459,7 +498,7 @@ class EditorDocument extends ChangeNotifier {
     }
   }
 
-  int _calcVisualX(int row, int col) {
+  int calcVisualX(int row, int col) {
     String line = (row < lines.length) ? lines[row] : "";
     String text;
     if (col <= line.length) {

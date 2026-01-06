@@ -224,4 +224,16 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get btnExitWithoutSave => 'Exit without Saving';
+
+  @override
+  String get labelRegex => 'Regular Expression';
+
+  @override
+  String get labelCaseSensitive => 'Case Sensitive';
+
+  @override
+  String get labelFindAll => 'Find All';
+
+  @override
+  String get labelGrepResults => 'Grep Results';
 }
