@@ -67,6 +67,9 @@ class EditorController extends ChangeNotifier {
   bool _uiBold = false;
   bool _uiItalic = false;
 
+  // --- 検索・Grepフォント設定 ---
+  double grepFontSize = 12.0;
+
   // --- エディタフォントのスタイル拡張 ---
   bool _editorBold = false;
   bool _editorItalic = false;
@@ -188,6 +191,7 @@ class EditorController extends ChangeNotifier {
     _uiFontSize = prefs.getDouble('uiFontSize') ?? 14.0;
     _uiBold = prefs.getBool('uiBold') ?? false;
     _uiItalic = prefs.getBool('uiItalic') ?? false;
+    grepFontSize = prefs.getDouble('grepFontSize') ?? 12.0;
     _editorBold = prefs.getBool('editorBold') ?? false;
     _editorItalic = prefs.getBool('editorItalic') ?? false;
 
@@ -255,6 +259,12 @@ class EditorController extends ChangeNotifier {
     _saveBool('uiBold', bold);
     _saveBool('uiItalic', italic);
 
+    notifyListeners();
+  }
+
+  void setGrepFontSize(double size) {
+    grepFontSize = size;
+    _saveDouble('grepFontSize', size);
     notifyListeners();
   }
 

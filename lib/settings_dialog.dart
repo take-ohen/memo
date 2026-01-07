@@ -43,6 +43,9 @@ class _SettingsDialogState extends State<SettingsDialog>
   late bool _uiBold;
   late bool _uiItalic;
 
+  // Search/Grep Settings
+  late double _grepFontSize;
+
   // Editor Colors
   late int _editorBackgroundColor;
   late int _editorTextColor;
@@ -90,6 +93,7 @@ class _SettingsDialogState extends State<SettingsDialog>
     _uiFontSize = widget.controller.uiFontSize;
     _uiBold = widget.controller.uiBold;
     _uiItalic = widget.controller.uiItalic;
+    _grepFontSize = widget.controller.grepFontSize;
 
     _editorBackgroundColor = widget.controller.editorBackgroundColor;
     _editorTextColor = widget.controller.editorTextColor;
@@ -138,6 +142,7 @@ class _SettingsDialogState extends State<SettingsDialog>
       _uiBold,
       _uiItalic,
     );
+    widget.controller.setGrepFontSize(_grepFontSize);
     widget.controller.setEditorColors(_editorBackgroundColor, _editorTextColor);
     widget.controller.setViewSettings(
       lnColor: _lineNumberColor,
@@ -369,6 +374,15 @@ class _SettingsDialogState extends State<SettingsDialog>
             fontSize: _uiFontSize,
             isBold: _uiBold,
             isItalic: _uiItalic,
+          ),
+          const Divider(height: 32),
+          _buildSectionTitle("Search & Grep Settings"),
+          _buildSlider(
+            label: "Font Size",
+            value: _grepFontSize,
+            onChanged: (v) => setState(() => _grepFontSize = v),
+            min: 8.0,
+            max: 24.0,
           ),
         ],
       ),
@@ -664,6 +678,8 @@ class _SettingsDialogState extends State<SettingsDialog>
     required String label,
     required double value,
     required ValueChanged<double> onChanged,
+    double min = 8.0,
+    double max = 32.0,
   }) {
     return Row(
       children: [
@@ -671,9 +687,9 @@ class _SettingsDialogState extends State<SettingsDialog>
         Expanded(
           child: Slider(
             value: value,
-            min: 8.0,
-            max: 32.0,
-            divisions: 48,
+            min: min,
+            max: max,
+            divisions: ((max - min) * 2).toInt(),
             label: value.toStringAsFixed(1),
             onChanged: onChanged,
           ),

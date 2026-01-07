@@ -16,6 +16,7 @@ import 'editor_controller.dart'; // コントローラーをインポート
 import 'package:free_memo_editor/file_io_helper.dart'; // 相対パスからpackageパスへ変更
 import 'editor_document.dart'; // NewLineTypeのためにインポート
 import 'settings_dialog.dart'; // 設定ダイアログをインポート
+import 'grep_result.dart';
 
 class EditorPage extends StatefulWidget {
   const EditorPage({super.key});
@@ -46,6 +47,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   final TextEditingController _replaceController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
   bool _showGrepResults = false;
+  double _grepPanelHeight = 250.0; // Grepパネルの高さ
 
   // カーソル点滅処理
   Timer? _cursorBlinkTimer;
@@ -56,6 +58,9 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   final ScrollController _rulerScrollController = ScrollController(); // ルーラー用
   final ScrollController _scrollbarScrollController =
       ScrollController(); // 固定スクロールバー用
+  final ScrollController _grepScrollController = ScrollController(); // Grep結果用
+  final ScrollController _grepHorizontalScrollController =
+      ScrollController(); // Grep結果横スクロール用
   final FocusNode _focusNode = FocusNode();
 
   // ミニマップ用
@@ -151,6 +156,8 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     _verticalScrollController.dispose();
     _rulerScrollController.dispose();
     _scrollbarScrollController.dispose();
+    _grepScrollController.dispose();
+    _grepHorizontalScrollController.dispose();
     _cursorBlinkTimer?.cancel(); // カーソル点滅用
     super.dispose();
   }
@@ -569,11 +576,18 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     final double viewportHeight =
         _verticalScrollController.position.viewportDimension;
     final double currentScrollY = _verticalScrollController.offset;
+    // 水平スクロールバーと重ならないようにするための下部マージン
+    // スクロールバーの高さ(約16px) + α として、2行分確保する
+    final double bottomMargin = _lineHeight * 2;
 
     if (cursorY < currentScrollY) {
       _verticalScrollController.jumpTo(cursorY);
-    } else if (cursorY + _lineHeight > currentScrollY + viewportHeight) {
-      _verticalScrollController.jumpTo(cursorY + _lineHeight - viewportHeight);
+    } else if (cursorY + _lineHeight >
+        currentScrollY + viewportHeight - bottomMargin) {
+      // カーソル行がマージンの上に来るようにスクロール
+      _verticalScrollController.jumpTo(
+        cursorY + _lineHeight - viewportHeight + bottomMargin,
+      );
     }
 
     // 水平スクロール
@@ -608,6 +622,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                   child: TextField(
                     controller: _searchController,
                     focusNode: _searchFocusNode,
+                    style: TextStyle(fontSize: _controller.grepFontSize),
                     decoration: InputDecoration(
                       labelText: s.labelSearch,
                       isDense: true,
@@ -696,6 +711,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                   Expanded(
                     child: TextField(
                       controller: _replaceController,
+                      style: TextStyle(fontSize: _controller.grepFontSize),
                       decoration: InputDecoration(
                         labelText: s.labelReplace,
                         isDense: true,
@@ -738,15 +754,58 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     }
     final s = AppLocalizations.of(context)!;
 
+    // コンテンツの最大幅を計算
+    double maxContentWidth = 0.0;
+    final double charW = _charWidth > 0 ? _charWidth : 10.0;
+
+    // 全結果を走査して最大幅を求める (パフォーマンス注意だが要件優先)
+    for (final result in _controller.grepResults) {
+      // ファイル名部分の概算 + 行内容の幅
+      String prefix =
+          '${result.document.displayName}:${result.searchResult.lineIndex + 1}: ';
+      int visualLength = TextUtils.calcTextWidth(prefix + result.line);
+      double width = visualLength * charW + 20.0; // パディング分余裕を持たせる
+      if (width > maxContentWidth) maxContentWidth = width;
+    }
+
     return Container(
-      height: 150,
-      decoration: BoxDecoration(
-        color: Colors.grey.shade100,
-        border: Border(top: BorderSide(color: Colors.grey.shade300)),
-      ),
+      height: _grepPanelHeight,
+      decoration: BoxDecoration(color: Colors.grey.shade100),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // リサイズハンドル
+          MouseRegion(
+            cursor: SystemMouseCursors.resizeRow,
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onVerticalDragUpdate: (details) {
+                setState(() {
+                  // 上にドラッグ(マイナス)で高さを増やす
+                  _grepPanelHeight -= details.delta.dy;
+                  // 最小・最大サイズの制限
+                  if (_grepPanelHeight < 100.0) _grepPanelHeight = 100.0;
+                  final maxHeight = MediaQuery.of(context).size.height * 0.8;
+                  if (_grepPanelHeight > maxHeight) {
+                    _grepPanelHeight = maxHeight;
+                  }
+                });
+              },
+              child: Container(
+                height: 8.0,
+                color: Colors.grey.shade300,
+                alignment: Alignment.center,
+                child: Container(
+                  width: 40,
+                  height: 2,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade500,
+                    borderRadius: BorderRadius.circular(1),
+                  ),
+                ),
+              ),
+            ),
+          ),
           // パネルヘッダー
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -767,20 +826,51 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
           ),
           // 結果リスト
           Expanded(
-            child: ListView.builder(
-              itemCount: _controller.grepResults.length,
-              itemBuilder: (context, index) {
-                final result = _controller.grepResults[index];
-                return ListTile(
-                  dense: true,
-                  title: Text(
-                    '${result.document.displayName}:${result.searchResult.lineIndex + 1}',
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final finalWidth = max(maxContentWidth, constraints.maxWidth);
+                return Scrollbar(
+                  controller: _grepScrollController,
+                  thumbVisibility: true,
+                  trackVisibility: true,
+                  // 縦スクロールバー: ListView(depth=1)の縦方向通知のみ拾う
+                  notificationPredicate: (notif) =>
+                      notif.depth == 1 && notif.metrics.axis == Axis.vertical,
+                  child: Scrollbar(
+                    controller: _grepHorizontalScrollController,
+                    thumbVisibility: true,
+                    trackVisibility: true,
+                    // 横スクロールバー: SingleChildScrollView(depth=0)の横方向通知のみ拾う
+                    notificationPredicate: (notif) =>
+                        notif.depth == 0 &&
+                        notif.metrics.axis == Axis.horizontal,
+                    child: SingleChildScrollView(
+                      controller: _grepHorizontalScrollController,
+                      scrollDirection: Axis.horizontal,
+                      child: SizedBox(
+                        width: finalWidth,
+                        height: constraints.maxHeight,
+                        child: ListView.separated(
+                          controller: _grepScrollController,
+                          itemCount: _controller.grepResults.length,
+                          separatorBuilder: (context, index) =>
+                              const Divider(height: 1),
+                          itemBuilder: (context, index) {
+                            final result = _controller.grepResults[index];
+                            return _GrepResultRow(
+                              result: result,
+                              textStyle: _textStyle,
+                              fontSize: _controller.grepFontSize,
+                              onTap: () {
+                                _controller.jumpToGrepResult(result);
+                                _scrollToCursor();
+                              },
+                            );
+                          },
+                        ),
+                      ),
+                    ),
                   ),
-                  subtitle: Text(result.line.trim()),
-                  onTap: () {
-                    _controller.jumpToGrepResult(result);
-                    _scrollToCursor();
-                  },
                 );
               },
             ),
@@ -1759,4 +1849,49 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   void showToolbar() {}
   @override
   AutofillScope? get currentAutofillScope => null;
+}
+
+class _GrepResultRow extends StatelessWidget {
+  final GrepResult result;
+  final TextStyle textStyle;
+  final double fontSize;
+  final VoidCallback onTap;
+
+  const _GrepResultRow({
+    required this.result,
+    required this.textStyle,
+    required this.fontSize,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+        child: Text.rich(
+          TextSpan(
+            children: [
+              TextSpan(
+                text:
+                    '${result.document.displayName}:${result.searchResult.lineIndex + 1}: ',
+                style: TextStyle(
+                  fontSize: fontSize,
+                  color: Colors.blue.shade800,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              TextSpan(
+                text: result.line,
+                style: textStyle.copyWith(fontSize: fontSize),
+              ),
+            ],
+          ),
+          softWrap: false,
+          overflow: TextOverflow.visible,
+        ),
+      ),
+    );
+  }
 }
