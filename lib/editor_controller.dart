@@ -51,6 +51,10 @@ class EditorController extends ChangeNotifier {
   Encoding get currentEncoding => activeDocument.currentEncoding;
   NewLineType get newLineType => activeDocument.newLineType;
 
+  // --- 新規設定項目 ---
+  NewLineType defaultNewLineType = NewLineType.crlf;
+  bool enableCursorBlink = true;
+
   bool showGrid = false; // グリッド表示フラグ
   bool showLineNumber = true;
   bool showRuler = true;
@@ -138,7 +142,11 @@ class EditorController extends ChangeNotifier {
   }
 
   void _addNewDocument() {
-    documents.add(EditorDocument()..tabWidth = tabWidth);
+    documents.add(
+      EditorDocument()
+        ..tabWidth = tabWidth
+        ..newLineType = defaultNewLineType,
+    );
     activeDocumentIndex = documents.length - 1;
     // ドキュメントの変更を監視して通知する
     documents.last.addListener(notifyListeners);
@@ -197,6 +205,13 @@ class EditorController extends ChangeNotifier {
 
     editorBackgroundColor = prefs.getInt('editorBackgroundColor') ?? 0xFFFFFFFF;
     editorTextColor = prefs.getInt('editorTextColor') ?? 0xFF000000;
+
+    // 新規設定の読み込み
+    int newLineTypeId = prefs.getInt('defaultNewLineType') ?? 0;
+    if (newLineTypeId >= 0 && newLineTypeId < NewLineType.values.length) {
+      defaultNewLineType = NewLineType.values[newLineTypeId];
+    }
+    enableCursorBlink = prefs.getBool('enableCursorBlink') ?? true;
 
     // 全ドキュメントに設定を反映
     for (var doc in documents) doc.tabWidth = tabWidth;
@@ -265,6 +280,18 @@ class EditorController extends ChangeNotifier {
   void setGrepFontSize(double size) {
     grepFontSize = size;
     _saveDouble('grepFontSize', size);
+    notifyListeners();
+  }
+
+  void setDefaultNewLineType(NewLineType type) {
+    defaultNewLineType = type;
+    _saveInt('defaultNewLineType', type.index);
+    notifyListeners();
+  }
+
+  void setEnableCursorBlink(bool value) {
+    enableCursorBlink = value;
+    _saveBool('enableCursorBlink', value);
     notifyListeners();
   }
 

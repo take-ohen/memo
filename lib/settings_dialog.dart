@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'editor_controller.dart';
 import 'font_manager.dart';
 import 'l10n/app_localizations.dart';
 import 'color_picker_widget.dart'; // 新規Widgetをインポート
 import 'memo_painter.dart'; // プレビュー描画用
+import 'editor_document.dart'; // NewLineType用
 
-enum SettingsTab { editor, ui, view }
+enum SettingsTab { textEditor, interface, general }
 
 enum ColorTarget { background, text, lineNumber, ruler, grid }
 
@@ -16,49 +18,47 @@ class SettingsDialog extends StatefulWidget {
   const SettingsDialog({
     super.key,
     required this.controller,
-    this.initialTab = SettingsTab.editor,
+    this.initialTab = SettingsTab.textEditor,
   });
 
   @override
   State<SettingsDialog> createState() => _SettingsDialogState();
 }
 
-class _SettingsDialogState extends State<SettingsDialog>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabController;
+class _SettingsDialogState extends State<SettingsDialog> {
   final FontManager _fontManager = FontManager();
   bool _isLoading = false;
 
-  // Editor Settings
+  // --- 1. Text Editor Settings ---
   late TextEditingController _editorFontController;
   late double _editorFontSize;
   late bool _editorBold;
   late bool _editorItalic;
-  late int _minColumns;
-  late int _minLines;
+  late int _tabWidth;
+  late NewLineType _defaultNewLineType;
+  late bool _enableCursorBlink;
+  // Colors for Editor
+  late int _editorBackgroundColor;
+  late int _editorTextColor;
+  ColorTarget _editorColorTarget = ColorTarget.background;
 
-  // UI Settings
+  // --- 2. Interface Settings ---
   late TextEditingController _uiFontController;
   late double _uiFontSize;
   late bool _uiBold;
   late bool _uiItalic;
-
-  // Search/Grep Settings
   late double _grepFontSize;
-
-  // Editor Colors
-  late int _editorBackgroundColor;
-  late int _editorTextColor;
-
-  // View Settings (Line Number & Ruler)
+  // Colors & Sizes for Interface
   late int _lineNumberColor;
   late double _lineNumberFontSize;
   late int _rulerColor;
   late double _rulerFontSize;
   late int _gridColor;
+  ColorTarget _interfaceColorTarget = ColorTarget.lineNumber;
 
-  // Viewタブ用状態
-  ColorTarget _activeColorTarget = ColorTarget.background;
+  // --- 3. General Settings ---
+  late int _minColumns;
+  late int _minLines;
 
   // プレビュー用ダミーデータ
   final List<String> _previewLines = [
@@ -68,14 +68,12 @@ class _SettingsDialogState extends State<SettingsDialog>
     '}',
   ];
 
+  // ウィンドウ移動用オフセット
+  Offset _offset = Offset.zero;
+
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(
-      length: 3,
-      vsync: this,
-      initialIndex: widget.initialTab.index,
-    );
 
     // 初期値のロード
     _editorFontController = TextEditingController(
@@ -84,6 +82,12 @@ class _SettingsDialogState extends State<SettingsDialog>
     _editorFontSize = widget.controller.fontSize;
     _editorBold = widget.controller.editorBold;
     _editorItalic = widget.controller.editorItalic;
+    _tabWidth = widget.controller.tabWidth;
+    _defaultNewLineType = widget.controller.defaultNewLineType;
+    _enableCursorBlink = widget.controller.enableCursorBlink;
+    _editorBackgroundColor = widget.controller.editorBackgroundColor;
+    _editorTextColor = widget.controller.editorTextColor;
+
     _minColumns = widget.controller.minColumns;
     _minLines = widget.controller.minLines;
 
@@ -94,9 +98,6 @@ class _SettingsDialogState extends State<SettingsDialog>
     _uiBold = widget.controller.uiBold;
     _uiItalic = widget.controller.uiItalic;
     _grepFontSize = widget.controller.grepFontSize;
-
-    _editorBackgroundColor = widget.controller.editorBackgroundColor;
-    _editorTextColor = widget.controller.editorTextColor;
 
     _lineNumberColor = widget.controller.lineNumberColor;
     _lineNumberFontSize = widget.controller.lineNumberFontSize;
@@ -122,20 +123,25 @@ class _SettingsDialogState extends State<SettingsDialog>
 
   @override
   void dispose() {
-    _tabController.dispose();
     _editorFontController.dispose();
     _uiFontController.dispose();
     super.dispose();
   }
 
   void _applySettings() {
+    // Text Editor
     widget.controller.setEditorFont(
       _editorFontController.text,
       _editorFontSize,
       _editorBold,
       _editorItalic,
     );
-    widget.controller.setCanvasSize(_minColumns, _minLines);
+    widget.controller.setTabWidth(_tabWidth);
+    widget.controller.setDefaultNewLineType(_defaultNewLineType);
+    widget.controller.setEnableCursorBlink(_enableCursorBlink);
+    widget.controller.setEditorColors(_editorBackgroundColor, _editorTextColor);
+
+    // Interface
     widget.controller.setUiFont(
       _uiFontController.text,
       _uiFontSize,
@@ -143,7 +149,6 @@ class _SettingsDialogState extends State<SettingsDialog>
       _uiItalic,
     );
     widget.controller.setGrepFontSize(_grepFontSize);
-    widget.controller.setEditorColors(_editorBackgroundColor, _editorTextColor);
     widget.controller.setViewSettings(
       lnColor: _lineNumberColor,
       lnSize: _lineNumberFontSize,
@@ -151,12 +156,38 @@ class _SettingsDialogState extends State<SettingsDialog>
       rSize: _rulerFontSize,
       gColor: _gridColor,
     );
+
+    // General
+    widget.controller.setCanvasSize(_minColumns, _minLines);
+
     Navigator.of(context).pop();
   }
 
-  // --- 共通パーツ: フォント設定セクション ---
-  Widget _buildFontSection({
+  // --- 共通パーツ: セクションタイトル ---
+  Widget _buildSectionTitle(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2.0, top: 6.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: Colors.black87,
+            ),
+          ),
+          const Divider(height: 4),
+        ],
+      ),
+    );
+  }
+
+  // --- 共通パーツ: フォント設定 ---
+  Widget _buildFontSettings({
     required BuildContext context,
+    required String title,
     required List<String> fontList,
     required TextEditingController fontController,
     required double fontSize,
@@ -170,231 +201,387 @@ class _SettingsDialogState extends State<SettingsDialog>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildSectionTitle('Font Settings'),
-        // フォント選択
-        LayoutBuilder(
-          builder: (context, constraints) {
-            return DropdownMenu<String>(
-              width: constraints.maxWidth,
-              controller: fontController,
-              enableFilter: true,
-              requestFocusOnTap: true,
-              label: Text(s.labelFontFamily),
-              dropdownMenuEntries: fontList.map((f) {
-                return DropdownMenuEntry<String>(value: f, label: f);
-              }).toList(),
-              onSelected: (value) {
-                if (value != null) {
-                  setState(() {
-                    fontController.text = value;
-                  });
-                }
-              },
-            );
-          },
+        _buildSectionTitle(title),
+        // DropdownMenu -> DropdownButton に変更してコンパクト化
+        SizedBox(
+          height: 24,
+          child: DropdownButton<String>(
+            value: fontList.contains(fontController.text)
+                ? fontController.text
+                : null,
+            isExpanded: true,
+            isDense: true,
+            underline: Container(height: 1, color: Colors.grey.shade300),
+            style: const TextStyle(fontSize: 11, color: Colors.black),
+            items: fontList.map((f) {
+              return DropdownMenuItem(
+                value: f,
+                child: Text(f, overflow: TextOverflow.ellipsis),
+              );
+            }).toList(),
+            onChanged: (v) {
+              if (v != null) setState(() => fontController.text = v);
+            },
+            hint: Text(s.labelFontFamily, style: const TextStyle(fontSize: 11)),
+          ),
         ),
-        const SizedBox(height: 16),
-        // サイズ
-        Row(
-          children: [
-            Text("${s.labelFontSize}: ${fontSize.toStringAsFixed(1)}"),
-            Expanded(
-              child: Slider(
-                value: fontSize,
-                min: 8.0,
-                max: 72.0,
-                divisions: 128,
-                onChanged: (v) => setState(() => onSizeChanged(v)),
-              ),
-            ),
-          ],
+        const SizedBox(height: 4),
+        _CompactValueInput(
+          label: s.labelFontSize,
+          value: fontSize,
+          min: 8.0,
+          max: 72.0,
+          onChanged: (v) => setState(() => onSizeChanged(v)),
         ),
-        // スタイル
         Row(
           children: [
             Checkbox(
               value: isBold,
+              visualDensity: const VisualDensity(
+                horizontal: -4,
+                vertical: -4,
+              ), // 極限まで詰める
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
               onChanged: (v) => setState(() => onBoldChanged(v)),
             ),
-            Text(s.labelBold),
+            Text(s.labelBold, style: const TextStyle(fontSize: 11)),
             const SizedBox(width: 16),
             Checkbox(
               value: isItalic,
+              visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
               onChanged: (v) => setState(() => onItalicChanged(v)),
             ),
-            Text(s.labelItalic),
+            Text(s.labelItalic, style: const TextStyle(fontSize: 11)),
           ],
         ),
       ],
     );
   }
 
-  // --- 共通パーツ: キャンバス設定セクション ---
-  Widget _buildCanvasSection({
-    required int minColumns,
-    required int minLines,
-    required Function(int, int) onCanvasSizeChanged,
-  }) {
-    final s = AppLocalizations.of(context)!;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          s.labelCanvasSizeMin,
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
-        // Columns
-        Row(
-          children: [
-            SizedBox(width: 80, child: Text("${s.labelColumns}: $minColumns")),
-            Expanded(
-              child: Slider(
-                value: minColumns.toDouble(),
-                min: 80,
-                max: 1000,
-                divisions: 920,
-                onChanged: (v) =>
-                    setState(() => onCanvasSizeChanged(v.toInt(), minLines)),
-              ),
-            ),
-          ],
-        ),
-        // Lines
-        Row(
-          children: [
-            SizedBox(width: 80, child: Text("${s.labelLines}: $minLines")),
-            Expanded(
-              child: Slider(
-                value: minLines.toDouble(),
-                min: 40,
-                max: 1000,
-                divisions: 960,
-                onChanged: (v) =>
-                    setState(() => onCanvasSizeChanged(minColumns, v.toInt())),
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  // --- 共通パーツ: プレビュー ---
-  Widget _buildPreviewSection({
+  // --- 共通パーツ: カラー設定セクション ---
+  Widget _buildColorSection({
     required BuildContext context,
-    required TextEditingController fontController,
-    required double fontSize,
-    required bool isBold,
-    required bool isItalic,
+    required String title,
+    required ColorTarget activeTarget,
+    required List<DropdownMenuItem<ColorTarget>> items,
+    required ValueChanged<ColorTarget> onTargetChanged,
+    required Color currentColor,
+    required ValueChanged<Color> onColorChanged,
   }) {
     final s = AppLocalizations.of(context)!;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Divider(height: 32),
-        Text("Preview", style: TextStyle(fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        SizedBox(
-          height: 100, // 高さを固定してオーバーフローを防ぐ
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey),
-              borderRadius: BorderRadius.circular(4),
+        _buildSectionTitle(title),
+        Row(
+          children: [
+            Text(
+              "${s.labelEditTarget}: ",
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
             ),
-            child: SingleChildScrollView(
-              child: Text(
-                s.previewText,
-                style: TextStyle(
-                  fontFamily: fontController.text,
-                  fontSize: fontSize,
-                  fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
-                  fontStyle: isItalic ? FontStyle.italic : FontStyle.normal,
-                ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: DropdownButton<ColorTarget>(
+                isExpanded: true,
+                isDense: true,
+                underline: Container(height: 1, color: Colors.grey.shade300),
+                style: const TextStyle(fontSize: 11, color: Colors.black),
+                value: activeTarget,
+                items: items,
+                onChanged: (v) {
+                  if (v != null) onTargetChanged(v);
+                },
               ),
             ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Container(
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey.shade300),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: ColorPickerWidget(
+            color: currentColor,
+            onColorChanged: onColorChanged,
           ),
         ),
       ],
     );
   }
 
-  // --- Editorタブの構築 ---
-  Widget _buildEditorTab(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildFontSection(
-            context: context,
-            fontList: _fontManager.monospaceFonts,
-            fontController: _editorFontController,
-            fontSize: _editorFontSize,
-            isBold: _editorBold,
-            isItalic: _editorItalic,
-            onSizeChanged: (v) => _editorFontSize = v,
-            onBoldChanged: (v) => _editorBold = v ?? false,
-            onItalicChanged: (v) => _editorItalic = v ?? false,
-          ),
-          _buildPreviewSection(
-            context: context,
-            fontController: _editorFontController,
-            fontSize: _editorFontSize,
-            isBold: _editorBold,
-            isItalic: _editorItalic,
-          ),
-        ],
-      ),
-    );
-  }
-
-  // --- UIタブの構築 ---
-  Widget _buildUiTab(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildFontSection(
-            context: context,
-            fontList: _fontManager.allFonts,
-            fontController: _uiFontController,
-            fontSize: _uiFontSize,
-            isBold: _uiBold,
-            isItalic: _uiItalic,
-            onSizeChanged: (v) => _uiFontSize = v,
-            onBoldChanged: (v) => _uiBold = v ?? false,
-            onItalicChanged: (v) => _uiItalic = v ?? false,
-          ),
-          _buildPreviewSection(
-            context: context,
-            fontController: _uiFontController,
-            fontSize: _uiFontSize,
-            isBold: _uiBold,
-            isItalic: _uiItalic,
-          ),
-          const Divider(height: 32),
-          _buildSectionTitle("Search & Grep Settings"),
-          _buildSlider(
-            label: "Font Size",
-            value: _grepFontSize,
-            onChanged: (v) => setState(() => _grepFontSize = v),
-            min: 8.0,
-            max: 24.0,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildViewTab(BuildContext context) {
+  // --- Tab 1: Text Editor ---
+  Widget _buildTextEditorTab(BuildContext context) {
     final s = AppLocalizations.of(context)!;
+
     // プレビュー用のメトリクス計算
     final previewTextStyle = TextStyle(
       fontFamily: _editorFontController.text,
       fontSize: _editorFontSize,
+      fontWeight: _editorBold ? FontWeight.bold : FontWeight.normal,
+      fontStyle: _editorItalic ? FontStyle.italic : FontStyle.normal,
+    );
+    final textPainter = TextPainter(
+      text: TextSpan(text: 'M', style: previewTextStyle),
+      textDirection: TextDirection.ltr,
+    );
+    textPainter.layout();
+    final charWidth = textPainter.width;
+    final charHeight = textPainter.height;
+    final lineHeight = charHeight * 1.2;
+
+    // 現在の色を取得
+    Color currentColor = _editorColorTarget == ColorTarget.background
+        ? Color(_editorBackgroundColor)
+        : Color(_editorTextColor);
+
+    return Column(
+      children: [
+        // --- 1. 固定プレビューエリア (上部) ---
+        Container(
+          height: 100,
+          width: double.infinity,
+          color: Colors.grey.shade100,
+          padding: const EdgeInsets.all(8),
+          child: Container(
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey),
+              color: Color(_editorBackgroundColor),
+            ),
+            child: ClipRect(
+              child: CustomPaint(
+                painter: MemoPainter(
+                  lines: _previewLines,
+                  charWidth: charWidth,
+                  charHeight: charHeight,
+                  lineHeight: lineHeight,
+                  showGrid: false,
+                  isOverwriteMode: false,
+                  cursorRow: 0,
+                  cursorCol: 0,
+                  textStyle: previewTextStyle.copyWith(
+                    color: Color(_editorTextColor),
+                  ),
+                  composingText: "",
+                  showCursor: _enableCursorBlink, // 点滅設定を反映
+                  gridColor: Colors.transparent,
+                ),
+                size: Size.infinite,
+              ),
+            ),
+          ),
+        ),
+        const Divider(height: 1),
+        // --- 2. スクロール設定エリア (下部) ---
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // 左カラム: フォント & 挙動
+                    Expanded(
+                      flex: 1,
+                      child: Column(
+                        children: [
+                          _buildFontSettings(
+                            context: context,
+                            title: s.labelEditorFont,
+                            fontList: _fontManager.monospaceFonts,
+                            fontController: _editorFontController,
+                            fontSize: _editorFontSize,
+                            isBold: _editorBold,
+                            isItalic: _editorItalic,
+                            onSizeChanged: (v) => _editorFontSize = v,
+                            onBoldChanged: (v) => _editorBold = v ?? false,
+                            onItalicChanged: (v) => _editorItalic = v ?? false,
+                          ),
+                          const SizedBox(height: 16),
+                          _buildSectionTitle(s.labelBehavior),
+                          // Tab Width
+                          Row(
+                            children: [
+                              SizedBox(
+                                width: 80,
+                                child: Text(
+                                  s.labelTabWidth,
+                                  style: const TextStyle(fontSize: 11),
+                                ),
+                              ),
+                              Expanded(
+                                child: DropdownButton<int>(
+                                  value: _tabWidth,
+                                  isDense: true,
+                                  isExpanded: true,
+                                  underline: Container(
+                                    height: 1,
+                                    color: Colors.grey.shade300,
+                                  ),
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.black,
+                                  ),
+                                  items: [
+                                    DropdownMenuItem(
+                                      value: 2,
+                                      child: Text(
+                                        "2 ${s.labelColumns}",
+                                        style: const TextStyle(fontSize: 11),
+                                      ),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: 4,
+                                      child: Text(
+                                        "4 ${s.labelColumns}",
+                                        style: const TextStyle(fontSize: 11),
+                                      ),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: 8,
+                                      child: Text(
+                                        "8 ${s.labelColumns}",
+                                        style: const TextStyle(fontSize: 11),
+                                      ),
+                                    ),
+                                  ],
+                                  onChanged: (v) {
+                                    if (v != null)
+                                      setState(() => _tabWidth = v);
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                          // Default Line Ending
+                          Row(
+                            children: [
+                              SizedBox(
+                                width: 80,
+                                child: Text(
+                                  s.labelNewLineCode,
+                                  style: const TextStyle(fontSize: 11),
+                                ),
+                              ),
+                              Expanded(
+                                child: DropdownButton<NewLineType>(
+                                  value: _defaultNewLineType,
+                                  isDense: true,
+                                  isExpanded: true,
+                                  underline: Container(
+                                    height: 1,
+                                    color: Colors.grey.shade300,
+                                  ),
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.black,
+                                  ),
+                                  items: NewLineType.values.map((type) {
+                                    return DropdownMenuItem(
+                                      value: type,
+                                      child: Text(
+                                        type.label,
+                                        style: const TextStyle(fontSize: 11),
+                                      ),
+                                    );
+                                  }).toList(),
+                                  onChanged: (v) {
+                                    if (v != null)
+                                      setState(() => _defaultNewLineType = v);
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                          // Cursor Blinking
+                          Row(
+                            children: [
+                              SizedBox(
+                                width: 80,
+                                child: Text(
+                                  s.labelCursorBlink,
+                                  style: const TextStyle(fontSize: 11),
+                                ),
+                              ),
+                              Checkbox(
+                                value: _enableCursorBlink,
+                                visualDensity: const VisualDensity(
+                                  horizontal: -4,
+                                  vertical: -4,
+                                ),
+                                materialTapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
+                                onChanged: (v) => setState(
+                                  () => _enableCursorBlink = v ?? true,
+                                ),
+                              ),
+                              Text(
+                                s.labelEnable,
+                                style: const TextStyle(fontSize: 11),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    // 右カラム: 色設定
+                    Expanded(
+                      flex: 1,
+                      child: _buildColorSection(
+                        context: context,
+                        title: s.labelEditorColors,
+                        activeTarget: _editorColorTarget,
+                        items: [
+                          DropdownMenuItem(
+                            value: ColorTarget.background,
+                            child: Text(
+                              s.labelBackground,
+                              style: const TextStyle(fontSize: 11),
+                            ),
+                          ),
+                          DropdownMenuItem(
+                            value: ColorTarget.text,
+                            child: Text(
+                              s.labelText,
+                              style: const TextStyle(fontSize: 11),
+                            ),
+                          ),
+                        ],
+                        onTargetChanged: (v) =>
+                            setState(() => _editorColorTarget = v),
+                        currentColor: currentColor,
+                        onColorChanged: (color) {
+                          setState(() {
+                            if (_editorColorTarget == ColorTarget.background) {
+                              _editorBackgroundColor = color.value;
+                            } else {
+                              _editorTextColor = color.value;
+                            }
+                          });
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // --- Tab 2: Interface ---
+  Widget _buildInterfaceTab(BuildContext context) {
+    final s = AppLocalizations.of(context)!;
+    // プレビュー用のメトリクス計算
+    final previewTextStyle = TextStyle(
+      fontFamily: _uiFontController.text,
+      fontSize: _uiFontSize,
     );
     final textPainter = TextPainter(
       text: TextSpan(text: 'M', style: previewTextStyle),
@@ -407,13 +594,7 @@ class _SettingsDialogState extends State<SettingsDialog>
 
     // 現在選択中の色を取得
     Color currentColor;
-    switch (_activeColorTarget) {
-      case ColorTarget.background:
-        currentColor = Color(_editorBackgroundColor);
-        break;
-      case ColorTarget.text:
-        currentColor = Color(_editorTextColor);
-        break;
+    switch (_interfaceColorTarget) {
       case ColorTarget.lineNumber:
         currentColor = Color(_lineNumberColor);
         break;
@@ -423,279 +604,314 @@ class _SettingsDialogState extends State<SettingsDialog>
       case ColorTarget.grid:
         currentColor = Color(_gridColor);
         break;
+      default:
+        currentColor = Colors.black;
     }
 
-    // 行番号とルーラーの設定UI
-    return Padding(
-      padding: const EdgeInsets.all(8.0), // 余白を削減
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // --- 左側: プレビューエリア (Expanded) ---
-          Expanded(
-            flex: 3,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildSectionTitle(s.labelPreview),
-                Expanded(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey),
-                    ),
-                    child: Column(
-                      children: [
-                        // ルーラー
-                        Container(
-                          height: 24,
-                          color: Colors.grey.shade200,
-                          child: Row(
-                            children: [
-                              const SizedBox(width: 40), // 行番号分のスペース
-                              Expanded(
-                                child: ClipRect(
-                                  child: CustomPaint(
-                                    size: const Size(double.infinity, 24),
-                                    painter: ColumnRulerPainter(
-                                      charWidth: charWidth,
-                                      lineHeight: 24,
-                                      textStyle: TextStyle(
-                                        fontFamily: _editorFontController.text,
-                                        fontSize: _rulerFontSize,
-                                        color: Color(_rulerColor),
-                                      ),
-                                      editorWidth: 500,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        // エディタ本体
-                        Expanded(
-                          child: Row(
-                            children: [
-                              // 行番号
-                              Container(
-                                width: 40,
-                                color: Colors.grey.shade200,
-                                child: CustomPaint(
-                                  size: Size.infinite,
-                                  painter: LineNumberPainter(
-                                    lineCount: _previewLines.length,
-                                    lineHeight: lineHeight,
-                                    textStyle: TextStyle(
-                                      fontFamily: _editorFontController.text,
-                                      fontSize: _lineNumberFontSize,
-                                      color: Color(_lineNumberColor),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              // テキストエリア
-                              Expanded(
-                                child: Container(
-                                  color: Color(_editorBackgroundColor),
-                                  child: ClipRect(
-                                    child: CustomPaint(
-                                      painter: MemoPainter(
-                                        lines: _previewLines,
-                                        charWidth: charWidth,
-                                        charHeight: charHeight,
-                                        lineHeight: lineHeight,
-                                        showGrid: true, // グリッド確認のため常時ON
-                                        isOverwriteMode: false,
-                                        cursorRow: 0,
-                                        cursorCol: 0,
-                                        textStyle: previewTextStyle.copyWith(
-                                          color: Color(_editorTextColor),
-                                          fontWeight: _editorBold
-                                              ? FontWeight.bold
-                                              : FontWeight.normal,
-                                          fontStyle: _editorItalic
-                                              ? FontStyle.italic
-                                              : FontStyle.normal,
-                                        ),
-                                        composingText: "",
-                                        showCursor: true,
-                                        gridColor: Color(_gridColor),
-                                      ),
-                                      size: Size.infinite,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                // Canvas Size設定を左下に配置
-                _buildCanvasSection(
-                  minColumns: _minColumns,
-                  minLines: _minLines,
-                  onCanvasSizeChanged: (c, l) {
-                    _minColumns = c;
-                    _minLines = l;
-                  },
-                ),
-              ],
+    return Column(
+      children: [
+        // --- 1. 固定プレビューエリア (上部) ---
+        Container(
+          height: 120,
+          width: double.infinity,
+          color: Colors.grey.shade100,
+          padding: const EdgeInsets.all(8),
+          child: Container(
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey),
+              color: Colors.white,
             ),
-          ),
-          const SizedBox(width: 16),
-
-          // --- 右側: 設定コントロール (固定幅) ---
-          SizedBox(
-            width: 300,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Stack(
               children: [
-                _buildSectionTitle(s.labelSettings),
-                // 編集対象の選択
-                Row(
+                Column(
                   children: [
-                    Text(
-                      "${s.labelEditTarget}:",
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: SizedBox(
-                        height: 30,
-                        child: DropdownButton<ColorTarget>(
-                          isExpanded: true,
-                          value: _activeColorTarget,
-                          underline: Container(height: 1, color: Colors.grey),
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: Colors.black,
+                    // ルーラー
+                    Container(
+                      height: 24,
+                      color: Colors.grey.shade200,
+                      child: Row(
+                        children: [
+                          const SizedBox(width: 40),
+                          Expanded(
+                            child: ClipRect(
+                              child: CustomPaint(
+                                size: const Size(double.infinity, 24),
+                                painter: ColumnRulerPainter(
+                                  charWidth: charWidth,
+                                  lineHeight: 24,
+                                  textStyle: TextStyle(
+                                    fontFamily: _uiFontController.text,
+                                    fontSize: _rulerFontSize,
+                                    color: Color(_rulerColor),
+                                  ),
+                                  editorWidth: 500,
+                                ),
+                              ),
+                            ),
                           ),
-                          items: [
-                            DropdownMenuItem(
-                              value: ColorTarget.background,
-                              child: Text(s.labelBackground),
+                        ],
+                      ),
+                    ),
+                    // 行番号 + グリッド
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 40,
+                            color: Colors.grey.shade200,
+                            child: CustomPaint(
+                              size: Size.infinite,
+                              painter: LineNumberPainter(
+                                lineCount: 3,
+                                lineHeight: lineHeight,
+                                textStyle: TextStyle(
+                                  fontFamily: _uiFontController.text,
+                                  fontSize: _lineNumberFontSize,
+                                  color: Color(_lineNumberColor),
+                                ),
+                              ),
                             ),
-                            DropdownMenuItem(
-                              value: ColorTarget.text,
-                              child: Text(s.labelText),
+                          ),
+                          Expanded(
+                            child: CustomPaint(
+                              painter: MemoPainter(
+                                lines: const ["Grid Preview", "", ""],
+                                charWidth: charWidth,
+                                charHeight: charHeight,
+                                lineHeight: lineHeight,
+                                showGrid: true, // グリッド確認のため常時ON
+                                isOverwriteMode: false,
+                                cursorRow: 0,
+                                cursorCol: 0,
+                                textStyle: previewTextStyle,
+                                composingText: "",
+                                showCursor: false,
+                                gridColor: Color(_gridColor),
+                              ),
+                              size: Size.infinite,
                             ),
-                            DropdownMenuItem(
-                              value: ColorTarget.lineNumber,
-                              child: Text(s.labelLineNumber),
-                            ),
-                            DropdownMenuItem(
-                              value: ColorTarget.ruler,
-                              child: Text(s.labelRuler),
-                            ),
-                            DropdownMenuItem(
-                              value: ColorTarget.grid,
-                              child: Text(s.labelGrid),
-                            ),
-                          ],
-                          onChanged: (value) {
-                            if (value != null) {
-                              setState(() {
-                                _activeColorTarget = value;
-                              });
-                            }
-                          },
-                        ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
-
-                // カラーピッカー (埋め込み)
-                Container(
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey.shade300),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: ColorPickerWidget(
-                    color: currentColor,
-                    onColorChanged: (newColor) {
-                      setState(() {
-                        switch (_activeColorTarget) {
-                          case ColorTarget.background:
-                            _editorBackgroundColor = newColor.value;
-                            break;
-                          case ColorTarget.text:
-                            _editorTextColor = newColor.value;
-                            break;
-                          case ColorTarget.lineNumber:
-                            _lineNumberColor = newColor.value;
-                            break;
-                          case ColorTarget.ruler:
-                            _rulerColor = newColor.value;
-                            break;
-                          case ColorTarget.grid:
-                            _gridColor = newColor.value;
-                            break;
-                        }
-                      });
-                    },
+                // 検索バー & Grep結果のダミー表示 (右上に配置)
+                Positioned(
+                  top: 30,
+                  right: 10,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      // ダミー検索バー
+                      Container(
+                        width: 200,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          border: Border.all(color: Colors.grey),
+                          borderRadius: BorderRadius.circular(4),
+                          boxShadow: [
+                            BoxShadow(color: Colors.black12, blurRadius: 4),
+                          ],
+                        ),
+                        child: Text(
+                          s.labelPreviewSearch,
+                          style: TextStyle(fontSize: _grepFontSize),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      // ダミーGrep結果
+                      Container(
+                        width: 200,
+                        padding: const EdgeInsets.all(4),
+                        color: Colors.grey.shade100,
+                        child: Text.rich(
+                          TextSpan(
+                            children: [
+                              TextSpan(
+                                text: 'file.txt:1: ',
+                                style: TextStyle(
+                                  fontSize: _grepFontSize,
+                                  color: Colors.blue.shade800,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              TextSpan(
+                                text: s.labelPreviewGrep,
+                                style: TextStyle(
+                                  fontFamily: _editorFontController.text,
+                                  fontSize: _grepFontSize,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-
-                const SizedBox(height: 8),
-                // フォントサイズ調整用スライダー (行番号・ルーラー用)
-                if (_activeColorTarget == ColorTarget.lineNumber)
-                  _buildSlider(
-                    label: s.labelFontSize,
-                    value: _lineNumberFontSize,
-                    onChanged: (v) => setState(() => _lineNumberFontSize = v),
-                  ),
-                if (_activeColorTarget == ColorTarget.ruler)
-                  _buildSlider(
-                    label: s.labelFontSize,
-                    value: _rulerFontSize,
-                    onChanged: (v) => setState(() => _rulerFontSize = v),
-                  ),
               ],
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSectionTitle(String title) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8.0),
-      child: Text(
-        title,
-        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-      ),
-    );
-  }
-
-  Widget _buildSlider({
-    required String label,
-    required double value,
-    required ValueChanged<double> onChanged,
-    double min = 8.0,
-    double max = 32.0,
-  }) {
-    return Row(
-      children: [
-        SizedBox(width: 80, child: Text(label)),
+        ),
+        const Divider(height: 1),
+        // --- 2. スクロール設定エリア (下部) ---
         Expanded(
-          child: Slider(
-            value: value,
-            min: min,
-            max: max,
-            divisions: ((max - min) * 2).toInt(),
-            label: value.toStringAsFixed(1),
-            onChanged: onChanged,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // 左カラム: UIフォント & 検索設定
+                    Expanded(
+                      flex: 1,
+                      child: Column(
+                        children: [
+                          _buildFontSettings(
+                            context: context,
+                            title: s.labelUiFont,
+                            fontList: _fontManager.allFonts,
+                            fontController: _uiFontController,
+                            fontSize: _uiFontSize,
+                            isBold: _uiBold,
+                            isItalic: _uiItalic,
+                            onSizeChanged: (v) => _uiFontSize = v,
+                            onBoldChanged: (v) => _uiBold = v ?? false,
+                            onItalicChanged: (v) => _uiItalic = v ?? false,
+                          ),
+                          const SizedBox(height: 16),
+                          _buildSectionTitle(s.labelSearchSettings),
+                          _CompactValueInput(
+                            label: s.labelFontSize,
+                            value: _grepFontSize,
+                            min: 8.0,
+                            max: 24.0,
+                            onChanged: (v) => setState(() => _grepFontSize = v),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    // 右カラム: Gutter & Ruler (色とサイズ)
+                    Expanded(
+                      flex: 1,
+                      child: Column(
+                        children: [
+                          _buildColorSection(
+                            context: context,
+                            title: s.labelGutterRulerColors,
+                            activeTarget: _interfaceColorTarget,
+                            items: [
+                              DropdownMenuItem(
+                                value: ColorTarget.lineNumber,
+                                child: Text(
+                                  s.labelLineNumber,
+                                  style: const TextStyle(fontSize: 11),
+                                ),
+                              ),
+                              DropdownMenuItem(
+                                value: ColorTarget.ruler,
+                                child: Text(
+                                  s.labelRuler,
+                                  style: const TextStyle(fontSize: 11),
+                                ),
+                              ),
+                              DropdownMenuItem(
+                                value: ColorTarget.grid,
+                                child: Text(
+                                  s.labelGrid,
+                                  style: const TextStyle(fontSize: 11),
+                                ),
+                              ),
+                            ],
+                            onTargetChanged: (v) =>
+                                setState(() => _interfaceColorTarget = v),
+                            currentColor: currentColor,
+                            onColorChanged: (color) {
+                              setState(() {
+                                switch (_interfaceColorTarget) {
+                                  case ColorTarget.lineNumber:
+                                    _lineNumberColor = color.value;
+                                    break;
+                                  case ColorTarget.ruler:
+                                    _rulerColor = color.value;
+                                    break;
+                                  case ColorTarget.grid:
+                                    _gridColor = color.value;
+                                    break;
+                                  default:
+                                    break;
+                                }
+                              });
+                            },
+                          ),
+                          const SizedBox(height: 8),
+                          if (_interfaceColorTarget == ColorTarget.lineNumber)
+                            _CompactValueInput(
+                              label: s.labelLineNumberSize,
+                              value: _lineNumberFontSize,
+                              min: 8.0,
+                              max: 24.0,
+                              onChanged: (v) =>
+                                  setState(() => _lineNumberFontSize = v),
+                            ),
+                          if (_interfaceColorTarget == ColorTarget.ruler)
+                            _CompactValueInput(
+                              label: s.labelRulerSize,
+                              value: _rulerFontSize,
+                              min: 8.0,
+                              max: 24.0,
+                              onChanged: (v) =>
+                                  setState(() => _rulerFontSize = v),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
-        SizedBox(width: 40, child: Text(value.toStringAsFixed(1))),
       ],
+    );
+  }
+
+  // --- Tab 3: General ---
+  Widget _buildGeneralTab(BuildContext context) {
+    final s = AppLocalizations.of(context)!;
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionTitle(s.labelCanvasSizeMin),
+          _CompactValueInput(
+            label: s.labelColumns,
+            value: _minColumns.toDouble(),
+            min: 80,
+            max: 1000,
+            divisions: 920,
+            onChanged: (v) => setState(() => _minColumns = v.toInt()),
+          ),
+          const SizedBox(height: 4),
+          _CompactValueInput(
+            label: s.labelLines,
+            value: _minLines.toDouble(),
+            min: 40,
+            max: 1000,
+            divisions: 960,
+            onChanged: (v) => setState(() => _minLines = v.toInt()),
+          ),
+        ],
+      ),
     );
   }
 
@@ -703,75 +919,282 @@ class _SettingsDialogState extends State<SettingsDialog>
   Widget build(BuildContext context) {
     final s = AppLocalizations.of(context)!;
 
+    // 表示するコンテンツとタイトルを決定
+    Widget content;
+    String title;
+    bool showFontScan = false;
+
+    switch (widget.initialTab) {
+      case SettingsTab.textEditor:
+        title = "${s.settingsTabEditor} ${s.labelSettings}";
+        content = _buildTextEditorTab(context);
+        showFontScan = true;
+        break;
+      case SettingsTab.interface:
+        title = "${s.settingsTabUi} ${s.labelSettings}";
+        content = _buildInterfaceTab(context);
+        showFontScan = true;
+        break;
+      case SettingsTab.general:
+        title = "General ${s.labelSettings}";
+        content = _buildGeneralTab(context);
+        break;
+    }
+
+    // ダイアログ全体をドラッグ可能にするためのレイアウト
     return Dialog(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(
-          maxWidth: 850,
-          maxHeight: 550,
-        ), // 横長に拡張
-        child: Column(
-          children: [
-            TabBar(
-              controller: _tabController,
-              tabs: [
-                Tab(text: s.settingsTabEditor),
-                Tab(text: s.settingsTabUi),
-                Tab(text: s.menuView),
-              ],
-            ),
-            Expanded(
-              child: _isLoading
-                  ? Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
+      backgroundColor: Colors.transparent, // 背景透明
+      insetPadding: EdgeInsets.zero, // 画面いっぱいに広げる
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // ドラッグ移動用のTransform
+          Transform.translate(
+            offset: _offset,
+            child: Container(
+              width: 420, // コンパクトな固定幅
+              height: 520, // コンパクトな固定高さ
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(4),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Colors.black26,
+                    blurRadius: 16,
+                    offset: Offset(0, 4),
+                  ),
+                ],
+                border: Border.all(color: Colors.grey.shade400),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // --- タイトルバー (ドラッグハンドル) ---
+                  GestureDetector(
+                    onPanUpdate: (details) {
+                      setState(() => _offset += details.delta);
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        border: Border(
+                          bottom: BorderSide(color: Colors.grey.shade300),
+                        ),
+                        borderRadius: const BorderRadius.vertical(
+                          top: Radius.circular(4),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const CircularProgressIndicator(),
-                          const SizedBox(height: 16),
-                          Text(s.msgScanningFonts),
+                          Text(
+                            title,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          InkWell(
+                            onTap: () => Navigator.of(context).pop(),
+                            child: const Icon(Icons.close, size: 16),
+                          ),
                         ],
                       ),
-                    )
-                  : TabBarView(
-                      controller: _tabController,
+                    ),
+                  ),
+                  // --- コンテンツ ---
+                  Expanded(
+                    child: _isLoading
+                        ? Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const CircularProgressIndicator(),
+                                const SizedBox(height: 16),
+                                Text(
+                                  s.msgScanningFonts,
+                                  style: const TextStyle(fontSize: 11),
+                                ),
+                              ],
+                            ),
+                          )
+                        : content,
+                  ),
+                  const Divider(height: 1),
+                  // --- フッター (ボタン) ---
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        // エディタ設定タブ
-                        _buildEditorTab(context),
-                        // UI設定タブ
-                        _buildUiTab(context),
-                        // 表示設定タブ
-                        _buildViewTab(context),
+                        if (showFontScan)
+                          SizedBox(
+                            height: 24,
+                            child: TextButton.icon(
+                              onPressed: _isLoading ? null : _rescanFonts,
+                              icon: const Icon(Icons.refresh, size: 14),
+                              label: Text(
+                                s.btnScanFonts,
+                                style: const TextStyle(fontSize: 11),
+                              ),
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                ),
+                              ),
+                            ),
+                          )
+                        else
+                          const SizedBox.shrink(),
+                        Row(
+                          children: [
+                            SizedBox(
+                              height: 28,
+                              child: OutlinedButton(
+                                onPressed: () => Navigator.of(context).pop(),
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                ),
+                                child: Text(
+                                  s.labelCancel,
+                                  style: const TextStyle(fontSize: 11),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            SizedBox(
+                              height: 28,
+                              child: FilledButton(
+                                onPressed: _applySettings,
+                                style: FilledButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                ),
+                                child: Text(
+                                  s.labelOK,
+                                  style: const TextStyle(fontSize: 11),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ],
                     ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  TextButton.icon(
-                    onPressed: _isLoading ? null : _rescanFonts,
-                    icon: const Icon(Icons.refresh),
-                    label: Text(s.btnScanFonts),
-                  ),
-                  Row(
-                    children: [
-                      TextButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        child: Text(s.labelCancel),
-                      ),
-                      const SizedBox(width: 8),
-                      FilledButton(
-                        onPressed: _applySettings,
-                        child: Text(s.labelOK),
-                      ),
-                    ],
                   ),
                 ],
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
+    );
+  }
+}
+
+// --- コンパクト数値入力 (スライダーなし) ---
+class _CompactValueInput extends StatefulWidget {
+  final String label;
+  final double value;
+  final double min;
+  final double max;
+  final int? divisions;
+  final ValueChanged<double> onChanged;
+
+  const _CompactValueInput({
+    required this.label,
+    required this.value,
+    required this.min,
+    required this.max,
+    this.divisions,
+    required this.onChanged,
+  });
+
+  @override
+  State<_CompactValueInput> createState() => _CompactValueInputState();
+}
+
+class _CompactValueInputState extends State<_CompactValueInput> {
+  late TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.value.toStringAsFixed(1));
+  }
+
+  @override
+  void didUpdateWidget(covariant _CompactValueInput oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.value != widget.value) {
+      _controller.text = widget.value.toStringAsFixed(1);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _handleSubmitted(String value) {
+    final double? val = double.tryParse(value);
+    if (val != null) {
+      final clamped = val.clamp(widget.min, widget.max);
+      widget.onChanged(clamped);
+      _controller.text = clamped.toStringAsFixed(1);
+    } else {
+      _controller.text = widget.value.toStringAsFixed(1);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 100,
+          child: Text(widget.label, style: const TextStyle(fontSize: 11)),
+        ),
+        const SizedBox(width: 8),
+        SizedBox(
+          width: 60,
+          child: TextField(
+            controller: _controller,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 11),
+            decoration: const InputDecoration(
+              isDense: true,
+              contentPadding: EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+              border: OutlineInputBorder(),
+            ),
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
+            ],
+            onSubmitted: _handleSubmitted,
+            onEditingComplete: () {
+              _handleSubmitted(_controller.text);
+              FocusScope.of(context).unfocus();
+            },
+          ),
+        ),
+      ],
     );
   }
 }

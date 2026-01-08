@@ -87,9 +87,9 @@ class _ColorPickerWidgetState extends State<ColorPickerWidget>
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.palette, size: 16),
-                    const SizedBox(width: 8),
-                    Text(s.labelPresets),
+                    const Icon(Icons.palette, size: 14),
+                    const SizedBox(width: 4),
+                    Text(s.labelPresets, style: const TextStyle(fontSize: 11)),
                   ],
                 ),
               ),
@@ -97,9 +97,9 @@ class _ColorPickerWidgetState extends State<ColorPickerWidget>
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.tune, size: 16),
-                    const SizedBox(width: 8),
-                    Text(s.labelCustom),
+                    const Icon(Icons.tune, size: 14),
+                    const SizedBox(width: 4),
+                    Text(s.labelCustom, style: const TextStyle(fontSize: 11)),
                   ],
                 ),
               ),
@@ -123,9 +123,9 @@ class _ColorPickerWidgetState extends State<ColorPickerWidget>
     return GridView.builder(
       padding: const EdgeInsets.all(8),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 8, // 列数を増やしてタイルを小さく (6 -> 8)
-        crossAxisSpacing: 4,
-        mainAxisSpacing: 4,
+        crossAxisCount: 12, // さらに小さく (8 -> 12)
+        crossAxisSpacing: 2,
+        mainAxisSpacing: 2,
       ),
       itemCount: _presets.length,
       itemBuilder: (context, index) {

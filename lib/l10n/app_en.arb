@@ -72,8 +72,20 @@
   "btnExitWithoutSave": "Exit without Saving",
   "labelRegex": "Regular Expression",
   "labelCaseSensitive": "Case Sensitive",
-  "labelRegex": "Regular Expression",
-  "labelCaseSensitive": "Case Sensitive",
   "labelFindAll": "Find All",
-  "labelGrepResults": "Grep Results"
+  "labelGrepResults": "Grep Results",
+  "labelEditorFont": "Editor Font",
+  "labelUiFont": "UI Font (Menu, Status Bar)",
+  "labelEditorColors": "Editor Colors",
+  "labelBehavior": "Behavior",
+  "labelTabWidth": "Tab Width",
+  "labelNewLineCode": "New Line Code",
+  "labelCursorBlink": "Cursor Blink",
+  "labelEnable": "Enable",
+  "labelSearchSettings": "Search & Grep Settings",
+  "labelGutterRulerColors": "Gutter & Ruler Colors",
+  "labelLineNumberSize": "Line No. Size",
+  "labelRulerSize": "Ruler Size",
+  "labelPreviewSearch": "Search Keyword",
+  "labelPreviewGrep": "Result line..."
 }

@@ -14,7 +14,6 @@ void main() async {
     minimumSize: Size(600, 400), // ウィンドウの最小サイズを設定
     center: true,
     backgroundColor: Colors.transparent,
-    skipTaskbar: false,
     titleBarStyle: TitleBarStyle.normal,
   );
 

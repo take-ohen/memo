@@ -73,5 +73,19 @@
   "labelRegex": "正規表現",
   "labelCaseSensitive": "大文字小文字を区別",
   "labelFindAll": "全て検索",
-  "labelGrepResults": "全体検索結果"
+  "labelGrepResults": "全体検索結果",
+  "labelEditorFont": "エディタフォント",
+  "labelUiFont": "UIフォント (メニュー等)",
+  "labelEditorColors": "エディタ配色",
+  "labelBehavior": "編集",
+  "labelTabWidth": "タブ幅",
+  "labelNewLineCode": "改行コード",
+  "labelCursorBlink": "カーソル点滅",
+  "labelEnable": "有効",
+  "labelSearchSettings": "検索・Grep",
+  "labelGutterRulerColors": "行番号・ルーラー配色",
+  "labelLineNumberSize": "行番号サイズ",
+  "labelRulerSize": "ルーラーサイズ",
+  "labelPreviewSearch": "検索キーワード",
+  "labelPreviewGrep": "検索結果の行..."
 }

@@ -547,6 +547,90 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Grep Results'**
   String get labelGrepResults;
+
+  /// No description provided for @labelEditorFont.
+  ///
+  /// In en, this message translates to:
+  /// **'Editor Font'**
+  String get labelEditorFont;
+
+  /// No description provided for @labelUiFont.
+  ///
+  /// In en, this message translates to:
+  /// **'UI Font (Menu, Status Bar)'**
+  String get labelUiFont;
+
+  /// No description provided for @labelEditorColors.
+  ///
+  /// In en, this message translates to:
+  /// **'Editor Colors'**
+  String get labelEditorColors;
+
+  /// No description provided for @labelBehavior.
+  ///
+  /// In en, this message translates to:
+  /// **'Behavior'**
+  String get labelBehavior;
+
+  /// No description provided for @labelTabWidth.
+  ///
+  /// In en, this message translates to:
+  /// **'Tab Width'**
+  String get labelTabWidth;
+
+  /// No description provided for @labelNewLineCode.
+  ///
+  /// In en, this message translates to:
+  /// **'New Line Code'**
+  String get labelNewLineCode;
+
+  /// No description provided for @labelCursorBlink.
+  ///
+  /// In en, this message translates to:
+  /// **'Cursor Blink'**
+  String get labelCursorBlink;
+
+  /// No description provided for @labelEnable.
+  ///
+  /// In en, this message translates to:
+  /// **'Enable'**
+  String get labelEnable;
+
+  /// No description provided for @labelSearchSettings.
+  ///
+  /// In en, this message translates to:
+  /// **'Search & Grep Settings'**
+  String get labelSearchSettings;
+
+  /// No description provided for @labelGutterRulerColors.
+  ///
+  /// In en, this message translates to:
+  /// **'Gutter & Ruler Colors'**
+  String get labelGutterRulerColors;
+
+  /// No description provided for @labelLineNumberSize.
+  ///
+  /// In en, this message translates to:
+  /// **'Line No. Size'**
+  String get labelLineNumberSize;
+
+  /// No description provided for @labelRulerSize.
+  ///
+  /// In en, this message translates to:
+  /// **'Ruler Size'**
+  String get labelRulerSize;
+
+  /// No description provided for @labelPreviewSearch.
+  ///
+  /// In en, this message translates to:
+  /// **'Search Keyword'**
+  String get labelPreviewSearch;
+
+  /// No description provided for @labelPreviewGrep.
+  ///
+  /// In en, this message translates to:
+  /// **'Result line...'**
+  String get labelPreviewGrep;
 }
 
 class _AppLocalizationsDelegate

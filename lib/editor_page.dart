@@ -1353,11 +1353,11 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                       context: context,
                       builder: (context) => SettingsDialog(
                         controller: _controller,
-                        initialTab: SettingsTab.editor,
+                        initialTab: SettingsTab.textEditor,
                       ),
                     );
                   },
-                  child: MenuAcceleratorLabel(s.menuFont),
+                  child: const MenuAcceleratorLabel('Text Editor...'),
                 ),
                 MenuItemButton(
                   onPressed: () {
@@ -1365,11 +1365,11 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                       context: context,
                       builder: (context) => SettingsDialog(
                         controller: _controller,
-                        initialTab: SettingsTab.ui,
+                        initialTab: SettingsTab.interface,
                       ),
                     );
                   },
-                  child: MenuAcceleratorLabel(s.settingsTabUi),
+                  child: const MenuAcceleratorLabel('Interface...'),
                 ),
                 MenuItemButton(
                   onPressed: () {
@@ -1377,11 +1377,11 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                       context: context,
                       builder: (context) => SettingsDialog(
                         controller: _controller,
-                        initialTab: SettingsTab.view,
+                        initialTab: SettingsTab.general,
                       ),
                     );
                   },
-                  child: MenuAcceleratorLabel(s.menuView),
+                  child: const MenuAcceleratorLabel('General...'),
                 ),
               ],
               child: MenuAcceleratorLabel(s.menuSettings),
