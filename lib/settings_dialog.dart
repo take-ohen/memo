@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dart:async'; // Timer用
 import 'editor_controller.dart';
 import 'font_manager.dart';
 import 'l10n/app_localizations.dart';
@@ -47,6 +48,14 @@ class _SettingsDialogState extends State<SettingsDialog> {
   late double _uiFontSize;
   late bool _uiBold;
   late bool _uiItalic;
+  late TextEditingController _statusFontController;
+  late double _statusFontSize;
+  late bool _statusBold;
+  late bool _statusItalic;
+  late TextEditingController _tabFontController;
+  late double _tabFontSize;
+  late bool _tabBold;
+  late bool _tabItalic;
   late double _grepFontSize;
   // Colors & Sizes for Interface
   late int _lineNumberColor;
@@ -71,6 +80,10 @@ class _SettingsDialogState extends State<SettingsDialog> {
   // ウィンドウ移動用オフセット
   Offset _offset = Offset.zero;
 
+  // プレビュー用カーソル点滅管理
+  Timer? _cursorTimer;
+  bool _previewCursorVisible = true;
+
   @override
   void initState() {
     super.initState();
@@ -83,7 +96,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
     _editorBold = widget.controller.editorBold;
     _editorItalic = widget.controller.editorItalic;
     _tabWidth = widget.controller.tabWidth;
-    _defaultNewLineType = widget.controller.defaultNewLineType;
+    _defaultNewLineType = widget.controller.newLineType;
     _enableCursorBlink = widget.controller.enableCursorBlink;
     _editorBackgroundColor = widget.controller.editorBackgroundColor;
     _editorTextColor = widget.controller.editorTextColor;
@@ -97,6 +110,20 @@ class _SettingsDialogState extends State<SettingsDialog> {
     _uiFontSize = widget.controller.uiFontSize;
     _uiBold = widget.controller.uiBold;
     _uiItalic = widget.controller.uiItalic;
+
+    _statusFontController = TextEditingController(
+      text: widget.controller.statusFontFamily,
+    );
+    _statusFontSize = widget.controller.statusFontSize;
+    _statusBold = widget.controller.statusBold;
+    _statusItalic = widget.controller.statusItalic;
+
+    _tabFontController = TextEditingController(
+      text: widget.controller.tabFontFamily,
+    );
+    _tabFontSize = widget.controller.tabFontSize;
+    _tabBold = widget.controller.tabBold;
+    _tabItalic = widget.controller.tabItalic;
     _grepFontSize = widget.controller.grepFontSize;
 
     _lineNumberColor = widget.controller.lineNumberColor;
@@ -107,6 +134,9 @@ class _SettingsDialogState extends State<SettingsDialog> {
 
     // フォントリストのロード開始
     _loadFonts();
+
+    // プレビュー用カーソル点滅タイマー開始
+    _startCursorTimer();
   }
 
   Future<void> _loadFonts() async {
@@ -121,10 +151,24 @@ class _SettingsDialogState extends State<SettingsDialog> {
     if (mounted) setState(() => _isLoading = false);
   }
 
+  void _startCursorTimer() {
+    _cursorTimer?.cancel();
+    _cursorTimer = Timer.periodic(const Duration(milliseconds: 500), (timer) {
+      if (mounted) {
+        setState(() {
+          _previewCursorVisible = !_previewCursorVisible;
+        });
+      }
+    });
+  }
+
   @override
   void dispose() {
+    _cursorTimer?.cancel();
     _editorFontController.dispose();
     _uiFontController.dispose();
+    _statusFontController.dispose();
+    _tabFontController.dispose();
     super.dispose();
   }
 
@@ -138,6 +182,8 @@ class _SettingsDialogState extends State<SettingsDialog> {
     );
     widget.controller.setTabWidth(_tabWidth);
     widget.controller.setDefaultNewLineType(_defaultNewLineType);
+    widget.controller.setNewLineType(_defaultNewLineType);
+
     widget.controller.setEnableCursorBlink(_enableCursorBlink);
     widget.controller.setEditorColors(_editorBackgroundColor, _editorTextColor);
 
@@ -147,6 +193,18 @@ class _SettingsDialogState extends State<SettingsDialog> {
       _uiFontSize,
       _uiBold,
       _uiItalic,
+    );
+    widget.controller.setStatusFont(
+      _statusFontController.text,
+      _statusFontSize,
+      _statusBold,
+      _statusItalic,
+    );
+    widget.controller.setTabFont(
+      _tabFontController.text,
+      _tabFontSize,
+      _tabBold,
+      _tabItalic,
     );
     widget.controller.setGrepFontSize(_grepFontSize);
     widget.controller.setViewSettings(
@@ -336,6 +394,12 @@ class _SettingsDialogState extends State<SettingsDialog> {
         ? Color(_editorBackgroundColor)
         : Color(_editorTextColor);
 
+    // プレビューでのカーソル表示状態を決定
+    // 点滅設定ONならタイマーに従う、OFFなら常時点灯(true)
+    final bool showCursorInPreview = _enableCursorBlink
+        ? _previewCursorVisible
+        : true;
+
     return Column(
       children: [
         // --- 1. 固定プレビューエリア (上部) ---
@@ -356,16 +420,16 @@ class _SettingsDialogState extends State<SettingsDialog> {
                   charWidth: charWidth,
                   charHeight: charHeight,
                   lineHeight: lineHeight,
-                  showGrid: false,
-                  isOverwriteMode: false,
+                  showGrid: widget.controller.showGrid,
+                  isOverwriteMode: widget.controller.isOverwriteMode,
                   cursorRow: 0,
                   cursorCol: 0,
                   textStyle: previewTextStyle.copyWith(
                     color: Color(_editorTextColor),
                   ),
                   composingText: "",
-                  showCursor: _enableCursorBlink, // 点滅設定を反映
-                  gridColor: Colors.transparent,
+                  showCursor: showCursorInPreview,
+                  gridColor: Color(_gridColor),
                 ),
                 size: Size.infinite,
               ),
@@ -428,23 +492,23 @@ class _SettingsDialogState extends State<SettingsDialog> {
                                   items: [
                                     DropdownMenuItem(
                                       value: 2,
-                                      child: Text(
-                                        "2 ${s.labelColumns}",
-                                        style: const TextStyle(fontSize: 11),
+                                      child: const Text(
+                                        "2",
+                                        style: TextStyle(fontSize: 11),
                                       ),
                                     ),
                                     DropdownMenuItem(
                                       value: 4,
-                                      child: Text(
-                                        "4 ${s.labelColumns}",
-                                        style: const TextStyle(fontSize: 11),
+                                      child: const Text(
+                                        "4",
+                                        style: TextStyle(fontSize: 11),
                                       ),
                                     ),
                                     DropdownMenuItem(
                                       value: 8,
-                                      child: Text(
-                                        "8 ${s.labelColumns}",
-                                        style: const TextStyle(fontSize: 11),
+                                      child: const Text(
+                                        "8",
+                                        style: TextStyle(fontSize: 11),
                                       ),
                                     ),
                                   ],
@@ -557,9 +621,9 @@ class _SettingsDialogState extends State<SettingsDialog> {
                         onColorChanged: (color) {
                           setState(() {
                             if (_editorColorTarget == ColorTarget.background) {
-                              _editorBackgroundColor = color.value;
+                              _editorBackgroundColor = color.toARGB32();
                             } else {
-                              _editorTextColor = color.value;
+                              _editorTextColor = color.toARGB32();
                             }
                           });
                         },
@@ -579,12 +643,26 @@ class _SettingsDialogState extends State<SettingsDialog> {
   Widget _buildInterfaceTab(BuildContext context) {
     final s = AppLocalizations.of(context)!;
     // プレビュー用のメトリクス計算
-    final previewTextStyle = TextStyle(
+    final uiPreviewStyle = TextStyle(
       fontFamily: _uiFontController.text,
       fontSize: _uiFontSize,
+      fontWeight: _uiBold ? FontWeight.bold : FontWeight.normal,
+      fontStyle: _uiItalic ? FontStyle.italic : FontStyle.normal,
+    );
+    final statusPreviewStyle = TextStyle(
+      fontFamily: _statusFontController.text,
+      fontSize: _statusFontSize,
+      fontWeight: _statusBold ? FontWeight.bold : FontWeight.normal,
+      fontStyle: _statusItalic ? FontStyle.italic : FontStyle.normal,
+    );
+    final tabPreviewStyle = TextStyle(
+      fontFamily: _tabFontController.text,
+      fontSize: _tabFontSize,
+      fontWeight: _tabBold ? FontWeight.bold : FontWeight.normal,
+      fontStyle: _tabItalic ? FontStyle.italic : FontStyle.normal,
     );
     final textPainter = TextPainter(
-      text: TextSpan(text: 'M', style: previewTextStyle),
+      text: TextSpan(text: 'M', style: uiPreviewStyle),
       textDirection: TextDirection.ltr,
     );
     textPainter.layout();
@@ -612,7 +690,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
       children: [
         // --- 1. 固定プレビューエリア (上部) ---
         Container(
-          height: 120,
+          height: 180, // タブバー分さらに高さを増やす
           width: double.infinity,
           color: Colors.grey.shade100,
           padding: const EdgeInsets.all(8),
@@ -624,7 +702,50 @@ class _SettingsDialogState extends State<SettingsDialog> {
             child: Stack(
               children: [
                 Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    // --- ダミーメニューバー ---
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      color: Colors.grey.shade200,
+                      child: Row(
+                        children: [
+                          Text("File", style: uiPreviewStyle),
+                          const SizedBox(width: 12),
+                          Text("Edit", style: uiPreviewStyle),
+                          const SizedBox(width: 12),
+                          Text("View", style: uiPreviewStyle),
+                          const SizedBox(width: 12),
+                          Text("Help", style: uiPreviewStyle),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    // --- ダミータブバー ---
+                    Container(
+                      height: 28,
+                      color: Colors.grey.shade300,
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            alignment: Alignment.center,
+                            color: Colors.white,
+                            child: Text("file1.txt", style: tabPreviewStyle),
+                          ),
+                          const SizedBox(width: 1),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            alignment: Alignment.center,
+                            color: Colors.grey.shade300,
+                            child: Text("file2.txt", style: tabPreviewStyle),
+                          ),
+                        ],
+                      ),
+                    ),
                     // ルーラー
                     Container(
                       height: 24,
@@ -640,7 +761,8 @@ class _SettingsDialogState extends State<SettingsDialog> {
                                   charWidth: charWidth,
                                   lineHeight: 24,
                                   textStyle: TextStyle(
-                                    fontFamily: _uiFontController.text,
+                                    fontFamily: _uiFontController
+                                        .text, // ルーラーはUIフォントに従う
                                     fontSize: _rulerFontSize,
                                     color: Color(_rulerColor),
                                   ),
@@ -665,7 +787,8 @@ class _SettingsDialogState extends State<SettingsDialog> {
                                 lineCount: 3,
                                 lineHeight: lineHeight,
                                 textStyle: TextStyle(
-                                  fontFamily: _uiFontController.text,
+                                  fontFamily:
+                                      _uiFontController.text, // 行番号はUIフォントに従う
                                   fontSize: _lineNumberFontSize,
                                   color: Color(_lineNumberColor),
                                 ),
@@ -683,7 +806,8 @@ class _SettingsDialogState extends State<SettingsDialog> {
                                 isOverwriteMode: false,
                                 cursorRow: 0,
                                 cursorCol: 0,
-                                textStyle: previewTextStyle,
+                                textStyle:
+                                    uiPreviewStyle, // エディタ部分はUIフォントプレビューとして表示
                                 composingText: "",
                                 showCursor: false,
                                 gridColor: Color(_gridColor),
@@ -694,11 +818,27 @@ class _SettingsDialogState extends State<SettingsDialog> {
                         ],
                       ),
                     ),
+                    const Divider(height: 1),
+                    // --- ダミーステータスバー ---
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 2,
+                      ),
+                      color: Colors.grey.shade300,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text("Ln 1, Col 1", style: statusPreviewStyle),
+                          Text("UTF-8", style: statusPreviewStyle),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
                 // 検索バー & Grep結果のダミー表示 (右上に配置)
                 Positioned(
-                  top: 30,
+                  top: 40, // メニューバー分下げる
                   right: 10,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
@@ -776,7 +916,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
                         children: [
                           _buildFontSettings(
                             context: context,
-                            title: s.labelUiFont,
+                            title: s.labelMenuBarFont, // ラベル分離
                             fontList: _fontManager.allFonts,
                             fontController: _uiFontController,
                             fontSize: _uiFontSize,
@@ -785,6 +925,32 @@ class _SettingsDialogState extends State<SettingsDialog> {
                             onSizeChanged: (v) => _uiFontSize = v,
                             onBoldChanged: (v) => _uiBold = v ?? false,
                             onItalicChanged: (v) => _uiItalic = v ?? false,
+                          ),
+                          const SizedBox(height: 16),
+                          _buildFontSettings(
+                            context: context,
+                            title: s.labelStatusBarFont, // 新規追加
+                            fontList: _fontManager.allFonts,
+                            fontController: _statusFontController,
+                            fontSize: _statusFontSize,
+                            isBold: _statusBold,
+                            isItalic: _statusItalic,
+                            onSizeChanged: (v) => _statusFontSize = v,
+                            onBoldChanged: (v) => _statusBold = v ?? false,
+                            onItalicChanged: (v) => _statusItalic = v ?? false,
+                          ),
+                          const SizedBox(height: 16),
+                          _buildFontSettings(
+                            context: context,
+                            title: s.labelTabBarFont, // 新規追加
+                            fontList: _fontManager.allFonts,
+                            fontController: _tabFontController,
+                            fontSize: _tabFontSize,
+                            isBold: _tabBold,
+                            isItalic: _tabItalic,
+                            onSizeChanged: (v) => _tabFontSize = v,
+                            onBoldChanged: (v) => _tabBold = v ?? false,
+                            onItalicChanged: (v) => _tabItalic = v ?? false,
                           ),
                           const SizedBox(height: 16),
                           _buildSectionTitle(s.labelSearchSettings),
@@ -838,13 +1004,13 @@ class _SettingsDialogState extends State<SettingsDialog> {
                               setState(() {
                                 switch (_interfaceColorTarget) {
                                   case ColorTarget.lineNumber:
-                                    _lineNumberColor = color.value;
+                                    _lineNumberColor = color.toARGB32();
                                     break;
                                   case ColorTarget.ruler:
-                                    _rulerColor = color.value;
+                                    _rulerColor = color.toARGB32();
                                     break;
                                   case ColorTarget.grid:
-                                    _gridColor = color.value;
+                                    _gridColor = color.toARGB32();
                                     break;
                                   default:
                                     break;
@@ -936,7 +1102,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
         showFontScan = true;
         break;
       case SettingsTab.general:
-        title = "General ${s.labelSettings}";
+        title = "${s.settingsTabGeneral} ${s.labelSettings}";
         content = _buildGeneralTab(context);
         break;
     }
@@ -1163,6 +1329,14 @@ class _CompactValueInputState extends State<_CompactValueInput> {
     }
   }
 
+  // リアルタイム反映用
+  void _handleChanged(String value) {
+    final double? val = double.tryParse(value);
+    if (val != null) {
+      widget.onChanged(val.clamp(widget.min, widget.max));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Row(
@@ -1187,6 +1361,7 @@ class _CompactValueInputState extends State<_CompactValueInput> {
             inputFormatters: [
               FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
             ],
+            onChanged: _handleChanged, // 入力中に即時反映
             onSubmitted: _handleSubmitted,
             onEditingComplete: () {
               _handleSubmitted(_controller.text);

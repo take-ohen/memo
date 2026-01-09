@@ -87,5 +87,16 @@
   "labelLineNumberSize": "行番号サイズ",
   "labelRulerSize": "ルーラーサイズ",
   "labelPreviewSearch": "検索キーワード",
-  "labelPreviewGrep": "検索結果の行..."
+  "labelPreviewGrep": "検索結果の行...",
+  "menuSettingsEditor": "エディタ設定...",
+  "menuSettingsUi": "UI / メニュー設定...",
+  "menuSettingsGeneral": "全般設定...",
+  "labelMenuBarFont": "メニューバーフォント",
+  "labelStatusBarFont": "ステータスバーフォント",
+  "labelTabBarFont": "タブバーフォント",
+  "settingsTabGeneral": "全般",
+  "tooltipNewTab": "新規タブ",
+  "titleConfirmation": "確認",
+  "msgFileAlreadyOpen": "このファイルは既に開かれています。\n読み直しますか？（未保存の変更は破棄されます）",
+  "btnReload": "読み直す"
 }

@@ -1,5 +1,5 @@
 // lib/file_io_helper.dart
-import 'package:file_picker/file_picker.dart';
+import 'package:file_selector/file_selector.dart';
 import 'dart:io';
 
 /// ファイル入出力を抽象化するヘルパークラス
@@ -8,14 +8,20 @@ class FileIOHelper {
   // シングルトン的なインスタンス。テスト時にこれを書き換える。
   static FileIOHelper instance = FileIOHelper();
 
+  // 共通のフィルタ定義
+  final List<XTypeGroup> _typeGroups = [
+    const XTypeGroup(
+      label: 'Text Files',
+      extensions: ['txt', 'md', 'dart', 'json', 'xml', 'log'],
+    ),
+    const XTypeGroup(label: 'All Files'),
+  ];
+
   /// ファイルを開くダイアログを表示し、パスを返す
   Future<String?> pickFilePath() async {
     try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['txt', 'md', 'dart', 'json', 'xml', 'log'],
-      );
-      return result?.files.single.path;
+      final XFile? file = await openFile(acceptedTypeGroups: _typeGroups);
+      return file?.path;
     } catch (e) {
       // エラーハンドリングが必要ならここで行う
       return null;
@@ -25,10 +31,11 @@ class FileIOHelper {
   /// 名前を付けて保存ダイアログを表示し、パスを返す
   Future<String?> saveFilePath({String? initialFileName}) async {
     try {
-      return await FilePicker.platform.saveFile(
-        dialogTitle: '名前を付けて保存',
-        fileName: initialFileName ?? 'memo.txt',
+      final FileSaveLocation? result = await getSaveLocation(
+        acceptedTypeGroups: _typeGroups,
+        suggestedName: initialFileName ?? 'memo.txt',
       );
+      return result?.path;
     } catch (e) {
       return null;
     }

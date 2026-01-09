@@ -661,35 +661,32 @@ class EditorDocument extends ChangeNotifier {
   }
 
   // --- File I/O ---
-  Future<void> openFile() async {
+  Future<void> loadFromFile(String path) async {
     try {
-      String? path = await FileIOHelper.instance.pickFilePath();
-      if (path != null) {
-        String content = await FileIOHelper.instance.readFileAsString(path);
-        saveHistory();
-        currentFilePath = path;
+      String content = await FileIOHelper.instance.readFileAsString(path);
+      saveHistory();
+      currentFilePath = path;
 
-        if (content.contains('\r\n')) {
-          newLineType = NewLineType.crlf;
-        } else if (content.contains('\r')) {
-          newLineType = NewLineType.cr;
-        } else {
-          newLineType = NewLineType.lf;
-        }
-
-        content = content.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
-        lines = content.split('\n');
-        if (lines.isEmpty) {
-          lines = [''];
-        }
-        cursorRow = 0;
-        cursorCol = 0;
-        preferredVisualX = 0;
-        selectionOriginRow = null;
-        isDirty = false;
-        selectionOriginCol = null;
-        notifyListeners();
+      if (content.contains('\r\n')) {
+        newLineType = NewLineType.crlf;
+      } else if (content.contains('\r')) {
+        newLineType = NewLineType.cr;
+      } else {
+        newLineType = NewLineType.lf;
       }
+
+      content = content.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+      lines = content.split('\n');
+      if (lines.isEmpty) {
+        lines = [''];
+      }
+      cursorRow = 0;
+      cursorCol = 0;
+      preferredVisualX = 0;
+      selectionOriginRow = null;
+      isDirty = false;
+      selectionOriginCol = null;
+      notifyListeners();
     } catch (e) {
       debugPrint('Error opening file: $e');
     }

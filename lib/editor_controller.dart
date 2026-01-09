@@ -1,3 +1,5 @@
+// ignore_for_file: curly_braces_in_flow_control_structures
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
@@ -8,7 +10,6 @@ import 'history_manager.dart';
 import 'text_utils.dart';
 import 'search_result.dart';
 import 'grep_result.dart';
-import 'package:free_memo_editor/file_io_helper.dart';
 import 'editor_document.dart'; // Import EditorDocument
 
 /// エディタの状態（データ）のみを管理するコントローラー
@@ -71,6 +72,18 @@ class EditorController extends ChangeNotifier {
   bool _uiBold = false;
   bool _uiItalic = false;
 
+  // --- ステータスバーフォント設定 ---
+  String _statusFontFamily = 'Segoe UI';
+  double _statusFontSize = 12.0;
+  bool _statusBold = false;
+  bool _statusItalic = false;
+
+  // --- タブバーフォント設定 ---
+  String _tabFontFamily = 'Segoe UI';
+  double _tabFontSize = 12.0;
+  bool _tabBold = false;
+  bool _tabItalic = false;
+
   // --- 検索・Grepフォント設定 ---
   double grepFontSize = 12.0;
 
@@ -94,6 +107,14 @@ class EditorController extends ChangeNotifier {
   double get uiFontSize => _uiFontSize;
   bool get uiBold => _uiBold;
   bool get uiItalic => _uiItalic;
+  String get statusFontFamily => _statusFontFamily;
+  double get statusFontSize => _statusFontSize;
+  bool get statusBold => _statusBold;
+  bool get statusItalic => _statusItalic;
+  String get tabFontFamily => _tabFontFamily;
+  double get tabFontSize => _tabFontSize;
+  bool get tabBold => _tabBold;
+  bool get tabItalic => _tabItalic;
   bool get editorBold => _editorBold;
   bool get editorItalic => _editorItalic;
 
@@ -199,6 +220,14 @@ class EditorController extends ChangeNotifier {
     _uiFontSize = prefs.getDouble('uiFontSize') ?? 14.0;
     _uiBold = prefs.getBool('uiBold') ?? false;
     _uiItalic = prefs.getBool('uiItalic') ?? false;
+    _statusFontFamily = prefs.getString('statusFontFamily') ?? 'Segoe UI';
+    _statusFontSize = prefs.getDouble('statusFontSize') ?? 12.0;
+    _statusBold = prefs.getBool('statusBold') ?? false;
+    _statusItalic = prefs.getBool('statusItalic') ?? false;
+    _tabFontFamily = prefs.getString('tabFontFamily') ?? 'Segoe UI';
+    _tabFontSize = prefs.getDouble('tabFontSize') ?? 12.0;
+    _tabBold = prefs.getBool('tabBold') ?? false;
+    _tabItalic = prefs.getBool('tabItalic') ?? false;
     grepFontSize = prefs.getDouble('grepFontSize') ?? 12.0;
     _editorBold = prefs.getBool('editorBold') ?? false;
     _editorItalic = prefs.getBool('editorItalic') ?? false;
@@ -214,6 +243,7 @@ class EditorController extends ChangeNotifier {
     enableCursorBlink = prefs.getBool('enableCursorBlink') ?? true;
 
     // 全ドキュメントに設定を反映
+    // ignore: curly_braces_in_flow_control_structures
     for (var doc in documents) doc.tabWidth = tabWidth;
 
     lineNumberColor = prefs.getInt('lineNumberColor') ?? 0xFF9E9E9E;
@@ -273,6 +303,36 @@ class EditorController extends ChangeNotifier {
     _saveDouble('uiFontSize', size);
     _saveBool('uiBold', bold);
     _saveBool('uiItalic', italic);
+
+    notifyListeners();
+  }
+
+  // ステータスバーフォント設定の更新メソッド
+  void setStatusFont(String family, double size, bool bold, bool italic) {
+    _statusFontFamily = family;
+    _statusFontSize = size;
+    _statusBold = bold;
+    _statusItalic = italic;
+
+    _saveString('statusFontFamily', family);
+    _saveDouble('statusFontSize', size);
+    _saveBool('statusBold', bold);
+    _saveBool('statusItalic', italic);
+
+    notifyListeners();
+  }
+
+  // タブバーフォント設定の更新メソッド
+  void setTabFont(String family, double size, bool bold, bool italic) {
+    _tabFontFamily = family;
+    _tabFontSize = size;
+    _tabBold = bold;
+    _tabItalic = italic;
+
+    _saveString('tabFontFamily', family);
+    _saveDouble('tabFontSize', size);
+    _saveBool('tabBold', bold);
+    _saveBool('tabItalic', italic);
 
     notifyListeners();
   }
@@ -1294,10 +1354,26 @@ class EditorController extends ChangeNotifier {
   }
 
   // --- File I/O ---
-  Future<void> openFile() async {
-    // 新しいタブで開く
+  int findDocumentIndex(String path) {
+    for (int i = 0; i < documents.length; i++) {
+      if (documents[i].currentFilePath == path) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  Future<void> openDocument(String path) async {
     newTab();
-    await activeDocument.openFile();
+    await activeDocument.loadFromFile(path);
+    notifyListeners();
+  }
+
+  Future<void> reloadDocument(int index, String path) async {
+    if (index >= 0 && index < documents.length) {
+      switchTab(index);
+      await activeDocument.loadFromFile(path);
+    }
     notifyListeners();
   }
 

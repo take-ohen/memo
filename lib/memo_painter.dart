@@ -329,7 +329,9 @@ class MemoPainter extends CustomPainter {
     return listEquals(oldDelegate.lines, lines) ||
         oldDelegate.charWidth != charWidth ||
         oldDelegate.charHeight != charHeight ||
+        oldDelegate.lineHeight != lineHeight ||
         oldDelegate.showGrid != showGrid ||
+        oldDelegate.isOverwriteMode != isOverwriteMode ||
         oldDelegate.cursorRow != cursorRow ||
         oldDelegate.cursorCol != cursorCol ||
         oldDelegate.textStyle != textStyle ||
@@ -337,8 +339,9 @@ class MemoPainter extends CustomPainter {
         oldDelegate.selectionOriginCol != selectionOriginCol ||
         oldDelegate.isRectangularSelection != isRectangularSelection ||
         oldDelegate.composingText != composingText ||
-        oldDelegate.searchResults != searchResults || // ★変更検知に追加
-        oldDelegate.currentSearchIndex != currentSearchIndex || // ★変更検知に追加
+        oldDelegate.showCursor != showCursor ||
+        oldDelegate.searchResults != searchResults ||
+        oldDelegate.currentSearchIndex != currentSearchIndex ||
         oldDelegate.gridColor != gridColor;
   }
 }

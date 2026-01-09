@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -12,8 +11,9 @@ import 'l10n/app_localizations.dart';
 import 'memo_painter.dart';
 import 'text_utils.dart';
 import 'history_manager.dart';
+import 'file_io_helper.dart'; // FileIOHelperをインポート
 import 'editor_controller.dart'; // コントローラーをインポート
-import 'package:free_memo_editor/file_io_helper.dart'; // 相対パスからpackageパスへ変更
+// 相対パスからpackageパスへ変更
 import 'editor_document.dart'; // NewLineTypeのためにインポート
 import 'settings_dialog.dart'; // 設定ダイアログをインポート
 import 'grep_result.dart';
@@ -434,7 +434,43 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
   // ファイルを開く
   Future<void> _openFile() async {
-    await _controller.openFile();
+    // 1. パスを取得
+    final String? path = await FileIOHelper.instance.pickFilePath();
+    if (path == null) return;
+
+    // 2. 重複チェック
+    final int index = _controller.findDocumentIndex(path);
+
+    if (index != -1) {
+      // 3. 重複あり -> 確認ダイアログ
+      if (!mounted) return;
+      final s = AppLocalizations.of(context)!;
+
+      final bool? shouldReload = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(s.titleConfirmation),
+          content: Text(s.msgFileAlreadyOpen),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false), // キャンセル
+              child: Text(s.labelCancel),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true), // 読み直す
+              child: Text(s.btnReload),
+            ),
+          ],
+        ),
+      );
+
+      if (shouldReload == true) {
+        await _controller.reloadDocument(index, path);
+      }
+    } else {
+      // 4. 重複なし -> 新規タブ
+      await _controller.openDocument(path);
+    }
   }
 
   // 上書き保存 (Ctrl + S)
@@ -882,6 +918,14 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
   // タブバーの構築
   Widget _buildTabBar() {
+    // タブフォント設定
+    final tabTextStyle = TextStyle(
+      fontFamily: _controller.tabFontFamily,
+      fontSize: _controller.tabFontSize,
+      fontWeight: _controller.tabBold ? FontWeight.bold : FontWeight.normal,
+      fontStyle: _controller.tabItalic ? FontStyle.italic : FontStyle.normal,
+    );
+
     return Container(
       height: 32,
       color: Colors.grey.shade300,
@@ -906,10 +950,9 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                       children: [
                         Text(
                           title,
-                          style: TextStyle(
-                            fontWeight: isActive
-                                ? FontWeight.bold
-                                : FontWeight.normal,
+                          style: tabTextStyle.copyWith(
+                            // アクティブなタブは太字にする（設定で既に太字なら太字のまま）
+                            fontWeight: isActive ? FontWeight.bold : null,
                           ),
                         ),
                         const SizedBox(width: 8),
@@ -927,7 +970,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
           IconButton(
             icon: const Icon(Icons.add, size: 20),
             onPressed: () => _controller.newTab(),
-            tooltip: 'New Tab',
+            tooltip: AppLocalizations.of(context)!.tooltipNewTab,
           ),
         ],
       ),
@@ -1357,7 +1400,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                       ),
                     );
                   },
-                  child: const MenuAcceleratorLabel('Text Editor...'),
+                  child: MenuAcceleratorLabel(s.menuSettingsEditor),
                 ),
                 MenuItemButton(
                   onPressed: () {
@@ -1369,7 +1412,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                       ),
                     );
                   },
-                  child: const MenuAcceleratorLabel('Interface...'),
+                  child: MenuAcceleratorLabel(s.menuSettingsUi),
                 ),
                 MenuItemButton(
                   onPressed: () {
@@ -1381,7 +1424,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                       ),
                     );
                   },
-                  child: const MenuAcceleratorLabel('General...'),
+                  child: MenuAcceleratorLabel(s.menuSettingsGeneral),
                 ),
               ],
               child: MenuAcceleratorLabel(s.menuSettings),
@@ -1466,12 +1509,30 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
   @override
   Widget build(BuildContext context) {
+    // UIフォント設定
+    final uiFontStyle = TextStyle(
+      fontFamily: _controller.uiFontFamily,
+      fontSize: _controller.uiFontSize,
+      fontWeight: _controller.uiBold ? FontWeight.bold : FontWeight.normal,
+      fontStyle: _controller.uiItalic ? FontStyle.italic : FontStyle.normal,
+    );
+
     // UIフォント設定を適用するためのThemeラッパー
     return Theme(
       data: Theme.of(context).copyWith(
-        textTheme: Theme.of(context).textTheme.apply(
-          fontFamily: _controller.uiFontFamily,
-          fontSizeFactor: _controller.uiFontSize / 14.0, // 基準サイズからの倍率
+        // 念のためTextThemeも上書き
+        textTheme: Theme.of(
+          context,
+        ).textTheme.copyWith(labelLarge: uiFontStyle),
+        // メニューボタンのテーマ (ドロップダウン項目用)
+        menuButtonTheme: MenuButtonThemeData(
+          style: ButtonStyle(
+            textStyle: WidgetStateProperty.all(uiFontStyle),
+            // 文字色も明示的に指定して適用を確実にする
+            foregroundColor: WidgetStateProperty.all(Colors.black87),
+            // アイコンサイズもフォントサイズに合わせて調整
+            iconSize: WidgetStateProperty.all(_controller.uiFontSize + 4),
+          ),
         ),
       ),
       child: _buildScaffold(context),
@@ -1675,7 +1736,11 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                                                     .selectionOriginRow,
                                                 selectionOriginCol: _controller
                                                     .selectionOriginCol,
-                                                showCursor: _showCursor,
+                                                showCursor:
+                                                    _controller
+                                                        .enableCursorBlink
+                                                    ? _showCursor
+                                                    : true,
                                                 isRectangularSelection:
                                                     _controller
                                                         .isRectangularSelection,
@@ -1744,56 +1809,55 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
           _buildGrepResultsPanel(),
           // --- ステータスバー ---
           Container(
-            height: 24,
             color: Colors.grey.shade300,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: Row(
-              children: [
-                // 変更状態
-                SizedBox(
-                  width: 80,
-                  child: Text(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            // DefaultTextStyleを使って一括でスタイルを適用する（王道）
+            child: DefaultTextStyle(
+              style: TextStyle(
+                fontFamily: _controller.statusFontFamily,
+                fontSize: _controller.statusFontSize,
+                fontWeight: _controller.statusBold
+                    ? FontWeight.bold
+                    : FontWeight.normal,
+                fontStyle: _controller.statusItalic
+                    ? FontStyle.italic
+                    : FontStyle.normal,
+                color: Colors.black87,
+              ),
+              child: Row(
+                children: [
+                  // 変更状態
+                  Text(
                     _controller.isDirty
                         ? AppLocalizations.of(context)!.statusUnsaved
                         : "",
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                    ),
                   ),
-                ),
-                const Spacer(),
-                // カーソル位置
-                Text(
-                  "Ln ${_controller.cursorRow + 1}, Col ${_controller.cursorCol + 1}",
-                  style: const TextStyle(fontSize: 12),
-                ),
-                const SizedBox(width: 16),
-                // 文字コード
-                Text(
-                  _controller.currentEncoding.name,
-                  style: const TextStyle(fontSize: 12),
-                ),
-                const SizedBox(width: 16),
-                // 改行コード
-                PopupMenuButton<NewLineType>(
-                  tooltip: '改行コード',
-                  child: Text(
-                    _controller.newLineType.label,
-                    style: const TextStyle(fontSize: 12),
+                  const Spacer(),
+                  // カーソル位置
+                  Text(
+                    "Ln ${_controller.cursorRow + 1}, Col ${_controller.cursorCol + 1}",
                   ),
-                  onSelected: (value) {
-                    _controller.setNewLineType(value);
-                  },
-                  itemBuilder: (context) => NewLineType.values.map((type) {
-                    return CheckedPopupMenuItem<NewLineType>(
-                      value: type,
-                      checked: _controller.newLineType == type,
-                      child: Text(type.label),
-                    );
-                  }).toList(),
-                ),
-              ],
+                  const SizedBox(width: 16),
+                  // 文字コード
+                  Text(_controller.currentEncoding.name),
+                  const SizedBox(width: 16),
+                  // 改行コード
+                  PopupMenuButton<NewLineType>(
+                    tooltip: '改行コード',
+                    child: Text(_controller.newLineType.label),
+                    onSelected: (value) {
+                      _controller.setNewLineType(value);
+                    },
+                    itemBuilder: (context) => NewLineType.values.map((type) {
+                      return CheckedPopupMenuItem<NewLineType>(
+                        value: type,
+                        checked: _controller.newLineType == type,
+                        child: Text(type.label),
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
             ),
           ),
         ],

@@ -87,5 +87,16 @@
   "labelLineNumberSize": "Line No. Size",
   "labelRulerSize": "Ruler Size",
   "labelPreviewSearch": "Search Keyword",
-  "labelPreviewGrep": "Result line..."
+  "labelPreviewGrep": "Result line...",
+  "menuSettingsEditor": "Text Editor...",
+  "menuSettingsUi": "Interface...",
+  "menuSettingsGeneral": "General...",
+  "labelMenuBarFont": "Menu Bar Font",
+  "labelStatusBarFont": "Status Bar Font",
+  "labelTabBarFont": "Tab Bar Font",
+  "settingsTabGeneral": "General",
+  "tooltipNewTab": "New Tab",
+  "titleConfirmation": "Confirmation",
+  "msgFileAlreadyOpen": "This file is already open.\nDo you want to reload it? (Unsaved changes will be lost)",
+  "btnReload": "Reload"
 }
