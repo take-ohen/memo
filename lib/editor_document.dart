@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:charset_converter/charset_converter.dart';
 import 'history_manager.dart';
 import 'text_utils.dart';
 import 'search_result.dart';
@@ -37,7 +37,7 @@ class EditorDocument extends ChangeNotifier {
   String? currentFilePath;
   String composingText = "";
   bool isDirty = false;
-  Encoding currentEncoding = utf8;
+  String currentEncoding = 'utf-8';
   NewLineType newLineType = NewLineType.lf;
 
   // 自動生成されたタイトル
@@ -661,9 +661,31 @@ class EditorDocument extends ChangeNotifier {
   }
 
   // --- File I/O ---
-  Future<void> loadFromFile(String path) async {
+  Future<void> loadFromFile(String path, {String? encoding}) async {
     try {
-      String content = await FileIOHelper.instance.readFileAsString(path);
+      final file = File(path);
+      final bytes = await file.readAsBytes();
+      String content;
+
+      if (encoding != null) {
+        // 指定されたエンコーディングで読み込む
+        currentEncoding = encoding;
+        if (currentEncoding.toLowerCase() == 'utf-8') {
+          content = utf8.decode(bytes);
+        } else {
+          content = await CharsetConverter.decode(currentEncoding, bytes);
+        }
+      } else {
+        // 自動判別（簡易）: UTF-8 で試してダメなら Shift_JIS (CP932)
+        try {
+          content = utf8.decode(bytes);
+          currentEncoding = 'utf-8';
+        } catch (_) {
+          currentEncoding = 'shift_jis';
+          content = await CharsetConverter.decode(currentEncoding, bytes);
+        }
+      }
+
       saveHistory();
       currentFilePath = path;
 
@@ -710,7 +732,14 @@ class EditorDocument extends ChangeNotifier {
           separator = '\n';
       }
       String content = lines.join(separator);
-      await FileIOHelper.instance.writeStringToFile(currentFilePath!, content);
+      final file = File(currentFilePath!);
+      List<int> encodedBytes;
+      if (currentEncoding.toLowerCase() == 'utf-8') {
+        encodedBytes = utf8.encode(content);
+      } else {
+        encodedBytes = await CharsetConverter.encode(currentEncoding, content);
+      }
+      await file.writeAsBytes(encodedBytes);
       isDirty = false;
       notifyListeners();
       return currentFilePath;
@@ -740,7 +769,17 @@ class EditorDocument extends ChangeNotifier {
             separator = '\n';
         }
         String content = lines.join(separator);
-        await FileIOHelper.instance.writeStringToFile(outputFile, content);
+        final file = File(outputFile);
+        List<int> encodedBytes;
+        if (currentEncoding.toLowerCase() == 'utf-8') {
+          encodedBytes = utf8.encode(content);
+        } else {
+          encodedBytes = await CharsetConverter.encode(
+            currentEncoding,
+            content,
+          );
+        }
+        await file.writeAsBytes(encodedBytes);
         isDirty = false;
         notifyListeners();
         return outputFile;

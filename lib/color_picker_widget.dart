@@ -130,7 +130,7 @@ class _ColorPickerWidgetState extends State<ColorPickerWidget>
       itemCount: _presets.length,
       itemBuilder: (context, index) {
         final color = _presets[index];
-        final isSelected = widget.color.value == color.value;
+        final isSelected = widget.color.toARGB32() == color.toARGB32();
         return InkWell(
           onTap: () => widget.onColorChanged(color),
           child: Container(

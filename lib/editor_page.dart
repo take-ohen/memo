@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:ui' as ui;
+import 'dart:convert'; // Encoding用
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -1839,7 +1840,59 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                   ),
                   const SizedBox(width: 16),
                   // 文字コード
-                  Text(_controller.currentEncoding.name),
+                  PopupMenuButton<String>(
+                    tooltip: '文字コード',
+                    child: Text(_controller.currentEncoding.toUpperCase()),
+                    onSelected: (encoding) async {
+                      // 読み直すか、保存設定を変更するか確認
+                      final s = AppLocalizations.of(context)!;
+                      final int? result = await showDialog<int>(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          title: const Text('文字コード変更'),
+                          content: Text('"$encoding" に変更します。\n処理を選択してください。'),
+                          actions: [
+                            TextButton(
+                              onPressed: () =>
+                                  Navigator.of(context).pop(0), // キャンセル
+                              child: Text(s.labelCancel),
+                            ),
+                            TextButton(
+                              onPressed: () =>
+                                  Navigator.of(context).pop(1), // 保存設定のみ変更
+                              child: const Text('保存設定のみ変更'),
+                            ),
+                            FilledButton(
+                              onPressed: () =>
+                                  Navigator.of(context).pop(2), // 読み直し
+                              child: const Text('読み直す'),
+                            ),
+                          ],
+                        ),
+                      );
+
+                      if (result == 1) {
+                        _controller.changeEncoding(encoding);
+                      } else if (result == 2) {
+                        await _controller.reloadWithEncoding(encoding);
+                      }
+                    },
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(value: 'utf-8', child: Text('UTF-8')),
+                      const PopupMenuItem(
+                        value: 'shift_jis',
+                        child: Text('Shift_JIS'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'euc-jp',
+                        child: Text('EUC-JP'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'iso-8859-1',
+                        child: Text('Latin1'),
+                      ),
+                    ],
+                  ),
                   const SizedBox(width: 16),
                   // 改行コード
                   PopupMenuButton<NewLineType>(

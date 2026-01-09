@@ -49,7 +49,7 @@ class EditorController extends ChangeNotifier {
   bool get isDirty => activeDocument.isDirty;
   set isDirty(bool value) => activeDocument.isDirty = value;
 
-  Encoding get currentEncoding => activeDocument.currentEncoding;
+  String get currentEncoding => activeDocument.currentEncoding;
   NewLineType get newLineType => activeDocument.newLineType;
 
   // --- 新規設定項目 ---
@@ -243,7 +243,6 @@ class EditorController extends ChangeNotifier {
     enableCursorBlink = prefs.getBool('enableCursorBlink') ?? true;
 
     // 全ドキュメントに設定を反映
-    // ignore: curly_braces_in_flow_control_structures
     for (var doc in documents) doc.tabWidth = tabWidth;
 
     lineNumberColor = prefs.getInt('lineNumberColor') ?? 0xFF9E9E9E;
@@ -1374,6 +1373,22 @@ class EditorController extends ChangeNotifier {
       switchTab(index);
       await activeDocument.loadFromFile(path);
     }
+    notifyListeners();
+  }
+
+  Future<void> reloadWithEncoding(String encoding) async {
+    if (activeDocument.currentFilePath != null) {
+      await activeDocument.loadFromFile(
+        activeDocument.currentFilePath!,
+        encoding: encoding,
+      );
+      notifyListeners();
+    }
+  }
+
+  void changeEncoding(String encoding) {
+    activeDocument.currentEncoding = encoding;
+    activeDocument.isDirty = true;
     notifyListeners();
   }
 

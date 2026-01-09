@@ -114,7 +114,7 @@ class _ColorPickerDialogState extends State<ColorPickerDialog>
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        '#${_currentColor.value.toRadixString(16).toUpperCase().padLeft(8, '0')}',
+                        '#${_currentColor.toARGB32().toRadixString(16).toUpperCase().padLeft(8, '0')}',
                         style: const TextStyle(fontFamily: 'monospace'),
                       ),
                     ],
@@ -153,7 +153,7 @@ class _ColorPickerDialogState extends State<ColorPickerDialog>
       itemCount: _presets.length,
       itemBuilder: (context, index) {
         final color = _presets[index];
-        final isSelected = _currentColor.value == color.value;
+        final isSelected = _currentColor.toARGB32() == color.toARGB32();
         return InkWell(
           onTap: () => _updateColor(color),
           child: Container(

@@ -176,9 +176,9 @@ class MemoPainter extends CustomPainter {
   // ★検索結果のハイライト描画ロジック
   void _drawSearchResults(Canvas canvas) {
     final paintHighlight = Paint()
-      ..color = Colors.yellow.withOpacity(0.4); // 通常のヒット色
+      ..color = Colors.yellow.withValues(alpha: 0.4); // 通常のヒット色
     final paintCurrent = Paint()
-      ..color = Colors.orange.withOpacity(0.6); // 現在選択中のヒット色
+      ..color = Colors.orange.withValues(alpha: 0.6); // 現在選択中のヒット色
 
     for (int i = 0; i < searchResults.length; i++) {
       final result = searchResults[i];
@@ -506,12 +506,12 @@ class MinimapPainter extends CustomPainter {
 
     // ビューポート枠（現在の表示範囲）
     final viewportPaint = Paint()
-      ..color = Colors.blue.withOpacity(0.1)
+      ..color = Colors.blue.withValues(alpha: 0.1)
       ..style = PaintingStyle.fill;
 
     // 枠線
     final viewportBorderPaint = Paint()
-      ..color = Colors.blue.withOpacity(0.3)
+      ..color = Colors.blue.withValues(alpha: 0.3)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.0 / scale; // 縮小されても線幅を保つ
 
