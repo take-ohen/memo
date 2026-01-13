@@ -68,6 +68,8 @@ class _SettingsDialogState extends State<SettingsDialog> {
   // --- 3. General Settings ---
   late int _minColumns;
   late int _minLines;
+  late int _shapePaddingX;
+  late double _shapePaddingY;
 
   // プレビュー用ダミーデータ
   final List<String> _previewLines = [
@@ -103,6 +105,8 @@ class _SettingsDialogState extends State<SettingsDialog> {
 
     _minColumns = widget.controller.minColumns;
     _minLines = widget.controller.minLines;
+    _shapePaddingX = widget.controller.shapePaddingX;
+    _shapePaddingY = widget.controller.shapePaddingY;
 
     _uiFontController = TextEditingController(
       text: widget.controller.uiFontFamily,
@@ -217,6 +221,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
 
     // General
     widget.controller.setCanvasSize(_minColumns, _minLines);
+    widget.controller.setShapePadding(_shapePaddingX, _shapePaddingY);
 
     Navigator.of(context).pop();
   }
@@ -430,6 +435,10 @@ class _SettingsDialogState extends State<SettingsDialog> {
                   composingText: "",
                   showCursor: showCursorInPreview,
                   gridColor: Color(_gridColor),
+                  shapePaddingX: _shapePaddingX,
+                  shapePaddingY: _shapePaddingY,
+                  showDrawings: true,
+                  showAllHandles: widget.controller.showAllHandles,
                 ),
                 size: Size.infinite,
               ),
@@ -811,6 +820,11 @@ class _SettingsDialogState extends State<SettingsDialog> {
                                 composingText: "",
                                 showCursor: false,
                                 gridColor: Color(_gridColor),
+                                shapePaddingX: _shapePaddingX,
+                                shapePaddingY: _shapePaddingY,
+                                showDrawings: true,
+                                showAllHandles:
+                                    widget.controller.showAllHandles,
                               ),
                               size: Size.infinite,
                             ),
@@ -1075,6 +1089,25 @@ class _SettingsDialogState extends State<SettingsDialog> {
             max: 1000,
             divisions: 960,
             onChanged: (v) => setState(() => _minLines = v.toInt()),
+          ),
+          const SizedBox(height: 16),
+          _buildSectionTitle("Shape Drawing Settings"),
+          _CompactValueInput(
+            label: "Padding X (chars)",
+            value: _shapePaddingX.toDouble(),
+            min: 0,
+            max: 10,
+            divisions: 10,
+            onChanged: (v) => setState(() => _shapePaddingX = v.toInt()),
+          ),
+          const SizedBox(height: 4),
+          _CompactValueInput(
+            label: "Padding Y (ratio)",
+            value: _shapePaddingY,
+            min: 0.0,
+            max: 1.0,
+            divisions: 20, // 0.05刻み
+            onChanged: (v) => setState(() => _shapePaddingY = v),
           ),
         ],
       ),

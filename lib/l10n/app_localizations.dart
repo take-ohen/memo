@@ -302,6 +302,12 @@ abstract class AppLocalizations {
   /// **'Show Minimap'**
   String get menuShowMinimap;
 
+  /// No description provided for @menuShowDrawings.
+  ///
+  /// In en, this message translates to:
+  /// **'Show Drawings'**
+  String get menuShowDrawings;
+
   /// No description provided for @menuSettings.
   ///
   /// In en, this message translates to:
@@ -631,6 +637,72 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Result line...'**
   String get labelPreviewGrep;
+
+  /// No description provided for @menuSettingsEditor.
+  ///
+  /// In en, this message translates to:
+  /// **'Text Editor...'**
+  String get menuSettingsEditor;
+
+  /// No description provided for @menuSettingsUi.
+  ///
+  /// In en, this message translates to:
+  /// **'Interface...'**
+  String get menuSettingsUi;
+
+  /// No description provided for @menuSettingsGeneral.
+  ///
+  /// In en, this message translates to:
+  /// **'General...'**
+  String get menuSettingsGeneral;
+
+  /// No description provided for @labelMenuBarFont.
+  ///
+  /// In en, this message translates to:
+  /// **'Menu Bar Font'**
+  String get labelMenuBarFont;
+
+  /// No description provided for @labelStatusBarFont.
+  ///
+  /// In en, this message translates to:
+  /// **'Status Bar Font'**
+  String get labelStatusBarFont;
+
+  /// No description provided for @labelTabBarFont.
+  ///
+  /// In en, this message translates to:
+  /// **'Tab Bar Font'**
+  String get labelTabBarFont;
+
+  /// No description provided for @settingsTabGeneral.
+  ///
+  /// In en, this message translates to:
+  /// **'General'**
+  String get settingsTabGeneral;
+
+  /// No description provided for @tooltipNewTab.
+  ///
+  /// In en, this message translates to:
+  /// **'New Tab'**
+  String get tooltipNewTab;
+
+  /// No description provided for @titleConfirmation.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirmation'**
+  String get titleConfirmation;
+
+  /// No description provided for @msgFileAlreadyOpen.
+  ///
+  /// In en, this message translates to:
+  /// **'This file is already open.\nDo you want to reload it? (Unsaved changes will be lost)'**
+  String get msgFileAlreadyOpen;
+
+  /// No description provided for @btnReload.
+  ///
+  /// In en, this message translates to:
+  /// **'Reload'**
+  String get btnReload;
 }
 
 class _AppLocalizationsDelegate

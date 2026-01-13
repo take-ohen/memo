@@ -11,6 +11,12 @@ import 'text_utils.dart';
 import 'search_result.dart';
 import 'grep_result.dart';
 import 'editor_document.dart'; // Import EditorDocument
+import 'drawing_data.dart'; // Import DrawingData
+
+enum EditorMode {
+  text, // テキスト編集
+  draw, // 図形描画
+}
 
 /// エディタの状態（データ）のみを管理するコントローラー
 class EditorController extends ChangeNotifier {
@@ -91,6 +97,13 @@ class EditorController extends ChangeNotifier {
   bool _editorBold = false;
   bool _editorItalic = false;
 
+  EditorMode currentMode = EditorMode.text; // 現在のエディタモード
+  bool showDrawings = true; // 図形表示フラグ
+  bool showAllHandles = false; // 全ハンドル表示フラグ (Text Mode用)
+  List<List<Offset>> get strokes => activeDocument.strokes;
+  List<DrawingObject> get drawings => activeDocument.drawings;
+  String? get selectedDrawingId => activeDocument.selectedDrawingId;
+
   // --- エディタカラー設定 ---
   int editorBackgroundColor = 0xFFFFFFFF; // 白
   int editorTextColor = 0xFF000000; // 黒
@@ -101,6 +114,11 @@ class EditorController extends ChangeNotifier {
   int rulerColor = 0xFF9E9E9E; // Colors.grey
   double rulerFontSize = 12.0;
   int gridColor = 0x4D9E9E9E; // デフォルト (Colors.grey with alpha ~0.3)
+
+  // --- 図形描画設定 ---
+  int shapePaddingX = 1; // 左右の余白 (文字数)
+  double shapePaddingY = 0.2; // 上下の余白 (行高さ比率)
+  DrawingType currentShapeType = DrawingType.rectangle; // 現在の囲み図形タイプ
 
   // Getters
   String get uiFontFamily => _uiFontFamily;
@@ -157,6 +175,9 @@ class EditorController extends ChangeNotifier {
 
   bool get hasSelection => activeDocument.hasSelection;
 
+  // 図形操作中かどうか (移動 or リサイズ)
+  bool get isInteractingWithDrawing => activeDocument.isInteractingWithDrawing;
+
   EditorController() {
     // 初期ドキュメント作成
     _addNewDocument();
@@ -210,6 +231,7 @@ class EditorController extends ChangeNotifier {
     showLineNumber = prefs.getBool('showLineNumber') ?? true;
     showRuler = prefs.getBool('showRuler') ?? true;
     showMinimap = prefs.getBool('showMinimap') ?? true;
+    showDrawings = prefs.getBool('showDrawings') ?? true;
     tabWidth = prefs.getInt('tabWidth') ?? 4;
     isOverwriteMode = prefs.getBool('isOverwriteMode') ?? false;
     fontFamily = prefs.getString('fontFamily') ?? "BIZ UDゴシック";
@@ -250,6 +272,9 @@ class EditorController extends ChangeNotifier {
     rulerColor = prefs.getInt('rulerColor') ?? 0xFF9E9E9E;
     rulerFontSize = prefs.getDouble('rulerFontSize') ?? 12.0;
     gridColor = prefs.getInt('gridColor') ?? 0x4D9E9E9E;
+
+    shapePaddingX = prefs.getInt('shapePaddingX') ?? 1;
+    shapePaddingY = prefs.getDouble('shapePaddingY') ?? 0.2;
     notifyListeners();
   }
 
@@ -396,6 +421,14 @@ class EditorController extends ChangeNotifier {
     _saveInt('rulerColor', rColor);
     _saveDouble('rulerFontSize', rSize);
     _saveInt('gridColor', gColor);
+    notifyListeners();
+  }
+
+  void setShapePadding(int x, double y) {
+    shapePaddingX = x;
+    shapePaddingY = y;
+    _saveInt('shapePaddingX', x);
+    _saveDouble('shapePaddingY', y);
     notifyListeners();
   }
 
@@ -552,8 +585,57 @@ class EditorController extends ChangeNotifier {
     activeDocument.indent();
   }
 
+  void setMode(EditorMode mode) {
+    currentMode = mode;
+    notifyListeners();
+  }
+
+  void toggleShowAllHandles() {
+    showAllHandles = !showAllHandles;
+    notifyListeners();
+  }
+
+  void toggleShapeType() {
+    if (currentShapeType == DrawingType.rectangle) {
+      currentShapeType = DrawingType.roundedRectangle;
+    } else if (currentShapeType == DrawingType.roundedRectangle) {
+      currentShapeType = DrawingType.oval;
+    } else {
+      currentShapeType = DrawingType.rectangle;
+    }
+    notifyListeners();
+  }
+
+  void startStroke(Offset pos) {
+    activeDocument.startStroke(pos);
+  }
+
+  void updateStroke(Offset pos) {
+    activeDocument.updateStroke(pos);
+  }
+
+  void endStroke(double charWidth, double lineHeight) {
+    activeDocument.endStroke(
+      charWidth,
+      lineHeight,
+      shapePaddingX,
+      shapePaddingY,
+      currentShapeType,
+    );
+  }
+
+  bool isPointOnDrawing(Offset pos, double charWidth, double lineHeight) {
+    return activeDocument.isPointOnDrawing(pos, charWidth, lineHeight);
+  }
+
   void setNewLineType(NewLineType type) {
     activeDocument.newLineType = type;
+    notifyListeners();
+  }
+
+  void toggleShowDrawings() {
+    showDrawings = !showDrawings;
+    _saveBool('showDrawings', showDrawings);
     notifyListeners();
   }
 
@@ -1788,110 +1870,22 @@ class EditorController extends ChangeNotifier {
         return KeyEventResult.handled;
 
       case PhysicalKeyboardKey.enter:
-        saveHistory();
-        deleteSelection();
-
-        // ★修正: 虚空(行データがない場所)での改行対策
-        ensureVirtualSpace(cursorRow, cursorCol);
-
-        final currentLine = lines[cursorRow];
-        final part1 = currentLine.substring(0, cursorCol);
-        final part2 = currentLine.substring(cursorCol);
-        lines[cursorRow] = part1;
-        lines.insert(cursorRow + 1, part2);
-        cursorRow++;
-        cursorCol = 0;
-        isDirty = true;
-        notifyListeners();
+        activeDocument.insertNewLine();
+        preferredVisualX = _calcVisualXForController(cursorRow, cursorCol);
         return KeyEventResult.handled;
 
       case PhysicalKeyboardKey.backspace:
-        saveHistory();
-        if (hasSelection) {
-          deleteSelection();
-          preferredVisualX = _calcVisualXForController(cursorRow, cursorCol);
-          return KeyEventResult.handled;
-        }
-
-        // 行が存在しない(虚空行)場合
-        if (cursorRow >= lines.length) {
-          if (cursorCol > 0) {
-            cursorCol--;
-          } else if (cursorRow > 0) {
-            cursorRow--;
-            // 前の行が存在すればその末尾へ、なければ0へ
-            cursorCol = (cursorRow < lines.length)
-                ? lines[cursorRow].length
-                : 0;
-          }
-          preferredVisualX = _calcVisualXForController(cursorRow, cursorCol);
-          isDirty = true;
-          notifyListeners();
-          return KeyEventResult.handled;
-        }
-
-        final currentLine = lines[cursorRow];
-
-        // カーソルが行末より右にある(行内虚空)場合
-        if (cursorCol > currentLine.length) {
-          cursorCol--;
-        } else {
-          // 実体がある場所での削除
-          if (cursorCol > 0) {
-            final part1 = currentLine.substring(0, cursorCol - 1);
-            final part2 = currentLine.substring(cursorCol);
-            lines[cursorRow] = part1 + part2;
-            cursorCol--;
-          } else if (cursorRow > 0) {
-            final lineToAppend = lines[cursorRow];
-            final prevLineLength = lines[cursorRow - 1].length;
-            lines[cursorRow - 1] += lineToAppend;
-            lines.removeAt(cursorRow);
-            cursorRow--;
-            cursorCol = prevLineLength;
-          }
-        }
+        activeDocument.backspace();
         preferredVisualX = _calcVisualXForController(cursorRow, cursorCol);
-        isDirty = true;
-        notifyListeners();
         return KeyEventResult.handled;
 
       case PhysicalKeyboardKey.delete:
-        saveHistory();
-        if (hasSelection) {
-          deleteSelection();
-          preferredVisualX = _calcVisualXForController(cursorRow, cursorCol);
-          return KeyEventResult.handled;
-        }
-
-        // 行が存在しない場合は何もしない
-        if (cursorRow >= lines.length) return KeyEventResult.handled;
-
-        final currentLine = lines[cursorRow];
-
-        // カーソルが行末以降にある場合
-        if (cursorCol >= currentLine.length) {
-          // 次の行があれば吸い上げる（結合する）
-          if (cursorRow < lines.length - 1) {
-            // 現在行をカーソル位置までスペースで埋める
-            if (cursorCol > currentLine.length) {
-              lines[cursorRow] = currentLine.padRight(cursorCol);
-            }
-            // 次の行を結合
-            lines[cursorRow] += lines[cursorRow + 1];
-            lines.removeAt(cursorRow + 1);
-          }
+        if (currentMode == EditorMode.draw) {
+          deleteSelectedDrawing();
         } else {
-          // 通常の文字削除
-          final part1 = currentLine.substring(0, cursorCol);
-          final part2 = (cursorCol + 1 < currentLine.length)
-              ? currentLine.substring(cursorCol + 1)
-              : '';
-          lines[cursorRow] = part1 + part2;
+          activeDocument.delete();
+          preferredVisualX = _calcVisualXForController(cursorRow, cursorCol);
         }
-        preferredVisualX = _calcVisualXForController(cursorRow, cursorCol);
-        isDirty = true;
-        notifyListeners();
         return KeyEventResult.handled;
 
       case PhysicalKeyboardKey.insert:
@@ -1912,31 +1906,23 @@ class EditorController extends ChangeNotifier {
     activeDocument.clearSelection();
   }
 
+  /// 図形選択 (Figure Mode用)
+  void trySelectDrawing(
+    Offset localPosition,
+    double charWidth,
+    double lineHeight,
+  ) {
+    activeDocument.trySelectDrawing(localPosition, charWidth, lineHeight);
+  }
+
+  /// 選択中の図形を削除
+  void deleteSelectedDrawing() {
+    activeDocument.deleteSelectedDrawing();
+  }
+
   /// タップ時のカーソル移動処理
   void handleTap(Offset localPosition, double charWidth, double lineHeight) {
-    if (charWidth == 0 || lineHeight == 0) return;
-
-    int clickedVisualX = (localPosition.dx / charWidth).floor();
-    int clickedRow = (localPosition.dy / lineHeight).floor();
-
-    cursorRow = max(0, clickedRow);
-
-    String currentLine = "";
-    if (cursorRow < lines.length) {
-      currentLine = lines[cursorRow];
-    }
-
-    int lineVisualWidth = TextUtils.calcTextWidth(currentLine);
-
-    if (clickedVisualX <= lineVisualWidth) {
-      cursorCol = TextUtils.getColFromVisualX(currentLine, clickedVisualX);
-    } else {
-      int gap = clickedVisualX - lineVisualWidth;
-      cursorCol = currentLine.length + gap;
-    }
-
-    activeDocument.preferredVisualX = clickedVisualX;
-    notifyListeners();
+    activeDocument.handleTap(localPosition, charWidth, lineHeight);
   }
 
   /// ドラッグ開始時の処理
@@ -1944,15 +1930,30 @@ class EditorController extends ChangeNotifier {
     Offset localPosition,
     double charWidth,
     double lineHeight,
-    bool isAltPressed,
-  ) {
+    bool isAltPressed, {
+    required EditorMode mode, // モード引数を追加
+  }) {
     activeDocument.handlePanStart(
       localPosition,
       charWidth,
       lineHeight,
       isAltPressed,
+      isFigureMode: mode == EditorMode.draw,
     );
-    notifyListeners();
+  }
+
+  /// ドラッグ中の処理 (リサイズ or 移動 or 選択)
+  void handlePanUpdate(
+    Offset localPosition,
+    double charWidth,
+    double lineHeight,
+  ) {
+    activeDocument.handlePanUpdate(localPosition, charWidth, lineHeight);
+  }
+
+  /// ドラッグ終了時の処理
+  void handlePanEnd() {
+    activeDocument.handlePanEnd();
   }
 
   // --- Input & State Management (Step 3) ---

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'dart:math';
 import 'text_utils.dart'; // ★作成した便利関数をインポート
 import 'search_result.dart'; // ★検索結果クラスをインポート
+import 'drawing_data.dart'; // ★図形データクラスをインポート
 
 class MemoPainter extends CustomPainter {
   final List<String> lines;
@@ -22,6 +23,12 @@ class MemoPainter extends CustomPainter {
   final List<SearchResult> searchResults; // ★検索結果リスト
   final int currentSearchIndex; // ★現在の検索結果インデックス
   final Color gridColor; // ★グリッド色
+  final List<DrawingObject> drawings; // ★図形リスト
+  final String? selectedDrawingId; // ★選択中の図形ID
+  final int shapePaddingX; // ★図形パディングX (文字数)
+  final double shapePaddingY; // ★図形パディングY (行高さ比率)
+  final bool showDrawings; // ★図形表示フラグ
+  final bool showAllHandles; // ★全ハンドル表示フラグ
 
   MemoPainter({
     required this.lines,
@@ -41,6 +48,12 @@ class MemoPainter extends CustomPainter {
     this.searchResults = const [], // ★初期値は空
     this.currentSearchIndex = -1, // ★初期値は-1
     required this.gridColor,
+    this.drawings = const [], // ★初期値は空
+    this.selectedDrawingId, // ★初期値はnull
+    required this.shapePaddingX,
+    required this.shapePaddingY,
+    required this.showDrawings,
+    required this.showAllHandles,
   });
 
   @override
@@ -170,6 +183,13 @@ class MemoPainter extends CustomPainter {
           cursorPaint,
         );
       }
+    }
+
+    // --------------------------------------------------------
+    // 5. 図形の描画 (最前面)
+    // --------------------------------------------------------
+    if (showDrawings) {
+      _drawDrawings(canvas);
     }
   }
 
@@ -324,6 +344,139 @@ class MemoPainter extends CustomPainter {
     return TextUtils.calcTextWidth(textBefore) * charWidth;
   }
 
+  // ★図形描画ロジック
+  void _drawDrawings(Canvas canvas) {
+    for (final drawing in drawings) {
+      final paint = Paint()
+        ..color = drawing.color
+        ..strokeWidth = drawing.strokeWidth
+        ..style = PaintingStyle.stroke;
+
+      // AnchorPoint -> Offset 変換
+      final List<Offset> points = drawing.points
+          .map((p) => _resolveAnchor(p))
+          .toList();
+
+      if (points.isEmpty) continue;
+
+      // 図形タイプごとの描画
+      switch (drawing.type) {
+        case DrawingType.line:
+          if (points.length >= 2) {
+            canvas.drawLine(points[0], points[1], paint);
+          }
+          break;
+        case DrawingType.rectangle:
+          if (points.length >= 2) {
+            final rect = Rect.fromPoints(points[0], points[1]);
+            canvas.drawRect(rect, paint);
+          }
+          break;
+        case DrawingType.oval:
+          if (points.length >= 2) {
+            final rect = Rect.fromPoints(points[0], points[1]);
+            canvas.drawOval(rect, paint);
+          }
+          break;
+        case DrawingType.roundedRectangle:
+          if (points.length >= 2) {
+            final rect = Rect.fromPoints(points[0], points[1]);
+            canvas.drawRRect(
+              RRect.fromRectAndRadius(rect, const Radius.circular(8)),
+              paint,
+            );
+          }
+          break;
+        case DrawingType.freehand:
+          if (points.length > 1) {
+            for (int i = 0; i < points.length - 1; i++) {
+              canvas.drawLine(points[i], points[i + 1], paint);
+            }
+          }
+          break;
+      }
+
+      // 選択中ならハンドルを描画
+      if (drawing.id == selectedDrawingId || showAllHandles) {
+        _drawHandles(canvas, points, drawing.type);
+      }
+    }
+  }
+
+  // ★ハンドル描画ロジック
+  void _drawHandles(Canvas canvas, List<Offset> points, DrawingType type) {
+    final paint = Paint()..color = Colors.blue;
+    const double size = 8.0;
+    const double halfSize = size / 2;
+
+    // パディング分(ピクセル)を計算
+    final double padPixelX = shapePaddingX * charWidth;
+    final double padPixelY = shapePaddingY * lineHeight;
+
+    // 線やフリーハンドは中心に描画（内側という概念が曖昧なため）
+    if (type == DrawingType.line ||
+        type == DrawingType.freehand ||
+        points.length < 2) {
+      for (final point in points) {
+        canvas.drawRect(
+          Rect.fromCenter(center: point, width: size, height: size),
+          paint,
+        );
+      }
+      return;
+    }
+
+    // 矩形系は枠の内側にハンドルを寄せる
+    // さらにパディング分も考慮して内側へずらす
+    final p1 = points[0];
+    final p2 = points[1];
+
+    // P1のハンドル (相手の点に向かってずらす)
+    double dx1 = (p1.dx < p2.dx)
+        ? (halfSize + padPixelX)
+        : -(halfSize + padPixelX);
+    double dy1 = (p1.dy < p2.dy)
+        ? (halfSize + padPixelY)
+        : -(halfSize + padPixelY);
+    canvas.drawRect(
+      Rect.fromCenter(center: p1 + Offset(dx1, dy1), width: size, height: size),
+      paint,
+    );
+
+    // P2のハンドル
+    double dx2 = (p2.dx < p1.dx)
+        ? (halfSize + padPixelX)
+        : -(halfSize + padPixelX);
+    double dy2 = (p2.dy < p1.dy)
+        ? (halfSize + padPixelY)
+        : -(halfSize + padPixelY);
+    canvas.drawRect(
+      Rect.fromCenter(center: p2 + Offset(dx2, dy2), width: size, height: size),
+      paint,
+    );
+  }
+
+  // ★AnchorPoint -> Offset 変換 (MemoPainter内での簡易実装)
+  Offset _resolveAnchor(AnchorPoint anchor) {
+    // 行が存在しない場合のガード
+    String line = (anchor.row < lines.length) ? lines[anchor.row] : "";
+
+    // Y座標: 行番号 * 行高さ + 相対オフセット
+    double y = (anchor.row + anchor.dy) * lineHeight;
+
+    // X座標: 文字列幅(px) + 相対オフセット
+    // 文字列幅の計算
+    String textBefore = "";
+    if (anchor.col <= line.length) {
+      textBefore = line.substring(0, anchor.col);
+    } else {
+      textBefore = line + (' ' * (anchor.col - line.length));
+    }
+    double x = (TextUtils.calcTextWidth(textBefore) + anchor.dx) * charWidth;
+
+    return Offset(x, y);
+  }
+
   @override
   bool shouldRepaint(covariant MemoPainter oldDelegate) {
     return listEquals(oldDelegate.lines, lines) ||
@@ -342,7 +495,13 @@ class MemoPainter extends CustomPainter {
         oldDelegate.showCursor != showCursor ||
         oldDelegate.searchResults != searchResults ||
         oldDelegate.currentSearchIndex != currentSearchIndex ||
-        oldDelegate.gridColor != gridColor;
+        oldDelegate.gridColor != gridColor ||
+        !listEquals(oldDelegate.drawings, drawings) || // ★図形の変更検知
+        oldDelegate.selectedDrawingId != selectedDrawingId || // ★選択状態の変更検知
+        oldDelegate.shapePaddingX != shapePaddingX ||
+        oldDelegate.shapePaddingY != shapePaddingY ||
+        oldDelegate.showDrawings != showDrawings ||
+        oldDelegate.showAllHandles != showAllHandles;
   }
 }
 

@@ -33,6 +33,7 @@
   "menuShowLineNumbers": "Show Line Numbers",
   "menuShowRuler": "Show Column Ruler",
   "menuShowMinimap": "Show Minimap",
+  "menuShowDrawings": "Show Drawings",
   "menuSettings": "Settings",
   "menuFont": "Font...",
   "menuHelp": "Help",

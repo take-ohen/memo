@@ -33,6 +33,7 @@
   "menuShowLineNumbers": "行番号を表示",
   "menuShowRuler": "列ルーラーを表示",
   "menuShowMinimap": "ミニマップを表示",
+  "menuShowDrawings": "図形を表示",
   "menuSettings": "設定",
   "menuFont": "フォント...",
   "menuHelp": "ヘルプ",

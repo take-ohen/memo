@@ -10,6 +10,7 @@ import 'dart:async';
 import 'l10n/app_localizations.dart';
 // 分割したファイルをインポート
 import 'memo_painter.dart';
+import 'drawing_painter.dart';
 import 'text_utils.dart';
 import 'history_manager.dart';
 import 'file_io_helper.dart'; // FileIOHelperをインポート
@@ -18,6 +19,7 @@ import 'editor_controller.dart'; // コントローラーをインポート
 import 'editor_document.dart'; // NewLineTypeのためにインポート
 import 'settings_dialog.dart'; // 設定ダイアログをインポート
 import 'grep_result.dart';
+import 'drawing_data.dart'; // DrawingTypeのためにインポート
 
 class EditorPage extends StatefulWidget {
   const EditorPage({super.key});
@@ -53,6 +55,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   // カーソル点滅処理
   Timer? _cursorBlinkTimer;
   bool _showCursor = true; // カーソル表示フラグ
+  MouseCursor _currentMouseCursor = SystemMouseCursors.text; // 現在のマウスカーソル
 
   final ScrollController _horizontalScrollController = ScrollController();
   final ScrollController _verticalScrollController = ScrollController();
@@ -292,6 +295,37 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   // --- REDO (Ctrl+Y) ---
   void _redo() {
     _controller.redo();
+  }
+
+  // マウスホバー時の処理（カーソル形状の切り替え）
+  void _handleHover(PointerHoverEvent event) {
+    // 1. Drawモード: 十字カーソル (図形上は移動カーソル)
+    if (_controller.currentMode == EditorMode.draw) {
+      final bool isHit = _controller.isPointOnDrawing(
+        event.localPosition,
+        _charWidth,
+        _lineHeight,
+      );
+      setState(() {
+        _currentMouseCursor = isHit
+            ? SystemMouseCursors.move
+            : SystemMouseCursors.precise;
+      });
+      return;
+    }
+
+    // 2. Textモード: 常にIビーム (図形は無視)
+    /*
+    final bool isHit = _controller.isPointOnDrawing(
+      event.localPosition,
+      _charWidth,
+      _lineHeight,
+    );
+    */
+
+    setState(() {
+      _currentMouseCursor = SystemMouseCursors.text;
+    });
   }
 
   // キー処理
@@ -973,6 +1007,57 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
             onPressed: () => _controller.newTab(),
             tooltip: AppLocalizations.of(context)!.tooltipNewTab,
           ),
+          IconButton(
+            icon: const Icon(Icons.text_fields),
+            onPressed: () => _controller.setMode(EditorMode.text),
+            tooltip: 'Text Mode',
+            color: _controller.currentMode == EditorMode.text
+                ? Colors.blue
+                : null,
+          ),
+          IconButton(
+            icon: const Icon(Icons.draw),
+            onPressed: () {
+              if (_controller.showDrawings) {
+                _controller.setMode(EditorMode.draw);
+              }
+            },
+            tooltip: 'Draw Mode',
+            color: _controller.currentMode == EditorMode.draw
+                ? Colors.blue
+                : null,
+          ),
+          // --- Text Mode: ハンドル表示切替 ---
+          if (_controller.currentMode == EditorMode.text)
+            IconButton(
+              icon: Icon(
+                _controller.showAllHandles
+                    ? Icons.check_box
+                    : Icons.check_box_outline_blank,
+              ),
+              onPressed: () => _controller.toggleShowAllHandles(),
+              tooltip: 'Show Handles',
+            ),
+          // --- Figure Mode: 削除ボタン ---
+          if (_controller.currentMode == EditorMode.draw)
+            IconButton(
+              icon: const Icon(Icons.delete),
+              onPressed: () => _controller.deleteSelectedDrawing(),
+              tooltip: 'Delete Selected Drawing',
+            ),
+          if (_controller.currentMode == EditorMode.draw)
+            IconButton(
+              icon: Icon(
+                _controller.currentShapeType == DrawingType.rectangle
+                    ? Icons.crop_square
+                    : _controller.currentShapeType ==
+                          DrawingType.roundedRectangle
+                    ? Icons.rounded_corner
+                    : Icons.circle_outlined,
+              ),
+              onPressed: () => _controller.toggleShapeType(),
+              tooltip: 'Toggle Shape (Rect/Oval)',
+            ),
         ],
       ),
     );
@@ -1385,6 +1470,21 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                     ],
                   ),
                 ),
+                MenuItemButton(
+                  onPressed: () => _controller.toggleShowDrawings(),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _controller.showDrawings
+                            ? Icons.check_box
+                            : Icons.check_box_outline_blank,
+                        size: 16,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(s.menuShowDrawings),
+                    ],
+                  ),
+                ),
               ],
               child: MenuAcceleratorLabel(s.menuView),
             ),
@@ -1667,95 +1767,210 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                                       child: SingleChildScrollView(
                                         controller: _horizontalScrollController,
                                         scrollDirection: Axis.horizontal,
-                                        child: GestureDetector(
-                                          onTapDown: (details) {
-                                            _resetCursorBlink();
-                                            _controller.clearSelection();
-                                            _controller.handleTap(
-                                              details.localPosition,
-                                              _charWidth,
-                                              _lineHeight,
-                                            );
-                                            _focusNode.requestFocus();
-                                            WidgetsBinding.instance
-                                                .addPostFrameCallback((_) {
-                                                  _updateImeWindowPosition();
-                                                });
-                                          },
-                                          onPanStart: (details) {
-                                            _resetCursorBlink();
-                                            _controller.handlePanStart(
-                                              details.localPosition,
-                                              _charWidth,
-                                              _lineHeight,
-                                              HardwareKeyboard
-                                                  .instance
-                                                  .isAltPressed,
-                                            );
-                                            _focusNode.requestFocus();
-                                            WidgetsBinding.instance
-                                                .addPostFrameCallback((_) {
-                                                  _updateImeWindowPosition();
-                                                });
-                                          },
-                                          onPanUpdate: (details) {
-                                            _resetCursorBlink();
-                                            _controller.handleTap(
-                                              details.localPosition,
-                                              _charWidth,
-                                              _lineHeight,
-                                            );
-                                            WidgetsBinding.instance
-                                                .addPostFrameCallback((_) {
-                                                  _updateImeWindowPosition();
-                                                });
-                                          },
-                                          child: Container(
-                                            color: Color(
-                                              _controller.editorBackgroundColor,
-                                            ), // 背景色を適用
-                                            width: editorWidth,
-                                            height: editorHeight,
-                                            child: CustomPaint(
-                                              key: _painterKey,
-                                              painter: MemoPainter(
-                                                lines: _controller.lines,
-                                                charWidth: _charWidth,
-                                                charHeight: _charHeight,
-                                                showGrid: _controller.showGrid,
-                                                isOverwriteMode:
-                                                    _controller.isOverwriteMode,
-                                                cursorRow:
-                                                    _controller.cursorRow,
-                                                cursorCol:
-                                                    _controller.cursorCol,
-                                                lineHeight: _lineHeight,
-                                                textStyle: _textStyle,
-                                                composingText:
-                                                    _controller.composingText,
-                                                selectionOriginRow: _controller
-                                                    .selectionOriginRow,
-                                                selectionOriginCol: _controller
-                                                    .selectionOriginCol,
-                                                showCursor:
-                                                    _controller
-                                                        .enableCursorBlink
-                                                    ? _showCursor
-                                                    : true,
-                                                isRectangularSelection:
-                                                    _controller
-                                                        .isRectangularSelection,
-                                                searchResults:
-                                                    _controller.searchResults,
-                                                currentSearchIndex: _controller
-                                                    .currentSearchIndex,
-                                                gridColor: Color(
-                                                  _controller.gridColor,
-                                                ),
-                                              ),
-                                              size: Size.infinite,
-                                              child: Container(
-                                                color: Colors.transparent,
+                                        child: MouseRegion(
+                                          cursor: _currentMouseCursor,
+                                          onHover: _handleHover,
+                                          child: GestureDetector(
+                                            onTapDown: (details) {
+                                              _resetCursorBlink();
+
+                                              if (_controller.currentMode ==
+                                                  EditorMode.draw) {
+                                                // Figureモード: 図形選択のみ
+                                                _controller.trySelectDrawing(
+                                                  details.localPosition,
+                                                  _charWidth,
+                                                  _lineHeight,
+                                                );
+                                              } else {
+                                                // Textモード: テキスト移動のみ
+                                                _controller.clearSelection();
+                                                _controller.handleTap(
+                                                  details.localPosition,
+                                                  _charWidth,
+                                                  _lineHeight,
+                                                );
+                                              }
+
+                                              _focusNode.requestFocus();
+                                              WidgetsBinding.instance
+                                                  .addPostFrameCallback((_) {
+                                                    _updateImeWindowPosition();
+                                                  });
+                                            },
+                                            onPanStart: (details) {
+                                              _resetCursorBlink();
+
+                                              if (_controller.currentMode ==
+                                                  EditorMode.draw) {
+                                                // 図形上なら移動/変形、そうでなければ新規描画
+                                                if (_controller
+                                                    .isPointOnDrawing(
+                                                      details.localPosition,
+                                                      _charWidth,
+                                                      _lineHeight,
+                                                    )) {
+                                                  _controller.handlePanStart(
+                                                    details.localPosition,
+                                                    _charWidth,
+                                                    _lineHeight,
+                                                    HardwareKeyboard
+                                                        .instance
+                                                        .isAltPressed,
+                                                    mode: EditorMode
+                                                        .draw, // ★修正: mode引数を追加
+                                                  );
+                                                } else {
+                                                  _controller.startStroke(
+                                                    details.localPosition,
+                                                  );
+                                                }
+                                              } else {
+                                                // Textモード: テキスト選択
+                                                _controller.handlePanStart(
+                                                  details.localPosition,
+                                                  _charWidth,
+                                                  _lineHeight,
+                                                  HardwareKeyboard
+                                                      .instance
+                                                      .isAltPressed,
+                                                  mode: EditorMode
+                                                      .text, // ★修正: mode引数を追加
+                                                );
+                                              }
+
+                                              _focusNode.requestFocus();
+                                              WidgetsBinding.instance
+                                                  .addPostFrameCallback((_) {
+                                                    _updateImeWindowPosition();
+                                                  });
+                                            },
+                                            onPanUpdate: (details) {
+                                              _resetCursorBlink();
+
+                                              if (_controller.currentMode ==
+                                                  EditorMode.draw) {
+                                                // 移動中なら移動処理、描画中なら描画処理
+                                                if (_controller
+                                                    .isInteractingWithDrawing) {
+                                                  _controller.handlePanUpdate(
+                                                    details.localPosition,
+                                                    _charWidth,
+                                                    _lineHeight,
+                                                  );
+                                                } else {
+                                                  _controller.updateStroke(
+                                                    details.localPosition,
+                                                  );
+                                                }
+                                              } else {
+                                                // Textモード: テキスト選択更新
+                                                _controller.handlePanUpdate(
+                                                  details.localPosition,
+                                                  _charWidth,
+                                                  _lineHeight,
+                                                );
+                                              }
+
+                                              WidgetsBinding.instance
+                                                  .addPostFrameCallback((_) {
+                                                    _updateImeWindowPosition();
+                                                  });
+                                            },
+                                            onPanEnd: (details) {
+                                              if (_controller.currentMode ==
+                                                  EditorMode.draw) {
+                                                if (_controller
+                                                    .isInteractingWithDrawing) {
+                                                  _controller.handlePanEnd();
+                                                } else {
+                                                  _controller.endStroke(
+                                                    _charWidth,
+                                                    _lineHeight,
+                                                  );
+                                                }
+                                              } else {
+                                                _controller.handlePanEnd();
+                                              }
+                                            },
+                                            child: Container(
+                                              color: Color(
+                                                _controller
+                                                    .editorBackgroundColor,
+                                              ), // 背景色を適用
+                                              width: editorWidth,
+                                              height: editorHeight,
+                                              child: Stack(
+                                                children: [
+                                                  CustomPaint(
+                                                    key: _painterKey,
+                                                    painter: MemoPainter(
+                                                      lines: _controller.lines,
+                                                      charWidth: _charWidth,
+                                                      charHeight: _charHeight,
+                                                      showGrid:
+                                                          _controller.showGrid,
+                                                      isOverwriteMode:
+                                                          _controller
+                                                              .isOverwriteMode,
+                                                      cursorRow:
+                                                          _controller.cursorRow,
+                                                      cursorCol:
+                                                          _controller.cursorCol,
+                                                      lineHeight: _lineHeight,
+                                                      textStyle: _textStyle,
+                                                      composingText: _controller
+                                                          .composingText,
+                                                      selectionOriginRow:
+                                                          _controller
+                                                              .selectionOriginRow,
+                                                      selectionOriginCol:
+                                                          _controller
+                                                              .selectionOriginCol,
+                                                      showCursor:
+                                                          _controller
+                                                              .enableCursorBlink
+                                                          ? _showCursor
+                                                          : true,
+                                                      isRectangularSelection:
+                                                          _controller
+                                                              .isRectangularSelection,
+                                                      searchResults: _controller
+                                                          .searchResults,
+                                                      currentSearchIndex:
+                                                          _controller
+                                                              .currentSearchIndex,
+                                                      gridColor: Color(
+                                                        _controller.gridColor,
+                                                      ),
+                                                      drawings:
+                                                          _controller.drawings,
+                                                      selectedDrawingId:
+                                                          _controller
+                                                              .selectedDrawingId,
+                                                      shapePaddingX: _controller
+                                                          .shapePaddingX,
+                                                      shapePaddingY: _controller
+                                                          .shapePaddingY,
+                                                      showDrawings: _controller
+                                                          .showDrawings,
+                                                      showAllHandles:
+                                                          _controller
+                                                              .showAllHandles,
+                                                    ),
+                                                    size: Size.infinite,
+                                                  ),
+                                                  CustomPaint(
+                                                    painter: DrawingPainter(
+                                                      strokes:
+                                                          _controller.strokes,
+                                                      lines: _controller.lines,
+                                                      charWidth: _charWidth,
+                                                      lineHeight: _lineHeight,
+                                                    ),
+                                                    size: Size.infinite,
+                                                  ),
+                                                ],
                                               ),
                                             ),
                                           ),

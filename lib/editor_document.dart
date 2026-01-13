@@ -8,6 +8,7 @@ import 'history_manager.dart';
 import 'text_utils.dart';
 import 'search_result.dart';
 import 'file_io_helper.dart';
+import 'drawing_data.dart';
 
 enum NewLineType {
   lf,
@@ -56,6 +57,25 @@ class EditorDocument extends ChangeNotifier {
   int? selectionOriginRow;
   int? selectionOriginCol;
   bool isRectangularSelection = false;
+
+  // 図形データ (フリーハンドのストローク)
+  // 確定済みの図形 (AnchorPointベース)
+  List<DrawingObject> drawings = [];
+  String? selectedDrawingId; // 選択中の図形ID
+  // 描画中のプレビュー用 (Offsetベース)
+  List<List<Offset>> strokes = [];
+  List<Offset>? _currentStroke;
+
+  // 図形操作用
+  int? _activeHandleIndex; // 操作中のハンドルのインデックス
+  bool _isMovingDrawing = false; // 図形移動中フラグ
+  List<AnchorPoint>? _initialDrawingPoints; // 移動開始時の図形座標（移動量の基準）
+  int? _dragStartRow; // ドラッグ開始時の行
+  int? _dragStartCol; // ドラッグ開始時の列
+
+  // 図形操作中かどうか
+  bool get isInteractingWithDrawing =>
+      _activeHandleIndex != null || _isMovingDrawing;
 
   // 履歴管理
   final HistoryManager historyManager = HistoryManager();
@@ -224,8 +244,386 @@ class EditorDocument extends ChangeNotifier {
 
   // --- Editing Logic ---
 
+  // --- Drawing Logic ---
+
+  void startStroke(Offset pos) {
+    _currentStroke = [pos];
+    strokes.add(_currentStroke!);
+    notifyListeners();
+  }
+
+  void updateStroke(Offset pos) {
+    if (_currentStroke != null) {
+      _currentStroke!.add(pos);
+      notifyListeners();
+    }
+  }
+
+  void endStroke(
+    double charWidth,
+    double lineHeight,
+    int paddingX,
+    double paddingY,
+    DrawingType shapeType,
+  ) {
+    if (_currentStroke == null || _currentStroke!.isEmpty) return;
+
+    // 1. ストロークの外接矩形を計算
+    double minX = double.infinity;
+    double minY = double.infinity;
+    double maxX = -double.infinity;
+    double maxY = -double.infinity;
+
+    for (final p in _currentStroke!) {
+      if (p.dx < minX) minX = p.dx;
+      if (p.dy < minY) minY = p.dy;
+      if (p.dx > maxX) maxX = p.dx;
+      if (p.dy > maxY) maxY = p.dy;
+    }
+
+    // 自動判定: 始点と終点の距離が、外接矩形の対角線に対して離れていれば「直線」
+    final startPoint = _currentStroke!.first;
+    final endPoint = _currentStroke!.last;
+    final distance = (endPoint - startPoint).distance;
+    final diagonal = sqrt(pow(maxX - minX, 2) + pow(maxY - minY, 2));
+
+    if (diagonal > 0 && (distance / diagonal) > 0.3) {
+      _createLine(startPoint, endPoint, charWidth, lineHeight);
+      return;
+    }
+
+    // 2. グリッド吸着 (Snap to Grid)
+    // 行 (Row) の計算
+    // 外接矩形の上下を、最も近い行インデックスに丸める
+    int startRow = (minY / lineHeight).round();
+    if (startRow < 0) startRow = 0;
+    int endRow = (maxY / lineHeight).round() - 1; // 下端が含まれる行
+    if (endRow < startRow) endRow = startRow;
+
+    // 3. テキストコンテンツに基づく列 (VisualX) の補正
+    // まずはラフな範囲 (VisualX) を計算
+    int rawStartVX = (minX / charWidth).floor();
+    int rawEndVX = (maxX / charWidth).ceil();
+
+    int contentMinVX = 999999;
+    int contentMaxVX = -999999;
+    int contentMinRow = 999999;
+    int contentMaxRow = -999999;
+    bool hasContent = false;
+
+    // 指定された行範囲内のテキストを走査し、矩形内にある「文字」の範囲を探す
+    for (int r = startRow; r <= endRow; r++) {
+      if (r >= lines.length) break;
+      String line = lines[r];
+
+      int currentVX = 0;
+      for (int i = 0; i < line.runes.length; i++) {
+        int w = (line.runes.elementAt(i) < 128) ? 1 : 2;
+        int charStartVX = currentVX;
+        int charEndVX = currentVX + w;
+        currentVX += w;
+
+        // 文字の範囲が、ラフな矩形範囲と交差しているか
+        if (charEndVX > rawStartVX && charStartVX < rawEndVX) {
+          // 空白でないかチェック
+          String char = String.fromCharCode(line.runes.elementAt(i));
+          if (char.trim().isNotEmpty) {
+            hasContent = true;
+            if (charStartVX < contentMinVX) contentMinVX = charStartVX;
+            if (charEndVX > contentMaxVX) contentMaxVX = charEndVX;
+            if (r < contentMinRow) contentMinRow = r;
+            if (r > contentMaxRow) contentMaxRow = r;
+          }
+        }
+      }
+    }
+
+    // 文字が見つかったらその範囲に、なければ元のラフな範囲（グリッドスナップ）に合わせる
+    int finalStartVX = hasContent ? contentMinVX : (minX / charWidth).round();
+    int finalEndVX = hasContent ? contentMaxVX : (maxX / charWidth).round();
+
+    // 行範囲もコンテンツに合わせて縮小する
+    if (hasContent) {
+      startRow = contentMinRow;
+      endRow = contentMaxRow;
+    }
+
+    // パディング処理: テキストがある場合、少し広げて余裕を持たせる
+    if (hasContent) {
+      finalStartVX -= paddingX; // 左にpaddingX文字分
+      finalEndVX += paddingX; // 右にpaddingX文字分
+    }
+
+    // 4. AnchorPointの作成
+    // 上辺: 行の上端より paddingY行分 上へ
+    AnchorPoint p1 = _createSnapAnchor(startRow, finalStartVX, dy: -paddingY);
+    // 下辺: 行の下端(lineHeight)より paddingY行分 下へ
+    AnchorPoint p2 = _createSnapAnchor(endRow, finalEndVX, dy: 1.0 + paddingY);
+
+    // 5. DrawingObjectを作成 (指定されたタイプを使用)
+    final newDrawing = DrawingObject(
+      id: DateTime.now().toIso8601String(), // 簡易ID
+      type: shapeType, // 矩形 or 楕円
+      points: [p1, p2],
+      color: Colors.red.withOpacity(0.8),
+      strokeWidth: 2.0,
+    );
+
+    saveHistory(); // 履歴保存
+    drawings.add(newDrawing);
+
+    // 描画中の一時ストロークをクリア
+    _currentStroke = null;
+    strokes.clear();
+    notifyListeners();
+  }
+
+  // 直線生成ロジック
+  void _createLine(
+    Offset start,
+    Offset end,
+    double charWidth,
+    double lineHeight,
+  ) {
+    // 始点・終点を最も近いグリッド交点(行境界・文字境界)にスナップ
+    int startRow = (start.dy / lineHeight).round();
+    int startVX = (start.dx / charWidth).round();
+
+    int endRow = (end.dy / lineHeight).round();
+    int endVX = (end.dx / charWidth).round();
+
+    AnchorPoint p1 = _createSnapAnchor(
+      max(0, startRow),
+      startVX,
+      dy: 0.0, // 行境界に合わせる
+    );
+    AnchorPoint p2 = _createSnapAnchor(
+      max(0, endRow),
+      endVX,
+      dy: 0.0, // 行境界に合わせる
+    );
+
+    final newDrawing = DrawingObject(
+      id: DateTime.now().toIso8601String(),
+      type: DrawingType.line,
+      points: [p1, p2],
+      color: Colors.red.withOpacity(0.8),
+      strokeWidth: 2.0,
+    );
+
+    saveHistory(); // 履歴保存
+    drawings.add(newDrawing);
+    _currentStroke = null;
+    strokes.clear();
+    notifyListeners();
+  }
+
+  // 指定座標に図形があるか判定（UIのカーソル変更用）
+  bool isPointOnDrawing(Offset pos, double charWidth, double lineHeight) {
+    for (int i = drawings.length - 1; i >= 0; i--) {
+      if (_isHit(drawings[i], pos, charWidth, lineHeight)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // --- Eraser Logic ---
+
+  void eraseDrawing(Offset pos, double charWidth, double lineHeight) {
+    // 逆順で走査（上にあるものを優先して消す）
+    for (int i = drawings.length - 1; i >= 0; i--) {
+      final drawing = drawings[i];
+      if (_isHit(drawing, pos, charWidth, lineHeight)) {
+        saveHistory(); // 履歴保存
+        drawings.removeAt(i);
+        notifyListeners();
+        return; // 1回のイベントで1つ消す（ドラッグで連続して消せるようにするため）
+      }
+    }
+  }
+
+  // 選択中の図形を削除
+  void deleteSelectedDrawing() {
+    if (selectedDrawingId == null) return;
+    saveHistory();
+    drawings.removeWhere((d) => d.id == selectedDrawingId);
+    selectedDrawingId = null;
+    notifyListeners();
+  }
+
+  bool _isHit(
+    DrawingObject drawing,
+    Offset pos,
+    double charWidth,
+    double lineHeight,
+  ) {
+    // 座標復元
+    List<Offset> points = drawing.points
+        .map((p) => _resolveAnchor(p, charWidth, lineHeight))
+        .toList();
+    if (points.isEmpty) return false;
+
+    // 許容誤差 (タッチ操作なども考慮して広めに設定)
+    const double hitThreshold = 10.0;
+
+    if (drawing.type == DrawingType.line) {
+      // 線分との距離判定
+      if (points.length < 2) return false;
+      return _distanceToLineSegment(pos, points.first, points.last) <
+          hitThreshold;
+    } else {
+      // 矩形範囲判定
+      if (points.length < 2) return false;
+      final rect = Rect.fromPoints(points[0], points[1]);
+
+      // 楕円の場合は描画時と同様に少し広げて判定
+      // 矩形・角丸矩形も同様に「枠線付近」のみをヒットとする
+      // (内部が透明なため、中身をクリックしても反応しないようにする)
+      final outer = rect.inflate(hitThreshold);
+      final inner = rect.deflate(hitThreshold);
+
+      // 図形が小さすぎて内側がない場合は、全体をヒットとする
+      if (rect.width < hitThreshold * 2 || rect.height < hitThreshold * 2) {
+        return outer.contains(pos);
+      }
+      // 内部も含めてヒットとする
+      return outer.contains(pos);
+    }
+  }
+
+  // 点Pと線分ABの距離を計算
+  double _distanceToLineSegment(Offset p, Offset a, Offset b) {
+    final double dx = b.dx - a.dx;
+    final double dy = b.dy - a.dy;
+    if (dx == 0 && dy == 0) return (p - a).distance;
+
+    // t = ((P-A) . (B-A)) / |B-A|^2
+    final double t =
+        ((p.dx - a.dx) * dx + (p.dy - a.dy) * dy) / (dx * dx + dy * dy);
+
+    if (t < 0) return (p - a).distance;
+    if (t > 1) return (p - b).distance;
+
+    final Offset projection = Offset(a.dx + t * dx, a.dy + t * dy);
+    return (p - projection).distance;
+  }
+
+  // グリッド吸着用のAnchorPoint作成ヘルパー
+  AnchorPoint _createSnapAnchor(int row, int visualX, {double dy = 0.0}) {
+    // 行が存在しない場合でも、論理的な位置として保持する
+    String line = "";
+    if (row < lines.length) {
+      line = lines[row];
+    }
+
+    // 修正: 行末より右側（虚空）の計算を追加
+    int lineVisualWidth = TextUtils.calcTextWidth(line);
+    int col;
+    if (visualX <= lineVisualWidth) {
+      col = TextUtils.getColFromVisualX(line, visualX);
+    } else {
+      // 行末より右にある場合は、差分をそのまま加算
+      col = line.length + (visualX - lineVisualWidth);
+    }
+
+    // dx, dy を 0 にすることでグリッドに吸着させる
+    // dyは行高さに対する比率として保存する (例: -0.2 や 1.2)
+    return AnchorPoint(row: row, col: col, dx: 0.0, dy: dy);
+  }
+
+  // 座標変換ロジック: Offset(px) -> AnchorPoint(row, col, dx, dy)
+  AnchorPoint _convertToAnchor(Offset p, double charWidth, double lineHeight) {
+    // 行番号
+    int row = (p.dy / lineHeight).floor();
+    if (row < 0) row = 0;
+
+    // 行内オフセットY
+    // ピクセルではなく比率(0.0~1.0)で保存
+    double dy = (p.dy - (row * lineHeight)) / lineHeight;
+
+    // 行テキスト取得
+    String line = "";
+    if (row < lines.length) {
+      line = lines[row];
+    }
+
+    // 文字位置(col)計算
+    int visualX = (p.dx / charWidth).floor();
+    int col = TextUtils.getColFromVisualX(line, visualX);
+
+    // 文字位置からのオフセットX計算 (正確な文字の開始位置からの差分)
+    String textBefore = "";
+    if (col <= line.length) {
+      textBefore = line.substring(0, col);
+    } else {
+      textBefore = line + (' ' * (col - line.length));
+    }
+    double charStartX = TextUtils.calcTextWidth(textBefore) * charWidth;
+    // ピクセルではなく比率で保存
+    double dx = (p.dx - charStartX) / charWidth;
+
+    return AnchorPoint(row: row, col: col, dx: dx, dy: dy);
+  }
+
+  // AnchorPoint -> Offset 変換ロジック (当たり判定用)
+  Offset _resolveAnchor(
+    AnchorPoint anchor,
+    double charWidth,
+    double lineHeight,
+  ) {
+    // 比率(dy) * 行高さ(lineHeight) でピクセルに戻す
+    double y = anchor.row * lineHeight + (anchor.dy * lineHeight);
+
+    String line = "";
+    if (anchor.row < lines.length) {
+      line = lines[anchor.row];
+    }
+
+    String textBefore = "";
+    if (anchor.col <= line.length) {
+      textBefore = line.substring(0, anchor.col);
+    } else {
+      textBefore = line + (' ' * (anchor.col - line.length));
+    }
+
+    // 比率(dx) * 文字幅(charWidth) でピクセルに戻す
+    double x =
+        TextUtils.calcTextWidth(textBefore) * charWidth +
+        (anchor.dx * charWidth);
+    return Offset(x, y);
+  }
+
+  // テキスト挿入に伴うアンカー位置の更新
+  void _updateAnchorsOnInsert(int row, int col, int length) {
+    for (final drawing in drawings) {
+      for (final point in drawing.points) {
+        if (point.row == row && point.col >= col) {
+          point.col += length;
+        }
+      }
+    }
+  }
+
+  // テキスト削除に伴うアンカー位置の更新
+  void _updateAnchorsOnDelete(int row, int col, int length) {
+    for (final drawing in drawings) {
+      for (final point in drawing.points) {
+        if (point.row == row) {
+          if (point.col >= col + length) {
+            point.col -= length;
+          } else if (point.col > col) {
+            // 削除範囲内にあったアンカーは削除開始位置に寄せる
+            point.col = col;
+            point.dx = 0.0; // オフセットもリセット
+          }
+        }
+      }
+    }
+  }
+
   void saveHistory() {
-    historyManager.save(lines, cursorRow, cursorCol);
+    historyManager.save(lines, cursorRow, cursorCol, drawings);
   }
 
   void ensureVirtualSpace(int row, int col) {
@@ -271,8 +669,13 @@ class EditorDocument extends ChangeNotifier {
         } else {
           part2 = "";
         }
+        // 上書きモードでの削除分を反映
+        _updateAnchorsOnDelete(cursorRow, cursorCol, removeLength);
       }
     }
+
+    // 挿入分を反映
+    _updateAnchorsOnInsert(cursorRow, cursorCol, text.length);
 
     lines[cursorRow] = part1 + text + part2;
     cursorCol += text.length;
@@ -340,6 +743,38 @@ class EditorDocument extends ChangeNotifier {
       }
     }
 
+    // 図形更新ロジック (単一行・複数行対応)
+    int deletedLinesCount = endRow - startRow;
+    for (final drawing in drawings) {
+      for (final point in drawing.points) {
+        if (point.row == startRow) {
+          if (point.col >= startCol) {
+            // startRow行目の削除範囲以降 -> startColに寄せる
+            // (単一行削除の場合は削除文字数分詰める)
+            if (startRow == endRow) {
+              point.col -= (endCol - startCol);
+            } else {
+              point.col = startCol;
+              point.dx = 0;
+            }
+          }
+        } else if (point.row > startRow && point.row < endRow) {
+          // 間の行 -> startRow, startCol に寄せる
+          point.row = startRow;
+          point.col = startCol;
+          point.dx = 0;
+        } else if (point.row == endRow) {
+          // endRow行目 -> startRow行目に結合
+          point.row = startRow;
+          // endColより前の部分はstartColに寄せ、それ以降は結合後の位置へシフト
+          point.col = startCol + max(0, point.col - endCol);
+        } else if (point.row > endRow) {
+          // それ以降の行 -> 行詰め
+          point.row -= deletedLinesCount;
+        }
+      }
+    }
+
     cursorRow = startRow;
     cursorCol = startCol;
     isDirty = true;
@@ -373,6 +808,9 @@ class EditorDocument extends ChangeNotifier {
       String part1 = line.substring(0, startCol);
       String part2 = line.substring(endCol);
       lines[i] = part1 + part2;
+
+      // 削除分を反映
+      _updateAnchorsOnDelete(i, startCol, endCol - startCol);
     }
     cursorRow = startRow;
     if (cursorRow < lines.length) {
@@ -418,6 +856,10 @@ class EditorDocument extends ChangeNotifier {
       String part2 = line.substring(endCol);
       lines[i] = part1 + text + part2;
 
+      // 削除と挿入を反映
+      _updateAnchorsOnDelete(i, startCol, endCol - startCol);
+      _updateAnchorsOnInsert(i, startCol, text.length);
+
       if (i == startRow) {
         newCursorCol = part1.length + text.length;
       }
@@ -440,7 +882,7 @@ class EditorDocument extends ChangeNotifier {
   }
 
   void undo() {
-    final entry = historyManager.undo(lines, cursorRow, cursorCol);
+    final entry = historyManager.undo(lines, cursorRow, cursorCol, drawings);
     if (entry != null) {
       isDirty = true;
       _applyHistoryEntry(entry);
@@ -448,7 +890,7 @@ class EditorDocument extends ChangeNotifier {
   }
 
   void redo() {
-    final entry = historyManager.redo(lines, cursorRow, cursorCol);
+    final entry = historyManager.redo(lines, cursorRow, cursorCol, drawings);
     if (entry != null) {
       isDirty = true;
       _applyHistoryEntry(entry);
@@ -459,6 +901,8 @@ class EditorDocument extends ChangeNotifier {
     lines = List.from(entry.lines);
     cursorRow = entry.cursorRow;
     cursorCol = entry.cursorCol;
+    // 図形の復元 (コピーして適用)
+    drawings = entry.drawings.map((d) => d.copy()).toList();
     selectionOriginRow = null;
     selectionOriginCol = null;
     preferredVisualX = calcVisualX(cursorRow, cursorCol);
@@ -496,6 +940,153 @@ class EditorDocument extends ChangeNotifier {
       isDirty = true;
       notifyListeners();
     }
+  }
+
+  // --- キー操作に対応する編集メソッド (図形更新付き) ---
+
+  // 改行挿入
+  void insertNewLine() {
+    saveHistory();
+    deleteSelection();
+    ensureVirtualSpace(cursorRow, cursorCol);
+
+    final currentLine = lines[cursorRow];
+    final part1 = currentLine.substring(0, cursorCol);
+    final part2 = currentLine.substring(cursorCol);
+
+    lines[cursorRow] = part1;
+    lines.insert(cursorRow + 1, part2);
+
+    // 図形の更新
+    for (final drawing in drawings) {
+      for (final point in drawing.points) {
+        if (point.row == cursorRow && point.col >= cursorCol) {
+          // 現在行のカーソル以降にある図形 -> 次の行へ移動
+          point.row += 1;
+          point.col -= cursorCol;
+        } else if (point.row > cursorRow) {
+          // それ以降の行にある図形 -> 行番号+1
+          point.row += 1;
+        }
+      }
+    }
+
+    cursorRow++;
+    cursorCol = 0;
+    isDirty = true;
+    notifyListeners();
+  }
+
+  // Backspace
+  void backspace() {
+    saveHistory();
+    if (hasSelection) {
+      deleteSelection();
+      return;
+    }
+
+    // 虚空行での処理
+    if (cursorRow >= lines.length) {
+      if (cursorCol > 0) {
+        cursorCol--;
+      } else if (cursorRow > 0) {
+        cursorRow--;
+        cursorCol = (cursorRow < lines.length) ? lines[cursorRow].length : 0;
+      }
+      isDirty = true;
+      notifyListeners();
+      return;
+    }
+
+    if (cursorCol > 0) {
+      // 行内削除
+      String line = lines[cursorRow];
+      // カーソルが行末より右にある(行内虚空)場合
+      if (cursorCol > line.length) {
+        cursorCol--;
+      } else {
+        // 簡易的に1文字削除 (サロゲートペア等は考慮していないが既存動作準拠)
+        String part1 = line.substring(0, cursorCol - 1);
+        String part2 = line.substring(cursorCol);
+        lines[cursorRow] = part1 + part2;
+        _updateAnchorsOnDelete(cursorRow, cursorCol - 1, 1);
+        cursorCol--;
+      }
+    } else if (cursorRow > 0) {
+      // 行結合 (前の行へ)
+      String lineToAppend = lines[cursorRow];
+      String prevLine = lines[cursorRow - 1];
+      int prevLineLength = prevLine.length;
+
+      lines[cursorRow - 1] += lineToAppend;
+      lines.removeAt(cursorRow);
+
+      // 図形の更新
+      for (final drawing in drawings) {
+        for (final point in drawing.points) {
+          if (point.row == cursorRow) {
+            // 現在行にある図形 -> 前の行の末尾へ移動
+            point.row -= 1;
+            point.col += prevLineLength;
+          } else if (point.row > cursorRow) {
+            // それ以降の行 -> 行番号-1
+            point.row -= 1;
+          }
+        }
+      }
+      cursorRow--;
+      cursorCol = prevLineLength;
+    }
+    isDirty = true;
+    notifyListeners();
+  }
+
+  // Delete
+  void delete() {
+    saveHistory();
+    if (hasSelection) {
+      deleteSelection();
+      return;
+    }
+    if (cursorRow >= lines.length) return;
+
+    String line = lines[cursorRow];
+    if (cursorCol < line.length) {
+      // 行内削除
+      String part1 = line.substring(0, cursorCol);
+      String part2 = line.substring(cursorCol + 1);
+      lines[cursorRow] = part1 + part2;
+      _updateAnchorsOnDelete(cursorRow, cursorCol, 1);
+    } else if (cursorRow < lines.length - 1) {
+      // 行結合 (次の行を吸い上げる)
+      String nextLine = lines[cursorRow + 1];
+      int currentLength = line.length;
+
+      // カーソルが行末より右にある場合、スペースで埋める
+      if (cursorCol > currentLength) {
+        lines[cursorRow] = line.padRight(cursorCol);
+        currentLength = cursorCol;
+      }
+
+      lines[cursorRow] += nextLine;
+      lines.removeAt(cursorRow + 1);
+
+      // 図形の更新
+      for (final drawing in drawings) {
+        for (final point in drawing.points) {
+          if (point.row == cursorRow + 1) {
+            // 次の行にある図形 -> 現在行の末尾へ移動
+            point.row -= 1;
+            point.col += currentLength;
+          } else if (point.row > cursorRow + 1) {
+            // それ以降の行 -> 行番号-1
+            point.row -= 1;
+          }
+        }
+      }
+    }
+    isDirty = true;
+    notifyListeners();
   }
 
   int calcVisualX(int row, int col) {
@@ -606,6 +1197,8 @@ class EditorDocument extends ChangeNotifier {
   void handleTap(Offset localPosition, double charWidth, double lineHeight) {
     if (charWidth == 0 || lineHeight == 0) return;
 
+    // ★修正: handleTapはテキストカーソル移動専用にする（図形選択は行わない）
+
     int clickedVisualX = (localPosition.dx / charWidth).floor();
     int clickedRow = (localPosition.dy / lineHeight).floor();
 
@@ -629,17 +1222,141 @@ class EditorDocument extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ★新設: 図形選択専用メソッド
+  void trySelectDrawing(
+    Offset localPosition,
+    double charWidth,
+    double lineHeight,
+  ) {
+    for (int i = drawings.length - 1; i >= 0; i--) {
+      if (_isHit(drawings[i], localPosition, charWidth, lineHeight)) {
+        selectedDrawingId = drawings[i].id;
+        notifyListeners();
+        return;
+      }
+    }
+    // 何もヒットしなければ選択解除
+    if (selectedDrawingId != null) {
+      selectedDrawingId = null;
+      notifyListeners();
+    }
+  }
+
   void handlePanStart(
     Offset localPosition,
     double charWidth,
     double lineHeight,
-    bool isAltPressed,
-  ) {
+    bool isAltPressed, {
+    bool isFigureMode = false, // ★モード引数を追加
+  }) {
+    // 1. 図形操作 (Figureモードの場合のみ)
+    if (isFigureMode) {
+      if (selectedDrawingId != null) {
+        final drawingIndex = drawings.indexWhere(
+          (d) => d.id == selectedDrawingId,
+        );
+        if (drawingIndex != -1) {
+          final drawing = drawings[drawingIndex];
+
+          // A. ハンドル判定 (リサイズ)
+          final points = drawing.points
+              .map((p) => _resolveAnchor(p, charWidth, lineHeight))
+              .toList();
+          for (int i = 0; i < points.length; i++) {
+            if ((points[i] - localPosition).distance < 20.0) {
+              _activeHandleIndex = i;
+              return;
+            }
+          }
+
+          // B. 図形本体判定 (移動)
+          if (_isHit(drawing, localPosition, charWidth, lineHeight)) {
+            _isMovingDrawing = true;
+            _initialDrawingPoints = drawing.points
+                .map(
+                  (p) =>
+                      AnchorPoint(row: p.row, col: p.col, dx: p.dx, dy: p.dy),
+                )
+                .toList();
+            _dragStartRow = (localPosition.dy / lineHeight).floor();
+            _dragStartCol = (localPosition.dx / charWidth).round();
+            return;
+          }
+        }
+      }
+      // Figureモードで図形以外をドラッグした場合、何もしない（テキスト選択には行かない）
+      return;
+    }
+
+    // 2. テキスト選択 (Textモードの場合のみ)
     handleTap(localPosition, charWidth, lineHeight);
     selectionOriginRow = cursorRow;
     selectionOriginCol = cursorCol;
     isRectangularSelection = isAltPressed;
     notifyListeners();
+  }
+
+  void handlePanUpdate(
+    Offset localPosition,
+    double charWidth,
+    double lineHeight,
+  ) {
+    // A. リサイズ中
+    if (_activeHandleIndex != null && selectedDrawingId != null) {
+      final index = drawings.indexWhere((d) => d.id == selectedDrawingId);
+      if (index != -1) {
+        // グリッドに吸着させる
+        int row = (localPosition.dy / lineHeight).round();
+        int visualX = (localPosition.dx / charWidth).round();
+
+        // 新しい座標を設定 (dx, dyは0にしてグリッドに合わせる)
+        // ※必要ならここでパディングを考慮した微調整を入れることも可能
+        final newPoint = _createSnapAnchor(max(0, row), visualX, dy: 0.0);
+        drawings[index].points[_activeHandleIndex!] = newPoint;
+        notifyListeners();
+      }
+      return;
+    }
+
+    // B. 移動中
+    if (_isMovingDrawing &&
+        selectedDrawingId != null &&
+        _initialDrawingPoints != null) {
+      final index = drawings.indexWhere((d) => d.id == selectedDrawingId);
+      if (index != -1) {
+        int currentRow = (localPosition.dy / lineHeight).floor();
+        int currentCol = (localPosition.dx / charWidth).round();
+
+        int deltaRow = currentRow - _dragStartRow!;
+        int deltaCol = currentCol - _dragStartCol!;
+
+        // 初期座標に差分を加えて更新
+        for (int i = 0; i < drawings[index].points.length; i++) {
+          final initial = _initialDrawingPoints![i];
+          final current = drawings[index].points[i];
+
+          current.row = max(0, initial.row + deltaRow);
+          current.col = max(0, initial.col + deltaCol);
+          // dx, dy (相対位置) は維持する
+        }
+        notifyListeners();
+      }
+      return;
+    }
+
+    // C. テキスト選択中
+    handleTap(localPosition, charWidth, lineHeight);
+  }
+
+  void handlePanEnd() {
+    if (_activeHandleIndex != null || _isMovingDrawing) {
+      saveHistory(); // 操作完了時に履歴保存
+      _activeHandleIndex = null;
+      _isMovingDrawing = false;
+      _initialDrawingPoints = null;
+      _dragStartRow = null;
+      _dragStartCol = null;
+    }
   }
 
   void updateComposingText(String text) {
@@ -683,6 +1400,21 @@ class EditorDocument extends ChangeNotifier {
         } catch (_) {
           currentEncoding = 'shift_jis';
           content = await CharsetConverter.decode(currentEncoding, bytes);
+        }
+      }
+
+      // 図形データの読み込み
+      drawings = []; // 初期化
+      final drawFile = File(_getDrawFilePath(path));
+      if (await drawFile.exists()) {
+        try {
+          final jsonString = await drawFile.readAsString();
+          final List<dynamic> jsonList = jsonDecode(jsonString);
+          drawings = jsonList
+              .map((e) => DrawingObject.fromJson(e as Map<String, dynamic>))
+              .toList();
+        } catch (e) {
+          debugPrint('Error loading drawing data: $e');
         }
       }
 
@@ -740,6 +1472,10 @@ class EditorDocument extends ChangeNotifier {
         encodedBytes = await CharsetConverter.encode(currentEncoding, content);
       }
       await file.writeAsBytes(encodedBytes);
+
+      // 図形データの保存
+      await _saveDrawings(currentFilePath!);
+
       isDirty = false;
       notifyListeners();
       return currentFilePath;
@@ -780,6 +1516,10 @@ class EditorDocument extends ChangeNotifier {
           );
         }
         await file.writeAsBytes(encodedBytes);
+
+        // 図形データの保存
+        await _saveDrawings(outputFile);
+
         isDirty = false;
         notifyListeners();
         return outputFile;
@@ -788,5 +1528,37 @@ class EditorDocument extends ChangeNotifier {
       debugPrint('Error saving file: $e');
     }
     return null;
+  }
+
+  // 図形ファイルパスの生成 (拡張子を _draw.json に置換)
+  String _getDrawFilePath(String txtPath) {
+    final dotIndex = txtPath.lastIndexOf('.');
+    if (dotIndex != -1) {
+      return '${txtPath.substring(0, dotIndex)}_draw.json';
+    }
+    return '${txtPath}_draw.json';
+  }
+
+  // 図形保存のヘルパーメソッド
+  Future<void> _saveDrawings(String txtPath) async {
+    final drawFile = File(_getDrawFilePath(txtPath));
+    if (drawings.isNotEmpty) {
+      try {
+        final jsonList = drawings.map((d) => d.toJson()).toList();
+        final jsonString = jsonEncode(jsonList);
+        await drawFile.writeAsString(jsonString);
+      } catch (e) {
+        debugPrint('Error saving drawing data: $e');
+      }
+    } else {
+      // 図形がない場合、古いファイルがあれば削除する（ゴミを残さない）
+      if (await drawFile.exists()) {
+        try {
+          await drawFile.delete();
+        } catch (e) {
+          debugPrint('Error deleting drawing file: $e');
+        }
+      }
+    }
   }
 }

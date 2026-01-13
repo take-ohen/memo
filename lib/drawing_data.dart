@@ -1,0 +1,109 @@
+import 'dart:ui';
+
+/// 図形の種類
+enum DrawingType {
+  freehand, // フリーハンド線
+  line, // 直線
+  rectangle, // 矩形
+  oval, // 楕円
+  roundedRectangle, // 角丸矩形
+}
+
+/// テキスト上の論理位置を表すクラス
+/// (行番号, 文字列インデックス) + (微調整オフセット)
+class AnchorPoint {
+  int row; // 行番号 (0-based)
+  int col; // 文字列インデックス (0-based)
+  double dx; // col位置からの相対X座標 (比率: 0.0〜1.0)
+  double dy; // row位置からの相対Y座標 (比率: 0.0〜1.0)
+
+  AnchorPoint({
+    required this.row,
+    required this.col,
+    this.dx = 0.0,
+    this.dy = 0.0,
+  });
+
+  // コピー用
+  AnchorPoint copyWith({int? row, int? col, double? dx, double? dy}) {
+    return AnchorPoint(
+      row: row ?? this.row,
+      col: col ?? this.col,
+      dx: dx ?? this.dx,
+      dy: dy ?? this.dy,
+    );
+  }
+
+  // JSON変換
+  Map<String, dynamic> toJson() => {'row': row, 'col': col, 'dx': dx, 'dy': dy};
+
+  factory AnchorPoint.fromJson(Map<String, dynamic> json) {
+    return AnchorPoint(
+      row: json['row'] as int,
+      col: json['col'] as int,
+      dx: (json['dx'] as num).toDouble(),
+      dy: (json['dy'] as num).toDouble(),
+    );
+  }
+
+  @override
+  String toString() => 'Anchor($row, $col, $dx, $dy)';
+}
+
+/// 1つの図形オブジェクトを表すクラス
+class DrawingObject {
+  final String id;
+  final DrawingType type;
+
+  // 図形を構成する点群
+  // - freehand: ストロークの全点
+  // - line/rectangle: [始点, 終点] の2点
+  final List<AnchorPoint> points;
+
+  // スタイル情報
+  Color color;
+  double strokeWidth;
+
+  DrawingObject({
+    required this.id,
+    required this.type,
+    required this.points,
+    this.color = const Color(0xFFFF0000), // デフォルト赤
+    this.strokeWidth = 2.0,
+  });
+
+  // コピー用 (Undo/Redo時のディープコピーに使用)
+  DrawingObject copy() {
+    return DrawingObject(
+      id: id,
+      type: type,
+      points: points.map((p) => p.copyWith()).toList(),
+      color: color,
+      strokeWidth: strokeWidth,
+    );
+  }
+
+  // 簡易的な矩形範囲取得（当たり判定用などに拡張可能）
+  // Rect get bounds => ...
+
+  // JSON変換
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'type': type.index, // enumはindexで保存
+    'points': points.map((p) => p.toJson()).toList(),
+    'color': color.value, // int値で保存
+    'strokeWidth': strokeWidth,
+  };
+
+  factory DrawingObject.fromJson(Map<String, dynamic> json) {
+    return DrawingObject(
+      id: json['id'] as String,
+      type: DrawingType.values[json['type'] as int],
+      points: (json['points'] as List)
+          .map((e) => AnchorPoint.fromJson(e as Map<String, dynamic>))
+          .toList(),
+      color: Color(json['color'] as int),
+      strokeWidth: (json['strokeWidth'] as num).toDouble(),
+    );
+  }
+}
