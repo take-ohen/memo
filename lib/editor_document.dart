@@ -265,40 +265,58 @@ class EditorDocument extends ChangeNotifier {
     int paddingX,
     double paddingY,
     DrawingType shapeType,
+    Color color,
+    double strokeWidth,
+    LineStyle lineStyle,
+    bool arrowStart,
+    bool arrowEnd,
   ) {
     if (_currentStroke == null || _currentStroke!.isEmpty) return;
 
-    // 1. ストロークの外接矩形を計算
+    final startPoint = _currentStroke!.first;
+    final endPoint = _currentStroke!.last;
+
+    // 線図形 (直線・L字線) の場合
+    if (shapeType == DrawingType.line || shapeType == DrawingType.elbow) {
+      _createLineOrElbow(
+        startPoint,
+        endPoint,
+        charWidth,
+        lineHeight,
+        shapeType,
+        color,
+        strokeWidth,
+        lineStyle,
+        arrowStart,
+        arrowEnd,
+      );
+      return;
+    }
+
+    // --- 囲み図形 (矩形・楕円・角丸) の処理 ---
+
+    // 1. ストローク全体の外接矩形を計算 (テキスト検出用 & 正規化)
     double minX = double.infinity;
-    double minY = double.infinity;
     double maxX = -double.infinity;
+    double minY = double.infinity;
     double maxY = -double.infinity;
 
     for (final p in _currentStroke!) {
       if (p.dx < minX) minX = p.dx;
-      if (p.dy < minY) minY = p.dy;
       if (p.dx > maxX) maxX = p.dx;
+      if (p.dy < minY) minY = p.dy;
       if (p.dy > maxY) maxY = p.dy;
-    }
-
-    // 自動判定: 始点と終点の距離が、外接矩形の対角線に対して離れていれば「直線」
-    final startPoint = _currentStroke!.first;
-    final endPoint = _currentStroke!.last;
-    final distance = (endPoint - startPoint).distance;
-    final diagonal = sqrt(pow(maxX - minX, 2) + pow(maxY - minY, 2));
-
-    if (diagonal > 0 && (distance / diagonal) > 0.3) {
-      _createLine(startPoint, endPoint, charWidth, lineHeight);
-      return;
     }
 
     // 2. グリッド吸着 (Snap to Grid)
     // 行 (Row) の計算
-    // 外接矩形の上下を、最も近い行インデックスに丸める
-    int startRow = (minY / lineHeight).round();
-    if (startRow < 0) startRow = 0;
-    int endRow = (maxY / lineHeight).round() - 1; // 下端が含まれる行
-    if (endRow < startRow) endRow = startRow;
+    // 矩形が少しかかっている行も含めるように floor を使用
+    // 浮動小数点の誤差対策として、微小値を許容する
+    const double epsilon = 0.001;
+    int minRow = ((minY + epsilon) / lineHeight).floor();
+    if (minRow < 0) minRow = 0;
+    int maxRow = ((maxY - epsilon) / lineHeight).floor();
+    if (maxRow < minRow) maxRow = minRow;
 
     // 3. テキストコンテンツに基づく列 (VisualX) の補正
     // まずはラフな範囲 (VisualX) を計算
@@ -312,7 +330,7 @@ class EditorDocument extends ChangeNotifier {
     bool hasContent = false;
 
     // 指定された行範囲内のテキストを走査し、矩形内にある「文字」の範囲を探す
-    for (int r = startRow; r <= endRow; r++) {
+    for (int r = minRow; r <= maxRow; r++) {
       if (r >= lines.length) break;
       String line = lines[r];
 
@@ -339,34 +357,38 @@ class EditorDocument extends ChangeNotifier {
     }
 
     // 文字が見つかったらその範囲に、なければ元のラフな範囲（グリッドスナップ）に合わせる
-    int finalStartVX = hasContent ? contentMinVX : (minX / charWidth).round();
-    int finalEndVX = hasContent ? contentMaxVX : (maxX / charWidth).round();
+    int finalMinVX = hasContent ? contentMinVX : (minX / charWidth).round();
+    int finalMaxVX = hasContent ? contentMaxVX : (maxX / charWidth).round();
+    int finalMinRow = hasContent ? contentMinRow : minRow;
+    int finalMaxRow = hasContent ? contentMaxRow : maxRow;
 
-    // 行範囲もコンテンツに合わせて縮小する
-    if (hasContent) {
-      startRow = contentMinRow;
-      endRow = contentMaxRow;
-    }
+    // 4. 始点・終点への割り当てとパディング適用 (正規化: 常に左上 -> 右下)
+    // min/max を使用して、常に左上を始点、右下を終点とする
+    int startVX = finalMinVX - (hasContent ? paddingX : 0);
+    int endVX = finalMaxVX + (hasContent ? paddingX : 0);
 
-    // パディング処理: テキストがある場合、少し広げて余裕を持たせる
-    if (hasContent) {
-      finalStartVX -= paddingX; // 左にpaddingX文字分
-      finalEndVX += paddingX; // 右にpaddingX文字分
-    }
+    int startR = finalMinRow;
+    double startDy = -paddingY;
 
-    // 4. AnchorPointの作成
-    // 上辺: 行の上端より paddingY行分 上へ
-    AnchorPoint p1 = _createSnapAnchor(startRow, finalStartVX, dy: -paddingY);
-    // 下辺: 行の下端(lineHeight)より paddingY行分 下へ
-    AnchorPoint p2 = _createSnapAnchor(endRow, finalEndVX, dy: 1.0 + paddingY);
+    int endR = finalMaxRow;
+    double endDy = 1.0 + paddingY;
 
-    // 5. DrawingObjectを作成 (指定されたタイプを使用)
+    // 5. AnchorPointの作成
+    AnchorPoint p1 = _createSnapAnchor(startR, startVX, dy: startDy);
+    AnchorPoint p2 = _createSnapAnchor(endR, endVX, dy: endDy);
+
+    // 6. DrawingObjectを作成 (指定されたタイプを使用)
     final newDrawing = DrawingObject(
       id: DateTime.now().toIso8601String(), // 簡易ID
       type: shapeType, // 矩形 or 楕円
       points: [p1, p2],
-      color: Colors.red.withOpacity(0.8),
-      strokeWidth: 2.0,
+      color: color,
+      strokeWidth: strokeWidth,
+      paddingX: paddingX,
+      paddingY: paddingY,
+      lineStyle: lineStyle,
+      hasArrowStart: arrowStart,
+      hasArrowEnd: arrowEnd,
     );
 
     saveHistory(); // 履歴保存
@@ -378,12 +400,18 @@ class EditorDocument extends ChangeNotifier {
     notifyListeners();
   }
 
-  // 直線生成ロジック
-  void _createLine(
+  // 線・L字線生成ロジック
+  void _createLineOrElbow(
     Offset start,
     Offset end,
     double charWidth,
     double lineHeight,
+    DrawingType type,
+    Color color,
+    double strokeWidth,
+    LineStyle lineStyle,
+    bool arrowStart,
+    bool arrowEnd,
   ) {
     // 始点・終点を最も近いグリッド交点(行境界・文字境界)にスナップ
     int startRow = (start.dy / lineHeight).round();
@@ -403,18 +431,107 @@ class EditorDocument extends ChangeNotifier {
       dy: 0.0, // 行境界に合わせる
     );
 
+    List<AnchorPoint> points = [p1];
+
+    if (type == DrawingType.elbow &&
+        _currentStroke != null &&
+        _currentStroke!.isNotEmpty) {
+      // L字線: 軌跡から角の位置を判定
+      // ストロークの中間点を取得
+      Offset midPoint = _currentStroke![_currentStroke!.length ~/ 2];
+
+      // 角の候補
+      // C1: 横移動優先 (start.y を維持して end.x へ) -> (end.x, start.y)
+      Offset c1 = Offset(end.dx, start.dy);
+      // C2: 縦移動優先 (start.x を維持して end.y へ) -> (start.x, end.y)
+      Offset c2 = Offset(start.dx, end.dy);
+
+      // 中間点がどちらに近いか
+      double dist1 = (midPoint - c1).distanceSquared;
+      double dist2 = (midPoint - c2).distanceSquared;
+
+      AnchorPoint corner;
+      if (dist1 < dist2) {
+        // 横移動優先: (start.x, start.y) -> (end.x, start.y) -> (end.x, end.y)
+        corner = _createSnapAnchor(max(0, startRow), endVX, dy: 0.0);
+      } else {
+        // 縦移動優先: (start.x, start.y) -> (start.x, end.y) -> (end.x, end.y)
+        corner = _createSnapAnchor(max(0, endRow), startVX, dy: 0.0);
+      }
+      points.add(corner);
+    }
+
+    points.add(p2);
+
     final newDrawing = DrawingObject(
       id: DateTime.now().toIso8601String(),
-      type: DrawingType.line,
-      points: [p1, p2],
-      color: Colors.red.withOpacity(0.8),
-      strokeWidth: 2.0,
+      type: type,
+      points: points,
+      color: color,
+      strokeWidth: strokeWidth,
+      lineStyle: lineStyle,
+      hasArrowStart: arrowStart,
+      hasArrowEnd: arrowEnd,
     );
 
     saveHistory(); // 履歴保存
     drawings.add(newDrawing);
     _currentStroke = null;
     strokes.clear();
+    notifyListeners();
+  }
+
+  // 図形プロパティの更新
+  void updateDrawingProperties(
+    String id, {
+    Color? color,
+    double? strokeWidth,
+    int? paddingX,
+    double? paddingY,
+    DrawingType? type, // 追加
+    LineStyle? lineStyle,
+    bool? arrowStart,
+    bool? arrowEnd,
+  }) {
+    final index = drawings.indexWhere((d) => d.id == id);
+    if (index == -1) return;
+
+    saveHistory();
+    final drawing = drawings[index];
+
+    if (color != null) drawing.color = color;
+    if (strokeWidth != null) drawing.strokeWidth = strokeWidth;
+    if (type != null) drawing.type = type; // 追加
+    if (lineStyle != null) drawing.lineStyle = lineStyle;
+    if (arrowStart != null) drawing.hasArrowStart = arrowStart;
+    if (arrowEnd != null) drawing.hasArrowEnd = arrowEnd;
+
+    // パディング更新 (矩形系のみ)
+    if ((paddingX != null || paddingY != null) &&
+        (drawing.type == DrawingType.rectangle ||
+            drawing.type == DrawingType.oval ||
+            drawing.type == DrawingType.roundedRectangle)) {
+      int oldPx = drawing.paddingX;
+      double oldPy = drawing.paddingY;
+      int newPx = paddingX ?? oldPx;
+      double newPy = paddingY ?? oldPy;
+
+      drawing.paddingX = newPx;
+      drawing.paddingY = newPy;
+
+      // 座標再計算: 元のパディングを戻して新しいパディングを適用
+      if (drawing.points.length >= 2) {
+        // p1 (Top-Left)
+        drawing.points[0].col += (oldPx - newPx);
+        drawing.points[0].dy = -newPy;
+        // p2 (Bottom-Right)
+        drawing.points[1].col -= (oldPx - newPx);
+        drawing.points[1].dy = 1.0 + newPy;
+      }
+    }
+
+    // リストの参照を変更して、MemoPainterのshouldRepaintで変更を検知させる
+    drawings = List.from(drawings);
     notifyListeners();
   }
 
@@ -440,6 +557,14 @@ class EditorDocument extends ChangeNotifier {
         notifyListeners();
         return; // 1回のイベントで1つ消す（ドラッグで連続して消せるようにするため）
       }
+    }
+  }
+
+  // 図形選択を解除
+  void clearDrawingSelection() {
+    if (selectedDrawingId != null) {
+      selectedDrawingId = null;
+      notifyListeners();
     }
   }
 

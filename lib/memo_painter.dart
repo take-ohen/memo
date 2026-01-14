@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'dart:math';
+import 'dart:ui';
 import 'text_utils.dart'; // ★作成した便利関数をインポート
 import 'search_result.dart'; // ★検索結果クラスをインポート
 import 'drawing_data.dart'; // ★図形データクラスをインポート
@@ -359,67 +360,192 @@ class MemoPainter extends CustomPainter {
 
       if (points.isEmpty) continue;
 
+      // パス生成
+      Path path = Path();
+
       // 図形タイプごとの描画
       switch (drawing.type) {
         case DrawingType.line:
           if (points.length >= 2) {
-            canvas.drawLine(points[0], points[1], paint);
+            path.moveTo(points[0].dx, points[0].dy);
+            path.lineTo(points[1].dx, points[1].dy);
+          }
+          break;
+        case DrawingType.elbow: // L型線
+          if (points.length >= 2) {
+            path.moveTo(points[0].dx, points[0].dy);
+            for (int i = 1; i < points.length; i++) {
+              path.lineTo(points[i].dx, points[i].dy);
+            }
           }
           break;
         case DrawingType.rectangle:
           if (points.length >= 2) {
             final rect = Rect.fromPoints(points[0], points[1]);
-            canvas.drawRect(rect, paint);
+            path.addRect(rect);
           }
           break;
         case DrawingType.oval:
           if (points.length >= 2) {
             final rect = Rect.fromPoints(points[0], points[1]);
-            canvas.drawOval(rect, paint);
+            path.addOval(rect);
           }
           break;
         case DrawingType.roundedRectangle:
           if (points.length >= 2) {
             final rect = Rect.fromPoints(points[0], points[1]);
-            canvas.drawRRect(
+            path.addRRect(
               RRect.fromRectAndRadius(rect, const Radius.circular(8)),
-              paint,
             );
           }
           break;
         case DrawingType.freehand:
           if (points.length > 1) {
+            path.moveTo(points[0].dx, points[0].dy);
             for (int i = 0; i < points.length - 1; i++) {
-              canvas.drawLine(points[i], points[i + 1], paint);
+              path.lineTo(points[i + 1].dx, points[i + 1].dy);
             }
           }
           break;
       }
 
+      // 線種に応じた描画
+      if (drawing.lineStyle == LineStyle.solid) {
+        canvas.drawPath(path, paint);
+      } else if (drawing.lineStyle == LineStyle.dotted) {
+        // 点線 (2, 2)
+        final dashedPath = _createDashedPath(path, 2, 2);
+        canvas.drawPath(dashedPath, paint);
+      } else if (drawing.lineStyle == LineStyle.dashed) {
+        // 破線 (5, 5)
+        final dashedPath = _createDashedPath(path, 5, 5);
+        canvas.drawPath(dashedPath, paint);
+      } else if (drawing.lineStyle == LineStyle.doubleLine) {
+        // 二重線: 太い線を描いて、内側を白で抜く (簡易実装)
+        final double originalWidth = paint.strokeWidth;
+
+        // 外側
+        paint.strokeWidth = originalWidth * 3;
+        canvas.drawPath(path, paint);
+
+        // 内側 (白)
+        paint.strokeWidth = originalWidth;
+        paint.color = Colors.white;
+        canvas.drawPath(path, paint);
+
+        // 色と太さを戻す
+        paint.color = drawing.color;
+        paint.strokeWidth = originalWidth;
+      }
+
+      // 矢印描画 (線とL型線のみ)
+      if (drawing.type == DrawingType.line ||
+          drawing.type == DrawingType.elbow) {
+        // 矢印サイズを線の太さに比例させる
+        // 二重線の場合は見た目の太さ(3倍)を基準にする
+        double baseWidth = paint.strokeWidth;
+        if (drawing.lineStyle == LineStyle.doubleLine) {
+          baseWidth *= 3.0;
+        }
+        double arrowSize = max(12.0, baseWidth * 3.0);
+
+        if (drawing.hasArrowStart && points.length >= 2) {
+          // 始点方向の角度 (p1 -> p0 ではなく、パスの進行方向の逆)
+          Offset p0 = points[0];
+          Offset next = points[1];
+          double angle = atan2(next.dy - p0.dy, next.dx - p0.dx);
+          _drawArrow(canvas, p0, angle + pi, paint, arrowSize);
+        }
+        if (drawing.hasArrowEnd && points.length >= 2) {
+          // 終点方向の角度
+          Offset pEnd = points.last;
+          Offset prev = points[points.length - 2];
+          double angle = atan2(pEnd.dy - prev.dy, pEnd.dx - prev.dx);
+          _drawArrow(canvas, pEnd, angle, paint, arrowSize);
+        }
+      }
+
       // 選択中ならハンドルを描画
       if (drawing.id == selectedDrawingId || showAllHandles) {
-        _drawHandles(canvas, points, drawing.type);
+        _drawHandles(canvas, points, drawing.type, drawing);
       }
     }
   }
 
+  // 破線パス生成ヘルパー
+  Path _createDashedPath(Path source, double dashWidth, double dashSpace) {
+    final Path dest = Path();
+    for (final PathMetric metric in source.computeMetrics()) {
+      double distance = 0.0;
+      while (distance < metric.length) {
+        double len = dashWidth;
+        if (distance + len > metric.length) {
+          len = metric.length - distance;
+        }
+        dest.addPath(metric.extractPath(distance, distance + len), Offset.zero);
+        distance += dashWidth + dashSpace;
+      }
+    }
+    return dest;
+  }
+
+  // 矢印描画ヘルパー
+  void _drawArrow(
+    Canvas canvas,
+    Offset tip,
+    double angle,
+    Paint paint,
+    double arrowSize,
+  ) {
+    const double arrowAngle = pi / 6; // 30度
+
+    final path = Path();
+    path.moveTo(tip.dx, tip.dy);
+    path.lineTo(
+      tip.dx - arrowSize * cos(angle - arrowAngle),
+      tip.dy - arrowSize * sin(angle - arrowAngle),
+    );
+    path.lineTo(
+      tip.dx - arrowSize * cos(angle + arrowAngle),
+      tip.dy - arrowSize * sin(angle + arrowAngle),
+    );
+    path.close();
+
+    final arrowPaint = Paint()
+      ..color = paint.color
+      ..style = PaintingStyle.fill;
+    canvas.drawPath(path, arrowPaint);
+  }
+
   // ★ハンドル描画ロジック
-  void _drawHandles(Canvas canvas, List<Offset> points, DrawingType type) {
-    final paint = Paint()..color = Colors.blue;
+  void _drawHandles(
+    Canvas canvas,
+    List<Offset> points,
+    DrawingType type,
+    DrawingObject drawing,
+  ) {
+    final paint = Paint();
     const double size = 8.0;
     const double halfSize = size / 2;
 
-    // パディング分(ピクセル)を計算
-    final double padPixelX = shapePaddingX * charWidth;
-    final double padPixelY = shapePaddingY * lineHeight;
+    // パディング分(ピクセル)を計算 (図形個別の設定を使用)
+    final double padPixelX = drawing.paddingX * charWidth;
+    final double padPixelY = drawing.paddingY * lineHeight;
 
     // 線やフリーハンドは中心に描画（内側という概念が曖昧なため）
     if (type == DrawingType.line ||
         type == DrawingType.freehand ||
         points.length < 2) {
-      for (final point in points) {
+      for (int i = 0; i < points.length; i++) {
+        if (i == 0) {
+          paint.color = Colors.green; // 始点
+        } else if (i == points.length - 1) {
+          paint.color = Colors.red; // 終点
+        } else {
+          paint.color = Colors.blue; // 中間点
+        }
         canvas.drawRect(
-          Rect.fromCenter(center: point, width: size, height: size),
+          Rect.fromCenter(center: points[i], width: size, height: size),
           paint,
         );
       }
@@ -431,25 +557,31 @@ class MemoPainter extends CustomPainter {
     final p1 = points[0];
     final p2 = points[1];
 
+    // 幅と高さを計算
+    double width = (p1.dx - p2.dx).abs();
+    double height = (p1.dy - p2.dy).abs();
+
+    // オフセット量の基本値
+    double offsetX = halfSize + padPixelX;
+    double offsetY = halfSize + padPixelY;
+
+    // 幅・高さが小さい場合は、中心を超えないように制限する (幅0ならオフセット0になる)
+    if (width < offsetX * 2) offsetX = width / 2;
+    if (height < offsetY * 2) offsetY = height / 2;
+
     // P1のハンドル (相手の点に向かってずらす)
-    double dx1 = (p1.dx < p2.dx)
-        ? (halfSize + padPixelX)
-        : -(halfSize + padPixelX);
-    double dy1 = (p1.dy < p2.dy)
-        ? (halfSize + padPixelY)
-        : -(halfSize + padPixelY);
+    paint.color = Colors.green; // 始点
+    double dx1 = (p1.dx < p2.dx) ? offsetX : -offsetX;
+    double dy1 = (p1.dy < p2.dy) ? offsetY : -offsetY;
     canvas.drawRect(
       Rect.fromCenter(center: p1 + Offset(dx1, dy1), width: size, height: size),
       paint,
     );
 
     // P2のハンドル
-    double dx2 = (p2.dx < p1.dx)
-        ? (halfSize + padPixelX)
-        : -(halfSize + padPixelX);
-    double dy2 = (p2.dy < p1.dy)
-        ? (halfSize + padPixelY)
-        : -(halfSize + padPixelY);
+    paint.color = Colors.red; // 終点
+    double dx2 = (p2.dx < p1.dx) ? offsetX : -offsetX;
+    double dy2 = (p2.dy < p1.dy) ? offsetY : -offsetY;
     canvas.drawRect(
       Rect.fromCenter(center: p2 + Offset(dx2, dy2), width: size, height: size),
       paint,

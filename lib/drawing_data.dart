@@ -7,6 +7,15 @@ enum DrawingType {
   rectangle, // 矩形
   oval, // 楕円
   roundedRectangle, // 角丸矩形
+  elbow, // L型線
+}
+
+/// 線の種類
+enum LineStyle {
+  solid, // 実線
+  dotted, // 点線
+  dashed, // 破線
+  doubleLine, // 二重線
 }
 
 /// テキスト上の論理位置を表すクラス
@@ -53,7 +62,7 @@ class AnchorPoint {
 /// 1つの図形オブジェクトを表すクラス
 class DrawingObject {
   final String id;
-  final DrawingType type;
+  DrawingType type; // 変更可能にするため final を削除
 
   // 図形を構成する点群
   // - freehand: ストロークの全点
@@ -63,6 +72,11 @@ class DrawingObject {
   // スタイル情報
   Color color;
   double strokeWidth;
+  int paddingX;
+  double paddingY;
+  LineStyle lineStyle;
+  bool hasArrowStart;
+  bool hasArrowEnd;
 
   DrawingObject({
     required this.id,
@@ -70,6 +84,11 @@ class DrawingObject {
     required this.points,
     this.color = const Color(0xFFFF0000), // デフォルト赤
     this.strokeWidth = 2.0,
+    this.paddingX = 0,
+    this.paddingY = 0.0,
+    this.lineStyle = LineStyle.solid,
+    this.hasArrowStart = false,
+    this.hasArrowEnd = false,
   });
 
   // コピー用 (Undo/Redo時のディープコピーに使用)
@@ -80,6 +99,11 @@ class DrawingObject {
       points: points.map((p) => p.copyWith()).toList(),
       color: color,
       strokeWidth: strokeWidth,
+      paddingX: paddingX,
+      paddingY: paddingY,
+      lineStyle: lineStyle,
+      hasArrowStart: hasArrowStart,
+      hasArrowEnd: hasArrowEnd,
     );
   }
 
@@ -93,6 +117,11 @@ class DrawingObject {
     'points': points.map((p) => p.toJson()).toList(),
     'color': color.value, // int値で保存
     'strokeWidth': strokeWidth,
+    'paddingX': paddingX,
+    'paddingY': paddingY,
+    'lineStyle': lineStyle.index,
+    'hasArrowStart': hasArrowStart,
+    'hasArrowEnd': hasArrowEnd,
   };
 
   factory DrawingObject.fromJson(Map<String, dynamic> json) {
@@ -104,6 +133,13 @@ class DrawingObject {
           .toList(),
       color: Color(json['color'] as int),
       strokeWidth: (json['strokeWidth'] as num).toDouble(),
+      paddingX: (json['paddingX'] as num?)?.toInt() ?? 0,
+      paddingY: (json['paddingY'] as num?)?.toDouble() ?? 0.0,
+      lineStyle: json['lineStyle'] != null
+          ? LineStyle.values[json['lineStyle'] as int]
+          : LineStyle.solid,
+      hasArrowStart: json['hasArrowStart'] as bool? ?? false,
+      hasArrowEnd: json['hasArrowEnd'] as bool? ?? false,
     );
   }
 }

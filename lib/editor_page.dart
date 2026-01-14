@@ -20,6 +20,7 @@ import 'editor_document.dart'; // NewLineTypeのためにインポート
 import 'settings_dialog.dart'; // 設定ダイアログをインポート
 import 'grep_result.dart';
 import 'drawing_data.dart'; // DrawingTypeのためにインポート
+import 'color_picker_widget.dart'; // 色選択用
 
 class EditorPage extends StatefulWidget {
   const EditorPage({super.key});
@@ -1045,19 +1046,6 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
               onPressed: () => _controller.deleteSelectedDrawing(),
               tooltip: 'Delete Selected Drawing',
             ),
-          if (_controller.currentMode == EditorMode.draw)
-            IconButton(
-              icon: Icon(
-                _controller.currentShapeType == DrawingType.rectangle
-                    ? Icons.crop_square
-                    : _controller.currentShapeType ==
-                          DrawingType.roundedRectangle
-                    ? Icons.rounded_corner
-                    : Icons.circle_outlined,
-              ),
-              onPressed: () => _controller.toggleShapeType(),
-              tooltip: 'Toggle Shape (Rect/Oval)',
-            ),
         ],
       ),
     );
@@ -1179,376 +1167,374 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   Widget _buildMenuBar() {
     // MenuBarも横幅いっぱいに広がろうとするため、Row(min)でラップして左寄せ・最小サイズにする
     final s = AppLocalizations.of(context)!;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        MenuBar(
-          children: [
-            // File
-            SubmenuButton(
-              menuChildren: [
-                MenuItemButton(
-                  onPressed: _openFile,
-                  shortcut: const SingleActivator(
-                    LogicalKeyboardKey.keyO,
-                    control: true,
-                  ),
-                  child: MenuAcceleratorLabel(s.menuOpen),
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: MenuBar(
+        children: [
+          // File
+          SubmenuButton(
+            menuChildren: [
+              MenuItemButton(
+                onPressed: _openFile,
+                shortcut: const SingleActivator(
+                  LogicalKeyboardKey.keyO,
+                  control: true,
                 ),
-                MenuItemButton(
-                  onPressed: _saveFile,
-                  shortcut: const SingleActivator(
-                    LogicalKeyboardKey.keyS,
-                    control: true,
-                  ),
-                  child: MenuAcceleratorLabel(s.menuSave),
+                child: MenuAcceleratorLabel(s.menuOpen),
+              ),
+              MenuItemButton(
+                onPressed: _saveFile,
+                shortcut: const SingleActivator(
+                  LogicalKeyboardKey.keyS,
+                  control: true,
                 ),
-                MenuItemButton(
-                  onPressed: _saveAsFile,
-                  shortcut: const SingleActivator(
-                    LogicalKeyboardKey.keyS,
-                    control: true,
-                    shift: true,
-                  ),
-                  child: MenuAcceleratorLabel(s.menuSaveAs),
+                child: MenuAcceleratorLabel(s.menuSave),
+              ),
+              MenuItemButton(
+                onPressed: _saveAsFile,
+                shortcut: const SingleActivator(
+                  LogicalKeyboardKey.keyS,
+                  control: true,
+                  shift: true,
                 ),
-              ],
-              child: MenuAcceleratorLabel(s.menuFile),
-            ),
-            // Edit
-            SubmenuButton(
-              menuChildren: [
-                MenuItemButton(
-                  onPressed: _undo,
-                  shortcut: const SingleActivator(
-                    LogicalKeyboardKey.keyZ,
-                    control: true,
-                  ),
-                  child: MenuAcceleratorLabel(s.menuUndo),
+                child: MenuAcceleratorLabel(s.menuSaveAs),
+              ),
+            ],
+            child: MenuAcceleratorLabel(s.menuFile),
+          ),
+          // Edit
+          SubmenuButton(
+            menuChildren: [
+              MenuItemButton(
+                onPressed: _undo,
+                shortcut: const SingleActivator(
+                  LogicalKeyboardKey.keyZ,
+                  control: true,
                 ),
-                MenuItemButton(
-                  onPressed: _redo,
-                  shortcut: const SingleActivator(
-                    LogicalKeyboardKey.keyY,
-                    control: true,
-                  ),
-                  child: MenuAcceleratorLabel(s.menuRedo),
+                child: MenuAcceleratorLabel(s.menuUndo),
+              ),
+              MenuItemButton(
+                onPressed: _redo,
+                shortcut: const SingleActivator(
+                  LogicalKeyboardKey.keyY,
+                  control: true,
                 ),
-                const Divider(), // 区切り線
-                MenuItemButton(
-                  onPressed: () {
-                    // 切り取り実装時はここ
-                  },
-                  shortcut: const SingleActivator(
-                    LogicalKeyboardKey.keyX,
-                    control: true,
-                  ),
-                  child: MenuAcceleratorLabel(s.menuCut),
+                child: MenuAcceleratorLabel(s.menuRedo),
+              ),
+              const Divider(), // 区切り線
+              MenuItemButton(
+                onPressed: () {
+                  // 切り取り実装時はここ
+                },
+                shortcut: const SingleActivator(
+                  LogicalKeyboardKey.keyX,
+                  control: true,
                 ),
-                MenuItemButton(
-                  onPressed: () => _controller.copySelection(),
-                  shortcut: const SingleActivator(
-                    LogicalKeyboardKey.keyC,
-                    control: true,
-                  ),
-                  child: MenuAcceleratorLabel(s.menuCopy),
+                child: MenuAcceleratorLabel(s.menuCut),
+              ),
+              MenuItemButton(
+                onPressed: () => _controller.copySelection(),
+                shortcut: const SingleActivator(
+                  LogicalKeyboardKey.keyC,
+                  control: true,
                 ),
-                MenuItemButton(
-                  onPressed: () => _controller.pasteNormal(),
-                  shortcut: const SingleActivator(
-                    LogicalKeyboardKey.keyV,
-                    control: true,
-                  ),
-                  child: MenuAcceleratorLabel(s.menuPaste),
+                child: MenuAcceleratorLabel(s.menuCopy),
+              ),
+              MenuItemButton(
+                onPressed: () => _controller.pasteNormal(),
+                shortcut: const SingleActivator(
+                  LogicalKeyboardKey.keyV,
+                  control: true,
                 ),
-                MenuItemButton(
-                  onPressed: () => _controller.pasteRectangular(),
-                  shortcut: const SingleActivator(
-                    LogicalKeyboardKey.keyV,
-                    control: true,
-                    alt: true,
-                  ),
-                  child: MenuAcceleratorLabel(s.menuPasteRect),
+                child: MenuAcceleratorLabel(s.menuPaste),
+              ),
+              MenuItemButton(
+                onPressed: () => _controller.pasteRectangular(),
+                shortcut: const SingleActivator(
+                  LogicalKeyboardKey.keyV,
+                  control: true,
+                  alt: true,
                 ),
-                const Divider(),
-                MenuItemButton(
-                  onPressed: () => _controller.trimTrailingWhitespace(),
-                  shortcut: const SingleActivator(
-                    LogicalKeyboardKey.keyD,
-                    control: true,
-                    alt: true,
-                  ),
-                  child: MenuAcceleratorLabel(s.menuTrimTrailingWhitespace),
+                child: MenuAcceleratorLabel(s.menuPasteRect),
+              ),
+              const Divider(),
+              MenuItemButton(
+                onPressed: () => _controller.trimTrailingWhitespace(),
+                shortcut: const SingleActivator(
+                  LogicalKeyboardKey.keyD,
+                  control: true,
+                  alt: true,
                 ),
-                const Divider(),
-                MenuItemButton(
-                  onPressed: () {
-                    setState(() {
-                      _showSearchBar = true;
-                      _isReplaceMode = false;
-                    });
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      _searchFocusNode.requestFocus();
-                    });
-                  },
-                  shortcut: const SingleActivator(
-                    LogicalKeyboardKey.keyF,
-                    control: true,
-                  ),
-                  child: MenuAcceleratorLabel(s.menuFind),
+                child: MenuAcceleratorLabel(s.menuTrimTrailingWhitespace),
+              ),
+              const Divider(),
+              MenuItemButton(
+                onPressed: () {
+                  setState(() {
+                    _showSearchBar = true;
+                    _isReplaceMode = false;
+                  });
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    _searchFocusNode.requestFocus();
+                  });
+                },
+                shortcut: const SingleActivator(
+                  LogicalKeyboardKey.keyF,
+                  control: true,
                 ),
-                MenuItemButton(
-                  onPressed: () {
-                    setState(() {
-                      _showSearchBar = true;
-                      _isReplaceMode = true;
-                    });
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      _searchFocusNode.requestFocus();
-                    });
-                  },
-                  shortcut: const SingleActivator(
-                    LogicalKeyboardKey.keyH,
-                    control: true,
-                  ),
-                  child: MenuAcceleratorLabel(s.menuReplace),
+                child: MenuAcceleratorLabel(s.menuFind),
+              ),
+              MenuItemButton(
+                onPressed: () {
+                  setState(() {
+                    _showSearchBar = true;
+                    _isReplaceMode = true;
+                  });
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    _searchFocusNode.requestFocus();
+                  });
+                },
+                shortcut: const SingleActivator(
+                  LogicalKeyboardKey.keyH,
+                  control: true,
                 ),
-              ],
-              child: MenuAcceleratorLabel(s.menuEdit),
-            ),
-            // Format (新規追加)
-            SubmenuButton(
-              menuChildren: [
-                MenuItemButton(
-                  onPressed: () => _controller.drawBox(useHalfWidth: false),
-                  child: MenuAcceleratorLabel(s.menuDrawBoxDouble),
+                child: MenuAcceleratorLabel(s.menuReplace),
+              ),
+            ],
+            child: MenuAcceleratorLabel(s.menuEdit),
+          ),
+          // Format (新規追加)
+          SubmenuButton(
+            menuChildren: [
+              MenuItemButton(
+                onPressed: () => _controller.drawBox(useHalfWidth: false),
+                child: MenuAcceleratorLabel(s.menuDrawBoxDouble),
+              ),
+              MenuItemButton(
+                onPressed: () => _controller.drawBox(useHalfWidth: true),
+                child: MenuAcceleratorLabel(s.menuDrawBoxSingle),
+              ),
+              const Divider(),
+              MenuItemButton(
+                onPressed: () => _controller.formatTable(useHalfWidth: false),
+                child: MenuAcceleratorLabel(s.menuFormatTableDouble),
+              ),
+              MenuItemButton(
+                onPressed: () => _controller.formatTable(useHalfWidth: true),
+                child: MenuAcceleratorLabel(s.menuFormatTableSingle),
+              ),
+              const Divider(),
+              MenuItemButton(
+                onPressed: () => _controller.drawLine(useHalfWidth: false),
+                child: MenuAcceleratorLabel(s.menuDrawLineDouble),
+              ),
+              MenuItemButton(
+                onPressed: () => _controller.drawLine(useHalfWidth: true),
+                child: MenuAcceleratorLabel(s.menuDrawLineSingle),
+              ),
+              const Divider(),
+              MenuItemButton(
+                onPressed: () =>
+                    _controller.drawLine(useHalfWidth: false, arrowEnd: true),
+                child: MenuAcceleratorLabel(s.menuArrowEndDouble),
+              ),
+              MenuItemButton(
+                onPressed: () =>
+                    _controller.drawLine(useHalfWidth: true, arrowEnd: true),
+                child: MenuAcceleratorLabel(s.menuArrowEndSingle),
+              ),
+              MenuItemButton(
+                onPressed: () => _controller.drawLine(
+                  useHalfWidth: false,
+                  arrowStart: true,
+                  arrowEnd: true,
                 ),
-                MenuItemButton(
-                  onPressed: () => _controller.drawBox(useHalfWidth: true),
-                  child: MenuAcceleratorLabel(s.menuDrawBoxSingle),
+                child: MenuAcceleratorLabel(s.menuArrowBothDouble),
+              ),
+              MenuItemButton(
+                onPressed: () => _controller.drawLine(
+                  useHalfWidth: true,
+                  arrowStart: true,
+                  arrowEnd: true,
                 ),
-                const Divider(),
-                MenuItemButton(
-                  onPressed: () => _controller.formatTable(useHalfWidth: false),
-                  child: MenuAcceleratorLabel(s.menuFormatTableDouble),
+                child: MenuAcceleratorLabel(s.menuArrowBothSingle),
+              ),
+              MenuItemButton(
+                onPressed: () => _controller.drawElbowLine(
+                  isUpperRoute: true,
+                  useHalfWidth: false,
+                  arrowEnd: true,
                 ),
-                MenuItemButton(
-                  onPressed: () => _controller.formatTable(useHalfWidth: true),
-                  child: MenuAcceleratorLabel(s.menuFormatTableSingle),
+                child: MenuAcceleratorLabel(s.menuElbowUpperDouble),
+              ),
+              MenuItemButton(
+                onPressed: () => _controller.drawElbowLine(
+                  isUpperRoute: true,
+                  useHalfWidth: true,
+                  arrowEnd: true,
                 ),
-                const Divider(),
-                MenuItemButton(
-                  onPressed: () => _controller.drawLine(useHalfWidth: false),
-                  child: MenuAcceleratorLabel(s.menuDrawLineDouble),
+                child: MenuAcceleratorLabel(s.menuElbowUpperSingle),
+              ),
+              MenuItemButton(
+                onPressed: () => _controller.drawElbowLine(
+                  isUpperRoute: false,
+                  useHalfWidth: false,
+                  arrowEnd: true,
                 ),
-                MenuItemButton(
-                  onPressed: () => _controller.drawLine(useHalfWidth: true),
-                  child: MenuAcceleratorLabel(s.menuDrawLineSingle),
+                child: MenuAcceleratorLabel(s.menuElbowLowerDouble),
+              ),
+              MenuItemButton(
+                onPressed: () => _controller.drawElbowLine(
+                  isUpperRoute: false,
+                  useHalfWidth: true,
+                  arrowEnd: true,
                 ),
-                const Divider(),
-                MenuItemButton(
-                  onPressed: () =>
-                      _controller.drawLine(useHalfWidth: false, arrowEnd: true),
-                  child: MenuAcceleratorLabel(s.menuArrowEndDouble),
+                child: MenuAcceleratorLabel(s.menuElbowLowerSingle),
+              ),
+            ],
+            child: MenuAcceleratorLabel(s.menuFormat),
+          ),
+          // View
+          SubmenuButton(
+            menuChildren: [
+              MenuItemButton(
+                onPressed: () => _controller.toggleGrid(),
+                child: Row(
+                  children: [
+                    Icon(
+                      _controller.showGrid
+                          ? Icons.check_box
+                          : Icons.check_box_outline_blank,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(s.menuShowGrid),
+                  ],
                 ),
-                MenuItemButton(
-                  onPressed: () =>
-                      _controller.drawLine(useHalfWidth: true, arrowEnd: true),
-                  child: MenuAcceleratorLabel(s.menuArrowEndSingle),
+              ),
+              MenuItemButton(
+                onPressed: () => _controller.toggleLineNumber(),
+                child: Row(
+                  children: [
+                    Icon(
+                      _controller.showLineNumber
+                          ? Icons.check_box
+                          : Icons.check_box_outline_blank,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(s.menuShowLineNumbers),
+                  ],
                 ),
-                MenuItemButton(
-                  onPressed: () => _controller.drawLine(
-                    useHalfWidth: false,
-                    arrowStart: true,
-                    arrowEnd: true,
-                  ),
-                  child: MenuAcceleratorLabel(s.menuArrowBothDouble),
+              ),
+              MenuItemButton(
+                onPressed: () => _controller.toggleRuler(),
+                child: Row(
+                  children: [
+                    Icon(
+                      _controller.showRuler
+                          ? Icons.check_box
+                          : Icons.check_box_outline_blank,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(s.menuShowRuler),
+                  ],
                 ),
-                MenuItemButton(
-                  onPressed: () => _controller.drawLine(
-                    useHalfWidth: true,
-                    arrowStart: true,
-                    arrowEnd: true,
-                  ),
-                  child: MenuAcceleratorLabel(s.menuArrowBothSingle),
+              ),
+              MenuItemButton(
+                onPressed: () => _controller.toggleMinimap(),
+                child: Row(
+                  children: [
+                    Icon(
+                      _controller.showMinimap
+                          ? Icons.check_box
+                          : Icons.check_box_outline_blank,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(s.menuShowMinimap),
+                  ],
                 ),
-                MenuItemButton(
-                  onPressed: () => _controller.drawElbowLine(
-                    isUpperRoute: true,
-                    useHalfWidth: false,
-                    arrowEnd: true,
-                  ),
-                  child: MenuAcceleratorLabel(s.menuElbowUpperDouble),
+              ),
+              MenuItemButton(
+                onPressed: () => _controller.toggleShowDrawings(),
+                child: Row(
+                  children: [
+                    Icon(
+                      _controller.showDrawings
+                          ? Icons.check_box
+                          : Icons.check_box_outline_blank,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(s.menuShowDrawings),
+                  ],
                 ),
-                MenuItemButton(
-                  onPressed: () => _controller.drawElbowLine(
-                    isUpperRoute: true,
-                    useHalfWidth: true,
-                    arrowEnd: true,
-                  ),
-                  child: MenuAcceleratorLabel(s.menuElbowUpperSingle),
-                ),
-                MenuItemButton(
-                  onPressed: () => _controller.drawElbowLine(
-                    isUpperRoute: false,
-                    useHalfWidth: false,
-                    arrowEnd: true,
-                  ),
-                  child: MenuAcceleratorLabel(s.menuElbowLowerDouble),
-                ),
-                MenuItemButton(
-                  onPressed: () => _controller.drawElbowLine(
-                    isUpperRoute: false,
-                    useHalfWidth: true,
-                    arrowEnd: true,
-                  ),
-                  child: MenuAcceleratorLabel(s.menuElbowLowerSingle),
-                ),
-              ],
-              child: MenuAcceleratorLabel(s.menuFormat),
-            ),
-            // View
-            SubmenuButton(
-              menuChildren: [
-                MenuItemButton(
-                  onPressed: () => _controller.toggleGrid(),
-                  child: Row(
-                    children: [
-                      Icon(
-                        _controller.showGrid
-                            ? Icons.check_box
-                            : Icons.check_box_outline_blank,
-                        size: 16,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(s.menuShowGrid),
-                    ],
-                  ),
-                ),
-                MenuItemButton(
-                  onPressed: () => _controller.toggleLineNumber(),
-                  child: Row(
-                    children: [
-                      Icon(
-                        _controller.showLineNumber
-                            ? Icons.check_box
-                            : Icons.check_box_outline_blank,
-                        size: 16,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(s.menuShowLineNumbers),
-                    ],
-                  ),
-                ),
-                MenuItemButton(
-                  onPressed: () => _controller.toggleRuler(),
-                  child: Row(
-                    children: [
-                      Icon(
-                        _controller.showRuler
-                            ? Icons.check_box
-                            : Icons.check_box_outline_blank,
-                        size: 16,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(s.menuShowRuler),
-                    ],
-                  ),
-                ),
-                MenuItemButton(
-                  onPressed: () => _controller.toggleMinimap(),
-                  child: Row(
-                    children: [
-                      Icon(
-                        _controller.showMinimap
-                            ? Icons.check_box
-                            : Icons.check_box_outline_blank,
-                        size: 16,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(s.menuShowMinimap),
-                    ],
-                  ),
-                ),
-                MenuItemButton(
-                  onPressed: () => _controller.toggleShowDrawings(),
-                  child: Row(
-                    children: [
-                      Icon(
-                        _controller.showDrawings
-                            ? Icons.check_box
-                            : Icons.check_box_outline_blank,
-                        size: 16,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(s.menuShowDrawings),
-                    ],
-                  ),
-                ),
-              ],
-              child: MenuAcceleratorLabel(s.menuView),
-            ),
-            // Settings (最上位)
-            SubmenuButton(
-              menuChildren: [
-                MenuItemButton(
-                  onPressed: () {
-                    showDialog(
-                      context: context,
-                      builder: (context) => SettingsDialog(
-                        controller: _controller,
-                        initialTab: SettingsTab.textEditor,
-                      ),
-                    );
-                  },
-                  child: MenuAcceleratorLabel(s.menuSettingsEditor),
-                ),
-                MenuItemButton(
-                  onPressed: () {
-                    showDialog(
-                      context: context,
-                      builder: (context) => SettingsDialog(
-                        controller: _controller,
-                        initialTab: SettingsTab.interface,
-                      ),
-                    );
-                  },
-                  child: MenuAcceleratorLabel(s.menuSettingsUi),
-                ),
-                MenuItemButton(
-                  onPressed: () {
-                    showDialog(
-                      context: context,
-                      builder: (context) => SettingsDialog(
-                        controller: _controller,
-                        initialTab: SettingsTab.general,
-                      ),
-                    );
-                  },
-                  child: MenuAcceleratorLabel(s.menuSettingsGeneral),
-                ),
-              ],
-              child: MenuAcceleratorLabel(s.menuSettings),
-            ),
-            // Help
-            SubmenuButton(
-              menuChildren: [
-                MenuItemButton(
-                  onPressed: () {
-                    showAboutDialog(
-                      context: context,
-                      applicationName: 'Free-form Memo',
-                      applicationVersion: '1.0.0',
-                    );
-                  },
-                  child: MenuAcceleratorLabel(s.menuAbout),
-                ),
-              ],
-              child: MenuAcceleratorLabel(s.menuHelp),
-            ),
-          ],
-        ),
-      ],
+              ),
+            ],
+            child: MenuAcceleratorLabel(s.menuView),
+          ),
+          // Settings (最上位)
+          SubmenuButton(
+            menuChildren: [
+              MenuItemButton(
+                onPressed: () {
+                  showDialog(
+                    context: context,
+                    builder: (context) => SettingsDialog(
+                      controller: _controller,
+                      initialTab: SettingsTab.textEditor,
+                    ),
+                  );
+                },
+                child: MenuAcceleratorLabel(s.menuSettingsEditor),
+              ),
+              MenuItemButton(
+                onPressed: () {
+                  showDialog(
+                    context: context,
+                    builder: (context) => SettingsDialog(
+                      controller: _controller,
+                      initialTab: SettingsTab.interface,
+                    ),
+                  );
+                },
+                child: MenuAcceleratorLabel(s.menuSettingsUi),
+              ),
+              MenuItemButton(
+                onPressed: () {
+                  showDialog(
+                    context: context,
+                    builder: (context) => SettingsDialog(
+                      controller: _controller,
+                      initialTab: SettingsTab.general,
+                    ),
+                  );
+                },
+                child: MenuAcceleratorLabel(s.menuSettingsGeneral),
+              ),
+            ],
+            child: MenuAcceleratorLabel(s.menuSettings),
+          ),
+          // Help
+          SubmenuButton(
+            menuChildren: [
+              MenuItemButton(
+                onPressed: () {
+                  showAboutDialog(
+                    context: context,
+                    applicationName: 'Free-form Memo',
+                    applicationVersion: '1.0.0',
+                  );
+                },
+                child: MenuAcceleratorLabel(s.menuAbout),
+              ),
+            ],
+            child: MenuAcceleratorLabel(s.menuHelp),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1602,6 +1588,353 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                 child: const Text('Tab Width: 4'),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showColorPickerDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('色の選択'),
+        content: SizedBox(
+          width: 300, // 幅を固定して例外を回避
+          child: ColorPickerWidget(
+            color: _controller.currentDrawingColor,
+            onColorChanged: (color) {
+              _controller.setDrawingStyle(color: color);
+              Navigator.pop(context);
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showStrokeWidthDialog() {
+    final controller = TextEditingController(
+      text: _controller.currentStrokeWidth.toString(),
+    );
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('線の太さ'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: controller,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              decoration: const InputDecoration(
+                labelText: 'Width (px)',
+                border: OutlineInputBorder(),
+              ),
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
+              ],
+              autofocus: true,
+              onSubmitted: (value) {
+                final val = double.tryParse(value);
+                if (val != null && val > 0) {
+                  _controller.setDrawingStyle(strokeWidth: val);
+                }
+                Navigator.pop(context);
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('キャンセル'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final val = double.tryParse(controller.text);
+              if (val != null && val > 0) {
+                _controller.setDrawingStyle(strokeWidth: val);
+              }
+              Navigator.pop(context);
+            },
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showPaddingDialog() {
+    final controllerX = TextEditingController(
+      text: _controller.shapePaddingX.toString(),
+    );
+    final controllerY = TextEditingController(
+      text: _controller.shapePaddingY.toString(),
+    );
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('パディング設定'),
+        content: SizedBox(
+          width: 300,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('左右 (文字数)', style: TextStyle(fontSize: 12)),
+                        const SizedBox(height: 4),
+                        TextField(
+                          controller: controllerX,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            prefixText: 'X: ',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                            contentPadding: EdgeInsets.all(8),
+                          ),
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('上下 (行比率)', style: TextStyle(fontSize: 12)),
+                        const SizedBox(height: 4),
+                        TextField(
+                          controller: controllerY,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          decoration: const InputDecoration(
+                            prefixText: 'Y: ',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                            contentPadding: EdgeInsets.all(8),
+                          ),
+                          inputFormatters: [
+                            FilteringTextInputFormatter.allow(
+                              RegExp(r'^\d*\.?\d*'),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('キャンセル'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final x = int.tryParse(controllerX.text);
+              final y = double.tryParse(controllerY.text);
+              if (x != null && y != null) {
+                _controller.setShapePadding(x, y);
+              }
+              Navigator.pop(context);
+            },
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // プロパティバーの構築 (Draw Mode用)
+  Widget _buildPropertyBar() {
+    if (_controller.currentMode != EditorMode.draw) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      color: Colors.grey.shade200,
+      child: Row(
+        children: [
+          const Text('Shape:', style: TextStyle(fontSize: 12)),
+          const SizedBox(width: 4),
+          PopupMenuButton<DrawingType>(
+            tooltip: 'Shape Type',
+            icon: Icon(
+              _controller.currentShapeType == DrawingType.line
+                  ? Icons
+                        .show_chart // 直線 (仮)
+                  : _controller.currentShapeType == DrawingType.elbow
+                  ? Icons
+                        .turn_right // L型
+                  : _controller.currentShapeType == DrawingType.rectangle
+                  ? Icons.crop_square
+                  : _controller.currentShapeType == DrawingType.roundedRectangle
+                  ? Icons.rounded_corner
+                  : Icons.circle_outlined,
+              size: 18,
+            ),
+            onSelected: (type) => _controller.setShapeType(type),
+            itemBuilder: (context) => [
+              const PopupMenuItem(value: DrawingType.line, child: Text('Line')),
+              const PopupMenuItem(
+                value: DrawingType.elbow,
+                child: Text('Elbow'),
+              ),
+              const PopupMenuItem(
+                value: DrawingType.rectangle,
+                child: Text('Rectangle'),
+              ),
+              const PopupMenuItem(
+                value: DrawingType.roundedRectangle,
+                child: Text('Rounded Rect'),
+              ),
+              const PopupMenuItem(value: DrawingType.oval, child: Text('Oval')),
+            ],
+          ),
+          const SizedBox(width: 16),
+          const Text('Color:', style: TextStyle(fontSize: 12)),
+          const SizedBox(width: 4),
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: _showColorPickerDialog,
+              child: Container(
+                width: 20,
+                height: 20,
+                decoration: BoxDecoration(
+                  color: _controller.currentDrawingColor,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.grey),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 16),
+          const Text('Width:', style: TextStyle(fontSize: 12)),
+          const SizedBox(width: 4),
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: _showStrokeWidthDialog,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade400),
+                  borderRadius: BorderRadius.circular(4),
+                  color: Colors.white,
+                ),
+                child: Text(
+                  _controller.currentStrokeWidth.toStringAsFixed(1),
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 16),
+          const Text('Pad:', style: TextStyle(fontSize: 12)),
+          const SizedBox(width: 4),
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: _showPaddingDialog,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade400),
+                  borderRadius: BorderRadius.circular(4),
+                  color: Colors.white,
+                ),
+                child: Text(
+                  'X:${_controller.shapePaddingX}  Y:${_controller.shapePaddingY.toStringAsFixed(1)}',
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 16),
+          const Text('Style:', style: TextStyle(fontSize: 12)),
+          PopupMenuButton<LineStyle>(
+            tooltip: 'Line Style',
+            icon: Icon(
+              _controller.currentLineStyle == LineStyle.solid
+                  ? Icons.remove
+                  : _controller.currentLineStyle == LineStyle.dotted
+                  ? Icons.more_horiz
+                  : _controller.currentLineStyle == LineStyle.dashed
+                  ? Icons.power_input
+                  : Icons.drag_handle, // Double
+              size: 18,
+            ),
+            onSelected: (style) =>
+                _controller.setDrawingStyle(lineStyle: style),
+            itemBuilder: (context) => [
+              const PopupMenuItem(value: LineStyle.solid, child: Text('Solid')),
+              const PopupMenuItem(
+                value: LineStyle.dotted,
+                child: Text('Dotted'),
+              ),
+              const PopupMenuItem(
+                value: LineStyle.dashed,
+                child: Text('Dashed'),
+              ),
+              const PopupMenuItem(
+                value: LineStyle.doubleLine,
+                child: Text('Double'),
+              ),
+            ],
+          ),
+          const SizedBox(width: 8),
+          // 矢印設定 (始点)
+          IconButton(
+            icon: Icon(
+              Icons.west,
+              size: 18,
+              color: _controller.currentArrowStart ? Colors.blue : Colors.grey,
+            ),
+            onPressed: () => _controller.setDrawingStyle(
+              arrowStart: !_controller.currentArrowStart,
+            ),
+            tooltip: 'Start Arrow',
+            constraints: const BoxConstraints(),
+            padding: const EdgeInsets.all(4),
+            style: IconButton.styleFrom(
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+          ),
+          // 矢印設定 (終点)
+          IconButton(
+            icon: Icon(
+              Icons.east,
+              size: 18,
+              color: _controller.currentArrowEnd ? Colors.blue : Colors.grey,
+            ),
+            onPressed: () => _controller.setDrawingStyle(
+              arrowEnd: !_controller.currentArrowEnd,
+            ),
+            tooltip: 'End Arrow',
+            constraints: const BoxConstraints(),
+            padding: const EdgeInsets.all(4),
+            style: IconButton.styleFrom(
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
           ),
         ],
       ),
@@ -1675,6 +2008,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
         children: [
           _buildMenuBar(), // メニューバー
           _buildToolbar(), // ツールバー
+          _buildPropertyBar(), // プロパティバー (新規追加)
           _buildTabBar(), // タブバー
           if (_showGrepResults) const Divider(height: 1),
           // --- 列ルーラーエリア ---

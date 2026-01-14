@@ -119,6 +119,23 @@ class EditorController extends ChangeNotifier {
   int shapePaddingX = 1; // 左右の余白 (文字数)
   double shapePaddingY = 0.2; // 上下の余白 (行高さ比率)
   DrawingType currentShapeType = DrawingType.rectangle; // 現在の囲み図形タイプ
+  Color currentDrawingColor = const Color(
+    0xCCF44336,
+  ); // Colors.red[400] with opacity 0.8
+  double currentStrokeWidth = 2.0;
+  LineStyle currentLineStyle = LineStyle.solid;
+  bool currentArrowStart = false;
+  bool currentArrowEnd = false;
+
+  // デフォルト値保持用 (選択解除時に復元するため)
+  Color _defaultDrawingColor = const Color(0xCCF44336);
+  double _defaultStrokeWidth = 2.0;
+  int _defaultShapePaddingX = 1;
+  double _defaultShapePaddingY = 0.2;
+  DrawingType _defaultShapeType = DrawingType.rectangle;
+  LineStyle _defaultLineStyle = LineStyle.solid;
+  bool _defaultArrowStart = false;
+  bool _defaultArrowEnd = false;
 
   // Getters
   String get uiFontFamily => _uiFontFamily;
@@ -184,14 +201,13 @@ class EditorController extends ChangeNotifier {
   }
 
   void _addNewDocument() {
-    documents.add(
-      EditorDocument()
-        ..tabWidth = tabWidth
-        ..newLineType = defaultNewLineType,
-    );
+    final doc = EditorDocument()
+      ..tabWidth = tabWidth
+      ..newLineType = defaultNewLineType;
+    documents.add(doc);
     activeDocumentIndex = documents.length - 1;
     // ドキュメントの変更を監視して通知する
-    documents.last.addListener(notifyListeners);
+    doc.addListener(_onDocumentChanged);
   }
 
   // --- タブ操作 ---
@@ -204,7 +220,7 @@ class EditorController extends ChangeNotifier {
     if (index < 0 || index >= documents.length) return;
 
     // リスナー解除
-    documents[index].removeListener(notifyListeners);
+    documents[index].removeListener(_onDocumentChanged);
     documents.removeAt(index);
 
     if (documents.isEmpty) {
@@ -218,8 +234,51 @@ class EditorController extends ChangeNotifier {
   void switchTab(int index) {
     if (index >= 0 && index < documents.length) {
       activeDocumentIndex = index;
-      notifyListeners();
+      _onDocumentChanged(); // タブ切り替え時にプロパティ同期
     }
+  }
+
+  // ドキュメント変更時のハンドラ (選択図形のプロパティ同期など)
+  void _onDocumentChanged() {
+    if (selectedDrawingId != null) {
+      try {
+        final drawing = activeDocument.drawings.firstWhere(
+          (d) => d.id == selectedDrawingId,
+        );
+        // 選択中の図形のプロパティをコントローラーに反映
+        currentDrawingColor = drawing.color;
+        currentStrokeWidth = drawing.strokeWidth;
+        currentLineStyle = drawing.lineStyle;
+        currentArrowStart = drawing.hasArrowStart;
+        currentArrowEnd = drawing.hasArrowEnd;
+
+        // パディング設定も同期
+        shapePaddingX = drawing.paddingX;
+        shapePaddingY = drawing.paddingY;
+        // 図形の種類も同期 (矩形・楕円系の場合のみ)
+        if (drawing.type == DrawingType.rectangle ||
+            drawing.type == DrawingType.roundedRectangle ||
+            drawing.type == DrawingType.oval) {
+          currentShapeType = drawing.type;
+        } else if (drawing.type == DrawingType.line ||
+            drawing.type == DrawingType.elbow) {
+          currentShapeType = drawing.type;
+        }
+      } catch (_) {
+        // 見つからない場合は無視
+      }
+    } else {
+      // 選択解除時はデフォルト値を復元
+      currentDrawingColor = _defaultDrawingColor;
+      currentStrokeWidth = _defaultStrokeWidth;
+      shapePaddingX = _defaultShapePaddingX;
+      shapePaddingY = _defaultShapePaddingY;
+      currentShapeType = _defaultShapeType;
+      currentLineStyle = _defaultLineStyle;
+      currentArrowStart = _defaultArrowStart;
+      currentArrowEnd = _defaultArrowEnd;
+    }
+    notifyListeners();
   }
 
   // --- Settings Persistence (設定の保存) ---
@@ -275,6 +334,9 @@ class EditorController extends ChangeNotifier {
 
     shapePaddingX = prefs.getInt('shapePaddingX') ?? 1;
     shapePaddingY = prefs.getDouble('shapePaddingY') ?? 0.2;
+    // デフォルト値も更新
+    _defaultShapePaddingX = shapePaddingX;
+    _defaultShapePaddingY = shapePaddingY;
     notifyListeners();
   }
 
@@ -429,6 +491,17 @@ class EditorController extends ChangeNotifier {
     shapePaddingY = y;
     _saveInt('shapePaddingX', x);
     _saveDouble('shapePaddingY', y);
+
+    if (selectedDrawingId == null) {
+      _defaultShapePaddingX = x;
+      _defaultShapePaddingY = y;
+    }
+
+    // 選択中の図形があれば更新
+    if (selectedDrawingId != null) {
+      updateSelectedDrawingProperties(paddingX: x, paddingY: y);
+    }
+
     notifyListeners();
   }
 
@@ -586,6 +659,10 @@ class EditorController extends ChangeNotifier {
   }
 
   void setMode(EditorMode mode) {
+    // モード変更時に図形選択を解除
+    activeDocument.clearDrawingSelection();
+    // モード変更時にハンドル全表示を解除
+    showAllHandles = false;
     currentMode = mode;
     notifyListeners();
   }
@@ -600,10 +677,65 @@ class EditorController extends ChangeNotifier {
       currentShapeType = DrawingType.roundedRectangle;
     } else if (currentShapeType == DrawingType.roundedRectangle) {
       currentShapeType = DrawingType.oval;
-    } else {
+    } else if (currentShapeType == DrawingType.oval) {
       currentShapeType = DrawingType.rectangle;
+    } else {
+      // line や elbow の場合は何もしない、あるいは rectangle に戻す
+      // ここでは図形モードのトグルボタン用なので、囲み図形のみを循環させる
+    }
+
+    // 選択中の図形があれば、その種類も変更する
+    if (selectedDrawingId != null) {
+      updateSelectedDrawingProperties(type: currentShapeType);
+    } else {
+      // 未選択時はデフォルト値を更新
+      _defaultShapeType = currentShapeType;
     }
     notifyListeners();
+  }
+
+  // 図形タイプを直接指定（直線やL型線用）
+  void setShapeType(DrawingType type) {
+    currentShapeType = type;
+    if (selectedDrawingId != null) {
+      updateSelectedDrawingProperties(type: currentShapeType);
+    } else {
+      _defaultShapeType = currentShapeType;
+    }
+    notifyListeners();
+  }
+
+  // 色や太さの設定変更（UIから呼ばれる）
+  void setDrawingStyle({
+    Color? color,
+    double? strokeWidth,
+    LineStyle? lineStyle,
+    bool? arrowStart,
+    bool? arrowEnd,
+  }) {
+    if (color != null) currentDrawingColor = color;
+    if (strokeWidth != null) currentStrokeWidth = strokeWidth;
+    if (lineStyle != null) currentLineStyle = lineStyle;
+    if (arrowStart != null) currentArrowStart = arrowStart;
+    if (arrowEnd != null) currentArrowEnd = arrowEnd;
+
+    if (selectedDrawingId != null) {
+      updateSelectedDrawingProperties(
+        color: color,
+        strokeWidth: strokeWidth,
+        lineStyle: lineStyle,
+        arrowStart: arrowStart,
+        arrowEnd: arrowEnd,
+      );
+    } else {
+      // 未選択時はデフォルト値を更新
+      if (color != null) _defaultDrawingColor = color;
+      if (strokeWidth != null) _defaultStrokeWidth = strokeWidth;
+      if (lineStyle != null) _defaultLineStyle = lineStyle;
+      if (arrowStart != null) _defaultArrowStart = arrowStart;
+      if (arrowEnd != null) _defaultArrowEnd = arrowEnd;
+      notifyListeners();
+    }
   }
 
   void startStroke(Offset pos) {
@@ -621,6 +753,35 @@ class EditorController extends ChangeNotifier {
       shapePaddingX,
       shapePaddingY,
       currentShapeType,
+      currentDrawingColor,
+      currentStrokeWidth,
+      currentLineStyle,
+      currentArrowStart,
+      currentArrowEnd,
+    );
+  }
+
+  void updateSelectedDrawingProperties({
+    Color? color,
+    double? strokeWidth,
+    int? paddingX,
+    double? paddingY,
+    DrawingType? type,
+    LineStyle? lineStyle,
+    bool? arrowStart,
+    bool? arrowEnd,
+  }) {
+    if (selectedDrawingId == null) return;
+    activeDocument.updateDrawingProperties(
+      selectedDrawingId!,
+      color: color,
+      strokeWidth: strokeWidth,
+      paddingX: paddingX,
+      paddingY: paddingY,
+      type: type,
+      lineStyle: lineStyle,
+      arrowStart: arrowStart,
+      arrowEnd: arrowEnd,
     );
   }
 
