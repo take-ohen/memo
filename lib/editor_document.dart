@@ -267,6 +267,7 @@ class EditorDocument extends ChangeNotifier {
     DrawingType shapeType,
     Color color,
     double strokeWidth,
+    double markerHeight,
     LineStyle lineStyle,
     bool arrowStart,
     bool arrowEnd,
@@ -384,6 +385,7 @@ class EditorDocument extends ChangeNotifier {
       points: [p1, p2],
       color: color,
       strokeWidth: strokeWidth,
+      markerHeight: markerHeight,
       paddingX: paddingX,
       paddingY: paddingY,
       lineStyle: lineStyle,
@@ -431,7 +433,8 @@ class EditorDocument extends ChangeNotifier {
       dy: 0.0, // 行境界に合わせる
     );
 
-    List<AnchorPoint> points = [p1];
+    List<AnchorPoint> points = [p1, p2];
+    bool isUpperRoute = true;
 
     if (type == DrawingType.elbow &&
         _currentStroke != null &&
@@ -450,18 +453,20 @@ class EditorDocument extends ChangeNotifier {
       double dist1 = (midPoint - c1).distanceSquared;
       double dist2 = (midPoint - c2).distanceSquared;
 
-      AnchorPoint corner;
       if (dist1 < dist2) {
         // 横移動優先: (start.x, start.y) -> (end.x, start.y) -> (end.x, end.y)
-        corner = _createSnapAnchor(max(0, startRow), endVX, dy: 0.0);
+        // 角のY座標は start.y (p1.y)
+        // p1.y < p2.y (下り) なら min(y1,y2) = y1 なので Upper
+        // p1.y > p2.y (上り) なら max(y1,y2) = y1 なので !Upper
+        isUpperRoute = (startRow <= endRow);
       } else {
         // 縦移動優先: (start.x, start.y) -> (start.x, end.y) -> (end.x, end.y)
-        corner = _createSnapAnchor(max(0, endRow), startVX, dy: 0.0);
+        // 角のY座標は end.y (p2.y)
+        // p1.y < p2.y (下り) なら max(y1,y2) = y2 なので !Upper
+        // p1.y > p2.y (上り) なら min(y1,y2) = y2 なので Upper
+        isUpperRoute = (startRow > endRow);
       }
-      points.add(corner);
     }
-
-    points.add(p2);
 
     final newDrawing = DrawingObject(
       id: DateTime.now().toIso8601String(),
@@ -472,6 +477,7 @@ class EditorDocument extends ChangeNotifier {
       lineStyle: lineStyle,
       hasArrowStart: arrowStart,
       hasArrowEnd: arrowEnd,
+      isUpperRoute: isUpperRoute,
     );
 
     saveHistory(); // 履歴保存
@@ -481,17 +487,28 @@ class EditorDocument extends ChangeNotifier {
     notifyListeners();
   }
 
+  DrawingType getDrawingType(String id) {
+    final drawing = drawings.firstWhere((d) => d.id == id);
+    return drawing.type;
+  }
+
+  DrawingObject getDrawing(String id) {
+    return drawings.firstWhere((d) => d.id == id);
+  }
+
   // 図形プロパティの更新
   void updateDrawingProperties(
     String id, {
     Color? color,
     double? strokeWidth,
+    double? markerHeight,
     int? paddingX,
     double? paddingY,
     DrawingType? type, // 追加
     LineStyle? lineStyle,
     bool? arrowStart,
     bool? arrowEnd,
+    bool? isUpperRoute,
   }) {
     final index = drawings.indexWhere((d) => d.id == id);
     if (index == -1) return;
@@ -501,16 +518,22 @@ class EditorDocument extends ChangeNotifier {
 
     if (color != null) drawing.color = color;
     if (strokeWidth != null) drawing.strokeWidth = strokeWidth;
-    if (type != null) drawing.type = type; // 追加
+    if (markerHeight != null) drawing.markerHeight = markerHeight;
+    if (type != null) {
+      drawing.type = type;
+    }
     if (lineStyle != null) drawing.lineStyle = lineStyle;
     if (arrowStart != null) drawing.hasArrowStart = arrowStart;
     if (arrowEnd != null) drawing.hasArrowEnd = arrowEnd;
+    if (isUpperRoute != null) drawing.isUpperRoute = isUpperRoute;
 
     // パディング更新 (矩形系のみ)
     if ((paddingX != null || paddingY != null) &&
         (drawing.type == DrawingType.rectangle ||
             drawing.type == DrawingType.oval ||
-            drawing.type == DrawingType.roundedRectangle)) {
+            drawing.type == DrawingType.roundedRectangle ||
+            drawing.type == DrawingType.burst ||
+            drawing.type == DrawingType.marker)) {
       int oldPx = drawing.paddingX;
       double oldPy = drawing.paddingY;
       int newPx = paddingX ?? oldPx;
@@ -1438,6 +1461,7 @@ class EditorDocument extends ChangeNotifier {
         // ※必要ならここでパディングを考慮した微調整を入れることも可能
         final newPoint = _createSnapAnchor(max(0, row), visualX, dy: 0.0);
         drawings[index].points[_activeHandleIndex!] = newPoint;
+
         notifyListeners();
       }
       return;

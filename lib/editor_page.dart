@@ -75,6 +75,14 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
   final GlobalKey _painterKey = GlobalKey();
 
+  // プロパティバー用コントローラー
+  late TextEditingController _widthController;
+  late TextEditingController _paddingXController;
+  late TextEditingController _paddingYController;
+  final FocusNode _widthFocus = FocusNode();
+  final FocusNode _paddingXFocus = FocusNode();
+  final FocusNode _paddingYFocus = FocusNode();
+
   // コントローラーの設定値を使用するように変更
   TextStyle get _textStyle => TextStyle(
     fontFamily: _controller.fontFamily,
@@ -118,6 +126,26 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     super.initState();
     _controller = EditorController(); // コントローラー初期化
 
+    // プロパティバー用コントローラー初期化
+    _widthController = TextEditingController();
+    _paddingXController = TextEditingController();
+    _paddingYController = TextEditingController();
+
+    _syncPropertyInputs(); // 初期値反映
+
+    // リスナー登録
+    _controller.addListener(_syncPropertyInputs);
+
+    _widthFocus.addListener(() {
+      if (!_widthFocus.hasFocus) _commitWidth();
+    });
+    _paddingXFocus.addListener(() {
+      if (!_paddingXFocus.hasFocus) _commitPadding();
+    });
+    _paddingYFocus.addListener(() {
+      if (!_paddingYFocus.hasFocus) _commitPadding();
+    });
+
     // 設定読み込み
     _controller.loadSettings();
 
@@ -151,6 +179,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
   @override
   void dispose() {
+    _controller.removeListener(_syncPropertyInputs);
     _listener.dispose();
     _controller.dispose();
     _searchController.dispose();
@@ -164,6 +193,12 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     _grepScrollController.dispose();
     _grepHorizontalScrollController.dispose();
     _cursorBlinkTimer?.cancel(); // カーソル点滅用
+    _widthController.dispose();
+    _paddingXController.dispose();
+    _paddingYController.dispose();
+    _widthFocus.dispose();
+    _paddingXFocus.dispose();
+    _paddingYFocus.dispose();
     super.dispose();
   }
 
@@ -1570,6 +1605,13 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
             },
             tooltip: s.menuShowGrid,
           ),
+          IconButton(
+            icon: Icon(
+              _controller.showDrawings ? Icons.visibility : Icons.visibility_off,
+            ),
+            onPressed: () => _controller.toggleShowDrawings(),
+            tooltip: s.menuShowDrawings,
+          ),
           PopupMenuButton<int>(
             tooltip: 'タブ幅設定',
             icon: const Icon(Icons.space_bar),
@@ -1597,168 +1639,97 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   void _showColorPickerDialog() {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('色の選択'),
-        content: SizedBox(
-          width: 300, // 幅を固定して例外を回避
-          child: ColorPickerWidget(
-            color: _controller.currentDrawingColor,
-            onColorChanged: (color) {
-              _controller.setDrawingStyle(color: color);
-              Navigator.pop(context);
-            },
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _showStrokeWidthDialog() {
-    final controller = TextEditingController(
-      text: _controller.currentStrokeWidth.toString(),
-    );
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('線の太さ'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: controller,
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
+      builder: (context) => ListenableBuilder(
+        listenable: _controller,
+        builder: (context, child) {
+          return AlertDialog(
+            title: const Text('色の選択'),
+            content: SizedBox(
+              width: 340, // 幅を少し広げる
+              child: ColorPickerWidget(
+                initialColor: _controller.currentDrawingColor,
+                onColorChanged: (color) {
+                  _controller.setDrawingStyle(color: color);
+                },
+                savedColors: _controller.savedColors
+                    .map((e) => Color(e))
+                    .toList(),
+                onSaveColor: (color) => _controller.addSavedColor(color.value),
+                onDeleteColor: (color) =>
+                    _controller.removeSavedColor(color.value),
               ),
-              decoration: const InputDecoration(
-                labelText: 'Width (px)',
-                border: OutlineInputBorder(),
-              ),
-              inputFormatters: [
-                FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
-              ],
-              autofocus: true,
-              onSubmitted: (value) {
-                final val = double.tryParse(value);
-                if (val != null && val > 0) {
-                  _controller.setDrawingStyle(strokeWidth: val);
-                }
-                Navigator.pop(context);
-              },
             ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('キャンセル'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final val = double.tryParse(controller.text);
-              if (val != null && val > 0) {
-                _controller.setDrawingStyle(strokeWidth: val);
-              }
-              Navigator.pop(context);
-            },
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showPaddingDialog() {
-    final controllerX = TextEditingController(
-      text: _controller.shapePaddingX.toString(),
-    );
-    final controllerY = TextEditingController(
-      text: _controller.shapePaddingY.toString(),
-    );
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('パディング設定'),
-        content: SizedBox(
-          width: 300,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('左右 (文字数)', style: TextStyle(fontSize: 12)),
-                        const SizedBox(height: 4),
-                        TextField(
-                          controller: controllerX,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            prefixText: 'X: ',
-                            border: OutlineInputBorder(),
-                            isDense: true,
-                            contentPadding: EdgeInsets.all(8),
-                          ),
-                          inputFormatters: [
-                            FilteringTextInputFormatter.digitsOnly,
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('上下 (行比率)', style: TextStyle(fontSize: 12)),
-                        const SizedBox(height: 4),
-                        TextField(
-                          controller: controllerY,
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          decoration: const InputDecoration(
-                            prefixText: 'Y: ',
-                            border: OutlineInputBorder(),
-                            isDense: true,
-                            contentPadding: EdgeInsets.all(8),
-                          ),
-                          inputFormatters: [
-                            FilteringTextInputFormatter.allow(
-                              RegExp(r'^\d*\.?\d*'),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('閉じる'),
               ),
             ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('キャンセル'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final x = int.tryParse(controllerX.text);
-              final y = double.tryParse(controllerY.text);
-              if (x != null && y != null) {
-                _controller.setShapePadding(x, y);
-              }
-              Navigator.pop(context);
-            },
-            child: const Text('OK'),
-          ),
-        ],
+          );
+        },
       ),
     );
+  }
+
+  // プロパティ入力値の同期
+  void _syncPropertyInputs() {
+    if (!mounted) return;
+
+    // Width
+    if (!_widthFocus.hasFocus) {
+      String newText = (_controller.currentShapeType == DrawingType.marker)
+          ? (_controller.currentMarkerHeight * 100).toStringAsFixed(0)
+          : _controller.currentStrokeWidth.toStringAsFixed(1);
+      if (_widthController.text != newText) {
+        _widthController.text = newText;
+      }
+    }
+
+    // Padding X
+    if (!_paddingXFocus.hasFocus) {
+      String newText = _controller.shapePaddingX.toString();
+      if (_paddingXController.text != newText) {
+        _paddingXController.text = newText;
+      }
+    }
+
+    // Padding Y
+    if (!_paddingYFocus.hasFocus) {
+      String newText = _controller.shapePaddingY.toStringAsFixed(1);
+      if (_paddingYController.text != newText) {
+        _paddingYController.text = newText;
+      }
+    }
+  }
+
+  void _commitWidth() {
+    final val = double.tryParse(_widthController.text);
+    if (val != null) {
+      if (_controller.currentShapeType == DrawingType.marker) {
+        _controller.setDrawingStyle(markerHeight: (val / 100.0).clamp(0.0, 1.0));
+      } else {
+        if (val > 0) _controller.setDrawingStyle(strokeWidth: val);
+      }
+    } else {
+      _syncPropertyInputs(); // 不正な値なら元に戻す
+    }
+  }
+
+  void _commitPadding() {
+    final x = int.tryParse(_paddingXController.text);
+    final y = double.tryParse(_paddingYController.text);
+
+    // どちらか一方でも有効な値があれば更新する
+    if (x != null || y != null) {
+      final newX = x ?? _controller.shapePaddingX;
+      final newY = y ?? _controller.shapePaddingY;
+      _controller.setShapePadding(newX, newY);
+    } else {
+      // 両方無効なら元の値に戻す
+      // _syncPropertyInputsはフォーカスがあると更新しないため、ここで強制的に戻す
+      _paddingXController.text = _controller.shapePaddingX.toString();
+      _paddingYController.text = _controller.shapePaddingY.toStringAsFixed(1);
+    }
   }
 
   // プロパティバーの構築 (Draw Mode用)
@@ -1766,6 +1737,15 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     if (_controller.currentMode != EditorMode.draw) {
       return const SizedBox.shrink();
     }
+
+    final type = _controller.currentShapeType;
+    final isLineFamily = type == DrawingType.line || type == DrawingType.elbow;
+    final isRectFamily =
+        type == DrawingType.rectangle ||
+        type == DrawingType.roundedRectangle ||
+        type == DrawingType.oval ||
+        type == DrawingType.burst;
+    final isMarker = type == DrawingType.marker;
 
     return Container(
       width: double.infinity,
@@ -1784,30 +1764,91 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                   : _controller.currentShapeType == DrawingType.elbow
                   ? Icons
                         .turn_right // L型
+                  : _controller.currentShapeType == DrawingType.marker
+                  ? Icons.format_paint
                   : _controller.currentShapeType == DrawingType.rectangle
                   ? Icons.crop_square
                   : _controller.currentShapeType == DrawingType.roundedRectangle
-                  ? Icons.rounded_corner
+                  ? Icons.rounded_corner 
+                  : _controller.currentShapeType == DrawingType.burst
+                  ? Icons.new_releases
                   : Icons.circle_outlined,
               size: 18,
             ),
             onSelected: (type) => _controller.setShapeType(type),
-            itemBuilder: (context) => [
-              const PopupMenuItem(value: DrawingType.line, child: Text('Line')),
-              const PopupMenuItem(
-                value: DrawingType.elbow,
-                child: Text('Elbow'),
-              ),
-              const PopupMenuItem(
-                value: DrawingType.rectangle,
-                child: Text('Rectangle'),
-              ),
-              const PopupMenuItem(
-                value: DrawingType.roundedRectangle,
-                child: Text('Rounded Rect'),
-              ),
-              const PopupMenuItem(value: DrawingType.oval, child: Text('Oval')),
-            ],
+            itemBuilder: (context) {
+              // 選択中は同系列のみ表示
+              if (_controller.selectedDrawingId != null) {
+                if (isLineFamily) {
+                  return [
+                    const PopupMenuItem(
+                      value: DrawingType.line,
+                      child: Text('Line'),
+                    ),
+                    const PopupMenuItem(
+                      value: DrawingType.elbow,
+                      child: Text('Elbow'),
+                    ),
+                  ];
+                } else if (isRectFamily) {
+                  return [
+                    const PopupMenuItem(
+                      value: DrawingType.rectangle,
+                      child: Text('Rectangle'),
+                    ),
+                    const PopupMenuItem(
+                      value: DrawingType.roundedRectangle,
+                      child: Text('Rounded Rect'),
+                    ),
+                    const PopupMenuItem(
+                      value: DrawingType.oval,
+                      child: Text('Oval'),
+                    ),
+                    const PopupMenuItem(
+                      value: DrawingType.burst,
+                      child: Text('Burst'),
+                    ),
+                  ];
+                } else {
+                  return [
+                    const PopupMenuItem(
+                      value: DrawingType.marker,
+                      child: Text('Marker'),
+                    ),
+                  ];
+                }
+              }
+              return [
+                const PopupMenuItem(
+                  value: DrawingType.line,
+                  child: Text('Line'),
+                ),
+                const PopupMenuItem(
+                  value: DrawingType.elbow,
+                  child: Text('Elbow'),
+                ),
+                const PopupMenuItem(
+                  value: DrawingType.marker,
+                  child: Text('Marker'),
+                ),
+                const PopupMenuItem(
+                  value: DrawingType.rectangle,
+                  child: Text('Rectangle'),
+                ),
+                const PopupMenuItem(
+                  value: DrawingType.roundedRectangle,
+                  child: Text('Rounded Rect'),
+                ),
+                const PopupMenuItem(
+                  value: DrawingType.oval,
+                  child: Text('Oval'),
+                ),
+                const PopupMenuItem(
+                  value: DrawingType.burst,
+                  child: Text('Burst'),
+                ),
+              ];
+            },
           ),
           const SizedBox(width: 16),
           const Text('Color:', style: TextStyle(fontSize: 12)),
@@ -1828,50 +1869,92 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
             ),
           ),
           const SizedBox(width: 16),
-          const Text('Width:', style: TextStyle(fontSize: 12)),
+          Text(
+            _controller.currentShapeType == DrawingType.marker
+                ? 'Height:'
+                : 'Width:',
+            style: const TextStyle(fontSize: 12),
+          ),
           const SizedBox(width: 4),
-          Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: _showStrokeWidthDialog,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey.shade400),
-                  borderRadius: BorderRadius.circular(4),
-                  color: Colors.white,
-                ),
-                child: Text(
-                  _controller.currentStrokeWidth.toStringAsFixed(1),
-                  style: const TextStyle(fontSize: 12),
-                ),
+          SizedBox(
+            width: 50,
+            child: TextField(
+              controller: _widthController,
+              focusNode: _widthFocus,
+              enabled: !isLineFamily,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
               ),
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 12),
+              decoration: const InputDecoration(
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(
+                  vertical: 4,
+                  horizontal: 4,
+                ),
+                border: OutlineInputBorder(),
+              ),
+              onSubmitted: (_) => _commitWidth(),
             ),
           ),
-          const SizedBox(width: 16),
-          const Text('Pad:', style: TextStyle(fontSize: 12)),
           const SizedBox(width: 4),
-          Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: _showPaddingDialog,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey.shade400),
-                  borderRadius: BorderRadius.circular(4),
-                  color: Colors.white,
+          Text(
+            _controller.currentShapeType == DrawingType.marker ? '%' : 'px',
+            style: const TextStyle(fontSize: 12),
+          ),
+          const SizedBox(width: 16),
+          const Text('Pad X:', style: TextStyle(fontSize: 12)),
+          const SizedBox(width: 4),
+          SizedBox(
+            width: 40,
+            child: TextField(
+              controller: _paddingXController,
+              focusNode: _paddingXFocus,
+              enabled: !isLineFamily,
+              keyboardType: TextInputType.number,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 12),
+              decoration: const InputDecoration(
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(
+                  vertical: 4,
+                  horizontal: 4,
                 ),
-                child: Text(
-                  'X:${_controller.shapePaddingX}  Y:${_controller.shapePaddingY.toStringAsFixed(1)}',
-                  style: const TextStyle(fontSize: 12),
-                ),
+                border: OutlineInputBorder(),
               ),
+              onSubmitted: (_) => _commitPadding(),
+            ),
+          ),
+          const SizedBox(width: 8),
+          const Text('Y:', style: TextStyle(fontSize: 12)),
+          const SizedBox(width: 4),
+          SizedBox(
+            width: 40,
+            child: TextField(
+              controller: _paddingYController,
+              focusNode: _paddingYFocus,
+              enabled: !isLineFamily && !isMarker,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 12),
+              decoration: const InputDecoration(
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(
+                  vertical: 4,
+                  horizontal: 4,
+                ),
+                border: OutlineInputBorder(),
+              ),
+              onSubmitted: (_) => _commitPadding(),
             ),
           ),
           const SizedBox(width: 16),
           const Text('Style:', style: TextStyle(fontSize: 12)),
           PopupMenuButton<LineStyle>(
+            enabled: !isMarker,
             tooltip: 'Line Style',
             icon: Icon(
               _controller.currentLineStyle == LineStyle.solid
@@ -1882,6 +1965,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                   ? Icons.power_input
                   : Icons.drag_handle, // Double
               size: 18,
+              color: isMarker ? Colors.grey : null,
             ),
             onSelected: (style) =>
                 _controller.setDrawingStyle(lineStyle: style),
@@ -1907,11 +1991,15 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
             icon: Icon(
               Icons.west,
               size: 18,
-              color: _controller.currentArrowStart ? Colors.blue : Colors.grey,
+              color: isLineFamily
+                  ? (_controller.currentArrowStart ? Colors.blue : Colors.grey)
+                  : Colors.grey.withOpacity(0.3),
             ),
-            onPressed: () => _controller.setDrawingStyle(
-              arrowStart: !_controller.currentArrowStart,
-            ),
+            onPressed: isLineFamily
+                ? () => _controller.setDrawingStyle(
+                    arrowStart: !_controller.currentArrowStart,
+                  )
+                : null,
             tooltip: 'Start Arrow',
             constraints: const BoxConstraints(),
             padding: const EdgeInsets.all(4),
@@ -1924,11 +2012,15 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
             icon: Icon(
               Icons.east,
               size: 18,
-              color: _controller.currentArrowEnd ? Colors.blue : Colors.grey,
+              color: isLineFamily
+                  ? (_controller.currentArrowEnd ? Colors.blue : Colors.grey)
+                  : Colors.grey.withOpacity(0.3),
             ),
-            onPressed: () => _controller.setDrawingStyle(
-              arrowEnd: !_controller.currentArrowEnd,
-            ),
+            onPressed: isLineFamily
+                ? () => _controller.setDrawingStyle(
+                    arrowEnd: !_controller.currentArrowEnd,
+                  )
+                : null,
             tooltip: 'End Arrow',
             constraints: const BoxConstraints(),
             padding: const EdgeInsets.all(4),
@@ -1936,6 +2028,25 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
           ),
+          // L字線のルート切り替え
+          if (type == DrawingType.elbow)
+            IconButton(
+              icon: Icon(
+                _controller.currentIsUpperRoute
+                    ? Icons.vertical_align_top
+                    : Icons.vertical_align_bottom,
+                size: 18,
+              ),
+              onPressed: () => _controller.setDrawingStyle(
+                isUpperRoute: !_controller.currentIsUpperRoute,
+              ),
+              tooltip: _controller.currentIsUpperRoute ? 'Route: Upper' : 'Route: Lower',
+              constraints: const BoxConstraints(),
+              padding: const EdgeInsets.all(4),
+              style: IconButton.styleFrom(
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
         ],
       ),
     );

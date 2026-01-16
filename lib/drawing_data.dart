@@ -7,7 +7,10 @@ enum DrawingType {
   rectangle, // 矩形
   oval, // 楕円
   roundedRectangle, // 角丸矩形
+  burst, // 破裂
   elbow, // L型線
+  marker, // マーカー
+  image, // 画像
 }
 
 /// 線の種類
@@ -72,11 +75,14 @@ class DrawingObject {
   // スタイル情報
   Color color;
   double strokeWidth;
+  double markerHeight;
   int paddingX;
   double paddingY;
   LineStyle lineStyle;
   bool hasArrowStart;
   bool hasArrowEnd;
+  bool isUpperRoute; // L字線のルート (true: 上/左優先, false: 下/右優先)
+  String? filePath; // 画像ファイルのパス
 
   DrawingObject({
     required this.id,
@@ -84,11 +90,14 @@ class DrawingObject {
     required this.points,
     this.color = const Color(0xFFFF0000), // デフォルト赤
     this.strokeWidth = 2.0,
+    this.markerHeight = 1.0,
     this.paddingX = 0,
     this.paddingY = 0.0,
     this.lineStyle = LineStyle.solid,
     this.hasArrowStart = false,
     this.hasArrowEnd = false,
+    this.isUpperRoute = true,
+    this.filePath,
   });
 
   // コピー用 (Undo/Redo時のディープコピーに使用)
@@ -99,11 +108,14 @@ class DrawingObject {
       points: points.map((p) => p.copyWith()).toList(),
       color: color,
       strokeWidth: strokeWidth,
+      markerHeight: markerHeight,
       paddingX: paddingX,
       paddingY: paddingY,
       lineStyle: lineStyle,
       hasArrowStart: hasArrowStart,
       hasArrowEnd: hasArrowEnd,
+      isUpperRoute: isUpperRoute,
+      filePath: filePath,
     );
   }
 
@@ -117,11 +129,14 @@ class DrawingObject {
     'points': points.map((p) => p.toJson()).toList(),
     'color': color.value, // int値で保存
     'strokeWidth': strokeWidth,
+    'markerHeight': markerHeight,
     'paddingX': paddingX,
     'paddingY': paddingY,
     'lineStyle': lineStyle.index,
     'hasArrowStart': hasArrowStart,
     'hasArrowEnd': hasArrowEnd,
+    'isUpperRoute': isUpperRoute,
+    'filePath': filePath,
   };
 
   factory DrawingObject.fromJson(Map<String, dynamic> json) {
@@ -133,6 +148,7 @@ class DrawingObject {
           .toList(),
       color: Color(json['color'] as int),
       strokeWidth: (json['strokeWidth'] as num).toDouble(),
+      markerHeight: (json['markerHeight'] as num?)?.toDouble() ?? 1.0,
       paddingX: (json['paddingX'] as num?)?.toInt() ?? 0,
       paddingY: (json['paddingY'] as num?)?.toDouble() ?? 0.0,
       lineStyle: json['lineStyle'] != null
@@ -140,6 +156,8 @@ class DrawingObject {
           : LineStyle.solid,
       hasArrowStart: json['hasArrowStart'] as bool? ?? false,
       hasArrowEnd: json['hasArrowEnd'] as bool? ?? false,
+      isUpperRoute: json['isUpperRoute'] as bool? ?? true,
+      filePath: json['filePath'] as String?,
     );
   }
 }

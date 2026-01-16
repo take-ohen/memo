@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async'; // Timer用
+import 'dart:math';
 import 'editor_controller.dart';
 import 'font_manager.dart';
 import 'l10n/app_localizations.dart';
@@ -70,6 +71,11 @@ class _SettingsDialogState extends State<SettingsDialog> {
   late int _minLines;
   late int _shapePaddingX;
   late double _shapePaddingY;
+
+  // スクロールコントローラー
+  final ScrollController _textEditorScrollController = ScrollController();
+  final ScrollController _interfaceScrollController = ScrollController();
+  final ScrollController _generalScrollController = ScrollController();
 
   // プレビュー用ダミーデータ
   final List<String> _previewLines = [
@@ -173,6 +179,9 @@ class _SettingsDialogState extends State<SettingsDialog> {
     _uiFontController.dispose();
     _statusFontController.dispose();
     _tabFontController.dispose();
+    _textEditorScrollController.dispose();
+    _interfaceScrollController.dispose();
+    _generalScrollController.dispose();
     super.dispose();
   }
 
@@ -366,8 +375,15 @@ class _SettingsDialogState extends State<SettingsDialog> {
             borderRadius: BorderRadius.circular(4),
           ),
           child: ColorPickerWidget(
-            color: currentColor,
+            initialColor: currentColor,
             onColorChanged: onColorChanged,
+            savedColors: widget.controller.savedColors
+                .map((e) => Color(e))
+                .toList(),
+            onSaveColor: (color) =>
+                widget.controller.addSavedColor(color.value),
+            onDeleteColor: (color) =>
+                widget.controller.removeSavedColor(color.value),
           ),
         ),
       ],
@@ -448,199 +464,205 @@ class _SettingsDialogState extends State<SettingsDialog> {
         const Divider(height: 1),
         // --- 2. スクロール設定エリア (下部) ---
         Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // 左カラム: フォント & 挙動
-                    Expanded(
-                      flex: 1,
-                      child: Column(
-                        children: [
-                          _buildFontSettings(
-                            context: context,
-                            title: s.labelEditorFont,
-                            fontList: _fontManager.monospaceFonts,
-                            fontController: _editorFontController,
-                            fontSize: _editorFontSize,
-                            isBold: _editorBold,
-                            isItalic: _editorItalic,
-                            onSizeChanged: (v) => _editorFontSize = v,
-                            onBoldChanged: (v) => _editorBold = v ?? false,
-                            onItalicChanged: (v) => _editorItalic = v ?? false,
-                          ),
-                          const SizedBox(height: 16),
-                          _buildSectionTitle(s.labelBehavior),
-                          // Tab Width
-                          Row(
-                            children: [
-                              SizedBox(
-                                width: 80,
-                                child: Text(
-                                  s.labelTabWidth,
+          child: Scrollbar(
+            controller: _textEditorScrollController,
+            thumbVisibility: true,
+            trackVisibility: true, // トラックを表示して視認性を向上
+            child: SingleChildScrollView(
+              controller: _textEditorScrollController,
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // 左カラム: フォント & 挙動
+                      Expanded(
+                        flex: 1,
+                        child: Column(
+                          children: [
+                            _buildFontSettings(
+                              context: context,
+                              title: s.labelEditorFont,
+                              fontList: _fontManager.monospaceFonts,
+                              fontController: _editorFontController,
+                              fontSize: _editorFontSize,
+                              isBold: _editorBold,
+                              isItalic: _editorItalic,
+                              onSizeChanged: (v) => _editorFontSize = v,
+                              onBoldChanged: (v) => _editorBold = v ?? false,
+                              onItalicChanged: (v) => _editorItalic = v ?? false,
+                            ),
+                            const SizedBox(height: 16),
+                            _buildSectionTitle(s.labelBehavior),
+                            // Tab Width
+                            Row(
+                              children: [
+                                SizedBox(
+                                  width: 80,
+                                  child: Text(
+                                    s.labelTabWidth,
+                                    style: const TextStyle(fontSize: 11),
+                                  ),
+                                ),
+                                Expanded(
+                                  child: DropdownButton<int>(
+                                    value: _tabWidth,
+                                    isDense: true,
+                                    isExpanded: true,
+                                    underline: Container(
+                                      height: 1,
+                                      color: Colors.grey.shade300,
+                                    ),
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.black,
+                                    ),
+                                    items: [
+                                      DropdownMenuItem(
+                                        value: 2,
+                                        child: const Text(
+                                          "2",
+                                          style: TextStyle(fontSize: 11),
+                                        ),
+                                      ),
+                                      DropdownMenuItem(
+                                        value: 4,
+                                        child: const Text(
+                                          "4",
+                                          style: TextStyle(fontSize: 11),
+                                        ),
+                                      ),
+                                      DropdownMenuItem(
+                                        value: 8,
+                                        child: const Text(
+                                          "8",
+                                          style: TextStyle(fontSize: 11),
+                                        ),
+                                      ),
+                                    ],
+                                    onChanged: (v) {
+                                      if (v != null)
+                                        setState(() => _tabWidth = v);
+                                    },
+                                  ),
+                                ),
+                              ],
+                            ),
+                            // Default Line Ending
+                            Row(
+                              children: [
+                                SizedBox(
+                                  width: 80,
+                                  child: Text(
+                                    s.labelNewLineCode,
+                                    style: const TextStyle(fontSize: 11),
+                                  ),
+                                ),
+                                Expanded(
+                                  child: DropdownButton<NewLineType>(
+                                    value: _defaultNewLineType,
+                                    isDense: true,
+                                    isExpanded: true,
+                                    underline: Container(
+                                      height: 1,
+                                      color: Colors.grey.shade300,
+                                    ),
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.black,
+                                    ),
+                                    items: NewLineType.values.map((type) {
+                                      return DropdownMenuItem(
+                                        value: type,
+                                        child: Text(
+                                          type.label,
+                                          style: const TextStyle(fontSize: 11),
+                                        ),
+                                      );
+                                    }).toList(),
+                                    onChanged: (v) {
+                                      if (v != null)
+                                        setState(() => _defaultNewLineType = v);
+                                    },
+                                  ),
+                                ),
+                              ],
+                            ),
+                            // Cursor Blinking
+                            Row(
+                              children: [
+                                SizedBox(
+                                  width: 80,
+                                  child: Text(
+                                    s.labelCursorBlink,
+                                    style: const TextStyle(fontSize: 11),
+                                  ),
+                                ),
+                                Checkbox(
+                                  value: _enableCursorBlink,
+                                  visualDensity: const VisualDensity(
+                                    horizontal: -4,
+                                    vertical: -4,
+                                  ),
+                                  materialTapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                  onChanged: (v) => setState(
+                                    () => _enableCursorBlink = v ?? true,
+                                  ),
+                                ),
+                                Text(
+                                  s.labelEnable,
                                   style: const TextStyle(fontSize: 11),
                                 ),
-                              ),
-                              Expanded(
-                                child: DropdownButton<int>(
-                                  value: _tabWidth,
-                                  isDense: true,
-                                  isExpanded: true,
-                                  underline: Container(
-                                    height: 1,
-                                    color: Colors.grey.shade300,
-                                  ),
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    color: Colors.black,
-                                  ),
-                                  items: [
-                                    DropdownMenuItem(
-                                      value: 2,
-                                      child: const Text(
-                                        "2",
-                                        style: TextStyle(fontSize: 11),
-                                      ),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 4,
-                                      child: const Text(
-                                        "4",
-                                        style: TextStyle(fontSize: 11),
-                                      ),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 8,
-                                      child: const Text(
-                                        "8",
-                                        style: TextStyle(fontSize: 11),
-                                      ),
-                                    ),
-                                  ],
-                                  onChanged: (v) {
-                                    if (v != null)
-                                      setState(() => _tabWidth = v);
-                                  },
-                                ),
-                              ),
-                            ],
-                          ),
-                          // Default Line Ending
-                          Row(
-                            children: [
-                              SizedBox(
-                                width: 80,
-                                child: Text(
-                                  s.labelNewLineCode,
-                                  style: const TextStyle(fontSize: 11),
-                                ),
-                              ),
-                              Expanded(
-                                child: DropdownButton<NewLineType>(
-                                  value: _defaultNewLineType,
-                                  isDense: true,
-                                  isExpanded: true,
-                                  underline: Container(
-                                    height: 1,
-                                    color: Colors.grey.shade300,
-                                  ),
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    color: Colors.black,
-                                  ),
-                                  items: NewLineType.values.map((type) {
-                                    return DropdownMenuItem(
-                                      value: type,
-                                      child: Text(
-                                        type.label,
-                                        style: const TextStyle(fontSize: 11),
-                                      ),
-                                    );
-                                  }).toList(),
-                                  onChanged: (v) {
-                                    if (v != null)
-                                      setState(() => _defaultNewLineType = v);
-                                  },
-                                ),
-                              ),
-                            ],
-                          ),
-                          // Cursor Blinking
-                          Row(
-                            children: [
-                              SizedBox(
-                                width: 80,
-                                child: Text(
-                                  s.labelCursorBlink,
-                                  style: const TextStyle(fontSize: 11),
-                                ),
-                              ),
-                              Checkbox(
-                                value: _enableCursorBlink,
-                                visualDensity: const VisualDensity(
-                                  horizontal: -4,
-                                  vertical: -4,
-                                ),
-                                materialTapTargetSize:
-                                    MaterialTapTargetSize.shrinkWrap,
-                                onChanged: (v) => setState(
-                                  () => _enableCursorBlink = v ?? true,
-                                ),
-                              ),
-                              Text(
-                                s.labelEnable,
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      // 右カラム: 色設定
+                      Expanded(
+                        flex: 1,
+                        child: _buildColorSection(
+                          context: context,
+                          title: s.labelEditorColors,
+                          activeTarget: _editorColorTarget,
+                          items: [
+                            DropdownMenuItem(
+                              value: ColorTarget.background,
+                              child: Text(
+                                s.labelBackground,
                                 style: const TextStyle(fontSize: 11),
                               ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    // 右カラム: 色設定
-                    Expanded(
-                      flex: 1,
-                      child: _buildColorSection(
-                        context: context,
-                        title: s.labelEditorColors,
-                        activeTarget: _editorColorTarget,
-                        items: [
-                          DropdownMenuItem(
-                            value: ColorTarget.background,
-                            child: Text(
-                              s.labelBackground,
-                              style: const TextStyle(fontSize: 11),
                             ),
-                          ),
-                          DropdownMenuItem(
-                            value: ColorTarget.text,
-                            child: Text(
-                              s.labelText,
-                              style: const TextStyle(fontSize: 11),
+                            DropdownMenuItem(
+                              value: ColorTarget.text,
+                              child: Text(
+                                s.labelText,
+                                style: const TextStyle(fontSize: 11),
+                              ),
                             ),
-                          ),
-                        ],
-                        onTargetChanged: (v) =>
-                            setState(() => _editorColorTarget = v),
-                        currentColor: currentColor,
-                        onColorChanged: (color) {
-                          setState(() {
-                            if (_editorColorTarget == ColorTarget.background) {
-                              _editorBackgroundColor = color.toARGB32();
-                            } else {
-                              _editorTextColor = color.toARGB32();
-                            }
-                          });
-                        },
+                          ],
+                          onTargetChanged: (v) =>
+                              setState(() => _editorColorTarget = v),
+                          currentColor: currentColor,
+                          onColorChanged: (color) {
+                            setState(() {
+                              if (_editorColorTarget == ColorTarget.background) {
+                                _editorBackgroundColor = color.toARGB32();
+                              } else {
+                                _editorTextColor = color.toARGB32();
+                              }
+                            });
+                          },
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-              ],
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -915,148 +937,154 @@ class _SettingsDialogState extends State<SettingsDialog> {
         const Divider(height: 1),
         // --- 2. スクロール設定エリア (下部) ---
         Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // 左カラム: UIフォント & 検索設定
-                    Expanded(
-                      flex: 1,
-                      child: Column(
-                        children: [
-                          _buildFontSettings(
-                            context: context,
-                            title: s.labelMenuBarFont, // ラベル分離
-                            fontList: _fontManager.allFonts,
-                            fontController: _uiFontController,
-                            fontSize: _uiFontSize,
-                            isBold: _uiBold,
-                            isItalic: _uiItalic,
-                            onSizeChanged: (v) => _uiFontSize = v,
-                            onBoldChanged: (v) => _uiBold = v ?? false,
-                            onItalicChanged: (v) => _uiItalic = v ?? false,
-                          ),
-                          const SizedBox(height: 16),
-                          _buildFontSettings(
-                            context: context,
-                            title: s.labelStatusBarFont, // 新規追加
-                            fontList: _fontManager.allFonts,
-                            fontController: _statusFontController,
-                            fontSize: _statusFontSize,
-                            isBold: _statusBold,
-                            isItalic: _statusItalic,
-                            onSizeChanged: (v) => _statusFontSize = v,
-                            onBoldChanged: (v) => _statusBold = v ?? false,
-                            onItalicChanged: (v) => _statusItalic = v ?? false,
-                          ),
-                          const SizedBox(height: 16),
-                          _buildFontSettings(
-                            context: context,
-                            title: s.labelTabBarFont, // 新規追加
-                            fontList: _fontManager.allFonts,
-                            fontController: _tabFontController,
-                            fontSize: _tabFontSize,
-                            isBold: _tabBold,
-                            isItalic: _tabItalic,
-                            onSizeChanged: (v) => _tabFontSize = v,
-                            onBoldChanged: (v) => _tabBold = v ?? false,
-                            onItalicChanged: (v) => _tabItalic = v ?? false,
-                          ),
-                          const SizedBox(height: 16),
-                          _buildSectionTitle(s.labelSearchSettings),
-                          _CompactValueInput(
-                            label: s.labelFontSize,
-                            value: _grepFontSize,
-                            min: 8.0,
-                            max: 24.0,
-                            onChanged: (v) => setState(() => _grepFontSize = v),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    // 右カラム: Gutter & Ruler (色とサイズ)
-                    Expanded(
-                      flex: 1,
-                      child: Column(
-                        children: [
-                          _buildColorSection(
-                            context: context,
-                            title: s.labelGutterRulerColors,
-                            activeTarget: _interfaceColorTarget,
-                            items: [
-                              DropdownMenuItem(
-                                value: ColorTarget.lineNumber,
-                                child: Text(
-                                  s.labelLineNumber,
-                                  style: const TextStyle(fontSize: 11),
-                                ),
-                              ),
-                              DropdownMenuItem(
-                                value: ColorTarget.ruler,
-                                child: Text(
-                                  s.labelRuler,
-                                  style: const TextStyle(fontSize: 11),
-                                ),
-                              ),
-                              DropdownMenuItem(
-                                value: ColorTarget.grid,
-                                child: Text(
-                                  s.labelGrid,
-                                  style: const TextStyle(fontSize: 11),
-                                ),
-                              ),
-                            ],
-                            onTargetChanged: (v) =>
-                                setState(() => _interfaceColorTarget = v),
-                            currentColor: currentColor,
-                            onColorChanged: (color) {
-                              setState(() {
-                                switch (_interfaceColorTarget) {
-                                  case ColorTarget.lineNumber:
-                                    _lineNumberColor = color.toARGB32();
-                                    break;
-                                  case ColorTarget.ruler:
-                                    _rulerColor = color.toARGB32();
-                                    break;
-                                  case ColorTarget.grid:
-                                    _gridColor = color.toARGB32();
-                                    break;
-                                  default:
-                                    break;
-                                }
-                              });
-                            },
-                          ),
-                          const SizedBox(height: 8),
-                          if (_interfaceColorTarget == ColorTarget.lineNumber)
+          child: Scrollbar(
+            controller: _interfaceScrollController,
+            thumbVisibility: true,
+            trackVisibility: true, // トラックを表示して視認性を向上
+            child: SingleChildScrollView(
+              controller: _interfaceScrollController,
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // 左カラム: UIフォント & 検索設定
+                      Expanded(
+                        flex: 1,
+                        child: Column(
+                          children: [
+                            _buildFontSettings(
+                              context: context,
+                              title: s.labelMenuBarFont, // ラベル分離
+                              fontList: _fontManager.allFonts,
+                              fontController: _uiFontController,
+                              fontSize: _uiFontSize,
+                              isBold: _uiBold,
+                              isItalic: _uiItalic,
+                              onSizeChanged: (v) => _uiFontSize = v,
+                              onBoldChanged: (v) => _uiBold = v ?? false,
+                              onItalicChanged: (v) => _uiItalic = v ?? false,
+                            ),
+                            const SizedBox(height: 16),
+                            _buildFontSettings(
+                              context: context,
+                              title: s.labelStatusBarFont, // 新規追加
+                              fontList: _fontManager.allFonts,
+                              fontController: _statusFontController,
+                              fontSize: _statusFontSize,
+                              isBold: _statusBold,
+                              isItalic: _statusItalic,
+                              onSizeChanged: (v) => _statusFontSize = v,
+                              onBoldChanged: (v) => _statusBold = v ?? false,
+                              onItalicChanged: (v) => _statusItalic = v ?? false,
+                            ),
+                            const SizedBox(height: 16),
+                            _buildFontSettings(
+                              context: context,
+                              title: s.labelTabBarFont, // 新規追加
+                              fontList: _fontManager.allFonts,
+                              fontController: _tabFontController,
+                              fontSize: _tabFontSize,
+                              isBold: _tabBold,
+                              isItalic: _tabItalic,
+                              onSizeChanged: (v) => _tabFontSize = v,
+                              onBoldChanged: (v) => _tabBold = v ?? false,
+                              onItalicChanged: (v) => _tabItalic = v ?? false,
+                            ),
+                            const SizedBox(height: 16),
+                            _buildSectionTitle(s.labelSearchSettings),
                             _CompactValueInput(
-                              label: s.labelLineNumberSize,
-                              value: _lineNumberFontSize,
+                              label: s.labelFontSize,
+                              value: _grepFontSize,
                               min: 8.0,
                               max: 24.0,
-                              onChanged: (v) =>
-                                  setState(() => _lineNumberFontSize = v),
+                              onChanged: (v) => setState(() => _grepFontSize = v),
                             ),
-                          if (_interfaceColorTarget == ColorTarget.ruler)
-                            _CompactValueInput(
-                              label: s.labelRulerSize,
-                              value: _rulerFontSize,
-                              min: 8.0,
-                              max: 24.0,
-                              onChanged: (v) =>
-                                  setState(() => _rulerFontSize = v),
-                            ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-              ],
+                      const SizedBox(width: 16),
+                      // 右カラム: Gutter & Ruler (色とサイズ)
+                      Expanded(
+                        flex: 1,
+                        child: Column(
+                          children: [
+                            _buildColorSection(
+                              context: context,
+                              title: s.labelGutterRulerColors,
+                              activeTarget: _interfaceColorTarget,
+                              items: [
+                                DropdownMenuItem(
+                                  value: ColorTarget.lineNumber,
+                                  child: Text(
+                                    s.labelLineNumber,
+                                    style: const TextStyle(fontSize: 11),
+                                  ),
+                                ),
+                                DropdownMenuItem(
+                                  value: ColorTarget.ruler,
+                                  child: Text(
+                                    s.labelRuler,
+                                    style: const TextStyle(fontSize: 11),
+                                  ),
+                                ),
+                                DropdownMenuItem(
+                                  value: ColorTarget.grid,
+                                  child: Text(
+                                    s.labelGrid,
+                                    style: const TextStyle(fontSize: 11),
+                                  ),
+                                ),
+                              ],
+                              onTargetChanged: (v) =>
+                                  setState(() => _interfaceColorTarget = v),
+                              currentColor: currentColor,
+                              onColorChanged: (color) {
+                                setState(() {
+                                  switch (_interfaceColorTarget) {
+                                    case ColorTarget.lineNumber:
+                                      _lineNumberColor = color.toARGB32();
+                                      break;
+                                    case ColorTarget.ruler:
+                                      _rulerColor = color.toARGB32();
+                                      break;
+                                    case ColorTarget.grid:
+                                      _gridColor = color.toARGB32();
+                                      break;
+                                    default:
+                                      break;
+                                  }
+                                });
+                              },
+                            ),
+                            const SizedBox(height: 8),
+                            if (_interfaceColorTarget == ColorTarget.lineNumber)
+                              _CompactValueInput(
+                                label: s.labelLineNumberSize,
+                                value: _lineNumberFontSize,
+                                min: 8.0,
+                                max: 24.0,
+                                onChanged: (v) =>
+                                    setState(() => _lineNumberFontSize = v),
+                              ),
+                            if (_interfaceColorTarget == ColorTarget.ruler)
+                              _CompactValueInput(
+                                label: s.labelRulerSize,
+                                value: _rulerFontSize,
+                                min: 8.0,
+                                max: 24.0,
+                                onChanged: (v) =>
+                                    setState(() => _rulerFontSize = v),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -1067,49 +1095,55 @@ class _SettingsDialogState extends State<SettingsDialog> {
   // --- Tab 3: General ---
   Widget _buildGeneralTab(BuildContext context) {
     final s = AppLocalizations.of(context)!;
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildSectionTitle(s.labelCanvasSizeMin),
-          _CompactValueInput(
-            label: s.labelColumns,
-            value: _minColumns.toDouble(),
-            min: 80,
-            max: 1000,
-            divisions: 920,
-            onChanged: (v) => setState(() => _minColumns = v.toInt()),
-          ),
-          const SizedBox(height: 4),
-          _CompactValueInput(
-            label: s.labelLines,
-            value: _minLines.toDouble(),
-            min: 40,
-            max: 1000,
-            divisions: 960,
-            onChanged: (v) => setState(() => _minLines = v.toInt()),
-          ),
-          const SizedBox(height: 16),
-          _buildSectionTitle("Shape Drawing Settings"),
-          _CompactValueInput(
-            label: "Padding X (chars)",
-            value: _shapePaddingX.toDouble(),
-            min: 0,
-            max: 10,
-            divisions: 10,
-            onChanged: (v) => setState(() => _shapePaddingX = v.toInt()),
-          ),
-          const SizedBox(height: 4),
-          _CompactValueInput(
-            label: "Padding Y (ratio)",
-            value: _shapePaddingY,
-            min: 0.0,
-            max: 1.0,
-            divisions: 20, // 0.05刻み
-            onChanged: (v) => setState(() => _shapePaddingY = v),
-          ),
-        ],
+    return Scrollbar(
+      controller: _generalScrollController,
+      thumbVisibility: true,
+      trackVisibility: true, // トラックを表示して視認性を向上
+      child: SingleChildScrollView(
+        controller: _generalScrollController,
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildSectionTitle(s.labelCanvasSizeMin),
+            _CompactValueInput(
+              label: s.labelColumns,
+              value: _minColumns.toDouble(),
+              min: 80,
+              max: 1000,
+              divisions: 920,
+              onChanged: (v) => setState(() => _minColumns = v.toInt()),
+            ),
+            const SizedBox(height: 4),
+            _CompactValueInput(
+              label: s.labelLines,
+              value: _minLines.toDouble(),
+              min: 40,
+              max: 1000,
+              divisions: 960,
+              onChanged: (v) => setState(() => _minLines = v.toInt()),
+            ),
+            const SizedBox(height: 16),
+            _buildSectionTitle("Shape Drawing Settings"),
+            _CompactValueInput(
+              label: "Padding X (chars)",
+              value: _shapePaddingX.toDouble(),
+              min: 0,
+              max: 10,
+              divisions: 10,
+              onChanged: (v) => setState(() => _shapePaddingX = v.toInt()),
+            ),
+            const SizedBox(height: 4),
+            _CompactValueInput(
+              label: "Padding Y (ratio)",
+              value: _shapePaddingY,
+              min: 0.0,
+              max: 1.0,
+              divisions: 20, // 0.05刻み
+              onChanged: (v) => setState(() => _shapePaddingY = v),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1140,6 +1174,11 @@ class _SettingsDialogState extends State<SettingsDialog> {
         break;
     }
 
+    // ダイアログサイズを計算 (画面サイズを超えないように制限)
+    final Size screenSize = MediaQuery.of(context).size;
+    final double dialogWidth = min(600.0, screenSize.width - 40);
+    final double dialogHeight = min(700.0, screenSize.height - 40);
+
     // ダイアログ全体をドラッグ可能にするためのレイアウト
     return Dialog(
       backgroundColor: Colors.transparent, // 背景透明
@@ -1151,8 +1190,8 @@ class _SettingsDialogState extends State<SettingsDialog> {
           Transform.translate(
             offset: _offset,
             child: Container(
-              width: 420, // コンパクトな固定幅
-              height: 520, // コンパクトな固定高さ
+              width: dialogWidth,
+              height: dialogHeight,
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(4),

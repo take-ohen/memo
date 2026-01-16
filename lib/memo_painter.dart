@@ -373,10 +373,19 @@ class MemoPainter extends CustomPainter {
           break;
         case DrawingType.elbow: // L型線
           if (points.length >= 2) {
-            path.moveTo(points[0].dx, points[0].dy);
-            for (int i = 1; i < points.length; i++) {
-              path.lineTo(points[i].dx, points[i].dy);
-            }
+            final p1 = points[0];
+            final p2 = points[1];
+            // 属性に基づいて角を計算
+            // UpperRoute: Y座標が小さい方を通る -> min(y1, y2)
+            // LowerRoute: Y座標が大きい方を通る -> max(y1, y2)
+            final double cornerY = drawing.isUpperRoute ? min(p1.dy, p2.dy) : max(p1.dy, p2.dy);
+            // 角のX座標は、角のY座標と同じYを持つ方の点のX座標ではない方...
+            // つまり、cornerY == p1.dy なら、まずは横移動なので cornerX = p2.dx
+            final double cornerX = (cornerY == p1.dy) ? p2.dx : p1.dx;
+
+            path.moveTo(p1.dx, p1.dy);
+            path.lineTo(cornerX, cornerY);
+            path.lineTo(p2.dx, p2.dy);
           }
           break;
         case DrawingType.rectangle:
@@ -399,6 +408,25 @@ class MemoPainter extends CustomPainter {
             );
           }
           break;
+        case DrawingType.burst:
+          if (points.length >= 2) {
+            final rect = Rect.fromPoints(points[0], points[1]);
+            final center = rect.center;
+            final double halfW = rect.width / 2;
+            final double halfH = rect.height / 2;
+            const int spikes = 16;
+            const double innerRatio = 0.7;
+
+            for (int i = 0; i < spikes * 2; i++) {
+              final double angle = (i * pi) / spikes - (pi / 2); // 上から開始
+              final double scale = (i % 2 == 0) ? 1.0 : innerRatio;
+              final double x = center.dx + halfW * scale * cos(angle);
+              final double y = center.dy + halfH * scale * sin(angle);
+              if (i == 0) path.moveTo(x, y); else path.lineTo(x, y);
+            }
+            path.close();
+          }
+          break;
         case DrawingType.freehand:
           if (points.length > 1) {
             path.moveTo(points[0].dx, points[0].dy);
@@ -406,6 +434,37 @@ class MemoPainter extends CustomPainter {
               path.lineTo(points[i + 1].dx, points[i + 1].dy);
             }
           }
+          break;
+        case DrawingType.marker:
+          if (points.length >= 2) {
+            final p1 = _resolveAnchor(drawing.points[0]);
+            final p2 = _resolveAnchor(drawing.points[1]);
+            final startRow = drawing.points[0].row;
+            final endRow = drawing.points[1].row;
+
+            final markerPaint = Paint()
+              ..color = drawing
+                  .color // 半透明色を想定
+              ..style = PaintingStyle.fill;
+
+            for (int r = startRow; r <= endRow; r++) {
+              final double lineBottom = (r + 1) * lineHeight;
+              final double heightRatio = drawing.markerHeight.clamp(0.0, 1.0);
+              final double markerHeight = lineHeight * heightRatio;
+              final double markerTop = lineBottom - markerHeight;
+
+              final Rect markerRect = Rect.fromLTRB(
+                p1.dx,
+                markerTop,
+                p2.dx,
+                lineBottom,
+              );
+              canvas.drawRect(markerRect, markerPaint);
+            }
+          }
+          break;
+        case DrawingType.image:
+          // 画像描画ロジックは別途実装
           break;
       }
 
@@ -449,19 +508,35 @@ class MemoPainter extends CustomPainter {
         }
         double arrowSize = max(12.0, baseWidth * 3.0);
 
+        // 矢印の向き計算用ベクトル
+        Offset startVecFrom = points.first;
+        Offset startVecTo = points.last;
+        Offset endVecFrom = points.first;
+        Offset endVecTo = points.last;
+
+        if (drawing.type == DrawingType.elbow && points.length >= 2) {
+          // L字線の場合、角を考慮してベクトルを計算
+          final p1 = points[0];
+          final p2 = points[1];
+          final double cornerY = drawing.isUpperRoute ? min(p1.dy, p2.dy) : max(p1.dy, p2.dy);
+          final double cornerX = (cornerY == p1.dy) ? p2.dx : p1.dx;
+          final corner = Offset(cornerX, cornerY);
+
+          // 始点 -> 角 (角が始点と同じ位置なら 始点 -> 終点)
+          startVecTo = (corner - p1).distance < 0.1 ? p2 : corner;
+          // 角 -> 終点 (角が終点と同じ位置なら 始点 -> 終点)
+          endVecFrom = (corner - p2).distance < 0.1 ? p1 : corner;
+        }
+
         if (drawing.hasArrowStart && points.length >= 2) {
-          // 始点方向の角度 (p1 -> p0 ではなく、パスの進行方向の逆)
-          Offset p0 = points[0];
-          Offset next = points[1];
-          double angle = atan2(next.dy - p0.dy, next.dx - p0.dx);
-          _drawArrow(canvas, p0, angle + pi, paint, arrowSize);
+          // 始点方向の角度 (進行方向の逆)
+          double angle = atan2(startVecTo.dy - startVecFrom.dy, startVecTo.dx - startVecFrom.dx);
+          _drawArrow(canvas, startVecFrom, angle + pi, paint, arrowSize);
         }
         if (drawing.hasArrowEnd && points.length >= 2) {
           // 終点方向の角度
-          Offset pEnd = points.last;
-          Offset prev = points[points.length - 2];
-          double angle = atan2(pEnd.dy - prev.dy, pEnd.dx - prev.dx);
-          _drawArrow(canvas, pEnd, angle, paint, arrowSize);
+          double angle = atan2(endVecTo.dy - endVecFrom.dy, endVecTo.dx - endVecFrom.dx);
+          _drawArrow(canvas, endVecTo, angle, paint, arrowSize);
         }
       }
 
@@ -535,6 +610,7 @@ class MemoPainter extends CustomPainter {
     // 線やフリーハンドは中心に描画（内側という概念が曖昧なため）
     if (type == DrawingType.line ||
         type == DrawingType.freehand ||
+        type == DrawingType.elbow ||
         points.length < 2) {
       for (int i = 0; i < points.length; i++) {
         if (i == 0) {
