@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'dart:math';
 import 'dart:ui';
+import 'dart:ui' as ui; // ui.Image用
 import 'text_utils.dart'; // ★作成した便利関数をインポート
 import 'search_result.dart'; // ★検索結果クラスをインポート
 import 'drawing_data.dart'; // ★図形データクラスをインポート
@@ -30,6 +31,7 @@ class MemoPainter extends CustomPainter {
   final double shapePaddingY; // ★図形パディングY (行高さ比率)
   final bool showDrawings; // ★図形表示フラグ
   final bool showAllHandles; // ★全ハンドル表示フラグ
+  final Map<String, ui.Image> imageCache; // ★画像キャッシュ
 
   MemoPainter({
     required this.lines,
@@ -55,6 +57,7 @@ class MemoPainter extends CustomPainter {
     required this.shapePaddingY,
     required this.showDrawings,
     required this.showAllHandles,
+    this.imageCache = const {},
   });
 
   @override
@@ -464,7 +467,28 @@ class MemoPainter extends CustomPainter {
           }
           break;
         case DrawingType.image:
-          // 画像描画ロジックは別途実装
+          if (points.length >= 2) {
+            final rect = Rect.fromPoints(points[0], points[1]);
+            final image = (drawing.filePath != null)
+                ? imageCache[drawing.filePath!]
+                : null;
+
+            if (image != null) {
+              paintImage(
+                canvas: canvas,
+                rect: rect,
+                image: image,
+                fit: BoxFit.contain, // アスペクト比を維持
+                filterQuality: FilterQuality.medium,
+              );
+            } else {
+              // 画像未ロード時のプレースホルダー
+              final placeholderPaint = Paint()
+                ..color = Colors.grey.withOpacity(0.2)
+                ..style = PaintingStyle.fill;
+              canvas.drawRect(rect, placeholderPaint);
+            }
+          }
           break;
       }
 
@@ -709,7 +733,8 @@ class MemoPainter extends CustomPainter {
         oldDelegate.shapePaddingX != shapePaddingX ||
         oldDelegate.shapePaddingY != shapePaddingY ||
         oldDelegate.showDrawings != showDrawings ||
-        oldDelegate.showAllHandles != showAllHandles;
+        oldDelegate.showAllHandles != showAllHandles ||
+        oldDelegate.imageCache != imageCache;
   }
 }
 

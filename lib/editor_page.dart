@@ -1771,7 +1771,9 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                   : _controller.currentShapeType == DrawingType.roundedRectangle
                   ? Icons.rounded_corner 
                   : _controller.currentShapeType == DrawingType.burst
-                  ? Icons.new_releases
+                  ? Icons.new_releases 
+                  : _controller.currentShapeType == DrawingType.image
+                  ? Icons.image
                   : Icons.circle_outlined,
               size: 18,
             ),
@@ -1807,6 +1809,13 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                     const PopupMenuItem(
                       value: DrawingType.burst,
                       child: Text('Burst'),
+                    ),
+                  ];
+                } else if (_controller.currentShapeType == DrawingType.image) {
+                  return [
+                    const PopupMenuItem(
+                      value: DrawingType.image,
+                      child: Text('Image'),
                     ),
                   ];
                 } else {
@@ -1846,6 +1855,10 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                 const PopupMenuItem(
                   value: DrawingType.burst,
                   child: Text('Burst'),
+                ),
+                const PopupMenuItem(
+                  value: DrawingType.image,
+                  child: Text('Image'),
                 ),
               ];
             },
@@ -2322,17 +2335,57 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                                                     _updateImeWindowPosition();
                                                   });
                                             },
-                                            onPanEnd: (details) {
+                                            onPanEnd: (details) async {
                                               if (_controller.currentMode ==
                                                   EditorMode.draw) {
                                                 if (_controller
                                                     .isInteractingWithDrawing) {
                                                   _controller.handlePanEnd();
                                                 } else {
+                                                  // 描画中だったかチェック
+                                                  bool wasDrawing =
+                                                      _controller.isDrawing;
+                                                  DrawingType type =
+                                                      _controller
+                                                          .currentShapeType;
+
                                                   _controller.endStroke(
                                                     _charWidth,
                                                     _lineHeight,
                                                   );
+
+                                                  // 画像ツールで描画が完了した場合
+                                                  if (wasDrawing &&
+                                                      type ==
+                                                          DrawingType.image) {
+                                                    if (_controller
+                                                        .drawings.isNotEmpty) {
+                                                      final last = _controller
+                                                          .drawings.last;
+                                                      if (last.type ==
+                                                              DrawingType
+                                                                  .image &&
+                                                          last.filePath ==
+                                                              null) {
+                                                        final path =
+                                                            await FileIOHelper
+                                                                .instance
+                                                                .pickImagePath();
+                                                        if (path != null) {
+                                                          await _controller
+                                                              .setImagePath(
+                                                                last.id,
+                                                                path,
+                                                              );
+                                                        } else {
+                                                          _controller
+                                                              .deleteDrawing(
+                                                                last.id,
+                                                              );
+                                                        }
+                                                      }
+                                                    }
+                                                  }
                                                 }
                                               } else {
                                                 _controller.handlePanEnd();
@@ -2402,6 +2455,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                                                       showAllHandles:
                                                           _controller
                                                               .showAllHandles,
+                                                      imageCache: _controller.imageCache,
                                                     ),
                                                     size: Size.infinite,
                                                   ),

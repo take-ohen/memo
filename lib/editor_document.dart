@@ -77,6 +77,9 @@ class EditorDocument extends ChangeNotifier {
   bool get isInteractingWithDrawing =>
       _activeHandleIndex != null || _isMovingDrawing;
 
+  // 描画中かどうか (ストロークが存在するか)
+  bool get isDrawing => _currentStroke != null && _currentStroke!.isNotEmpty;
+
   // 履歴管理
   final HistoryManager historyManager = HistoryManager();
 
@@ -509,6 +512,7 @@ class EditorDocument extends ChangeNotifier {
     bool? arrowStart,
     bool? arrowEnd,
     bool? isUpperRoute,
+    String? filePath,
   }) {
     final index = drawings.indexWhere((d) => d.id == id);
     if (index == -1) return;
@@ -526,6 +530,7 @@ class EditorDocument extends ChangeNotifier {
     if (arrowStart != null) drawing.hasArrowStart = arrowStart;
     if (arrowEnd != null) drawing.hasArrowEnd = arrowEnd;
     if (isUpperRoute != null) drawing.isUpperRoute = isUpperRoute;
+    if (filePath != null) drawing.filePath = filePath;
 
     // パディング更新 (矩形系のみ)
     if ((paddingX != null || paddingY != null) &&
@@ -597,6 +602,14 @@ class EditorDocument extends ChangeNotifier {
     saveHistory();
     drawings.removeWhere((d) => d.id == selectedDrawingId);
     selectedDrawingId = null;
+    notifyListeners();
+  }
+
+  // 指定IDの図形を削除 (画像挿入キャンセル時など)
+  void deleteDrawing(String id) {
+    saveHistory();
+    drawings.removeWhere((d) => d.id == id);
+    if (selectedDrawingId == id) selectedDrawingId = null;
     notifyListeners();
   }
 

@@ -17,6 +17,15 @@ class FileIOHelper {
     const XTypeGroup(label: 'All Files'),
   ];
 
+  // 画像用のフィルタ定義
+  final List<XTypeGroup> _imageTypeGroups = [
+    const XTypeGroup(
+      label: 'Images',
+      extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'],
+    ),
+    const XTypeGroup(label: 'All Files'),
+  ];
+
   /// ファイルを開くダイアログを表示し、パスを返す
   Future<String?> pickFilePath() async {
     try {
@@ -24,6 +33,16 @@ class FileIOHelper {
       return file?.path;
     } catch (e) {
       // エラーハンドリングが必要ならここで行う
+      return null;
+    }
+  }
+
+  /// 画像ファイルを開くダイアログを表示し、パスを返す
+  Future<String?> pickImagePath() async {
+    try {
+      final XFile? file = await openFile(acceptedTypeGroups: _imageTypeGroups);
+      return file?.path;
+    } catch (e) {
       return null;
     }
   }

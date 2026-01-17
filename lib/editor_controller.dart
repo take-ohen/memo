@@ -2,6 +2,8 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+import 'dart:ui' as ui;
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -259,6 +261,37 @@ class EditorController extends ChangeNotifier {
   // --- カラープリセット ---
   List<int> savedColors = [];
 
+  // --- 画像キャッシュ ---
+  Map<String, ui.Image> imageCache = {};
+
+  // 画像をロードしてキャッシュする
+  Future<void> loadImage(String path) async {
+    if (imageCache.containsKey(path)) return;
+
+    try {
+      final file = File(path);
+      if (!await file.exists()) return;
+
+      final data = await file.readAsBytes();
+      final codec = await ui.instantiateImageCodec(data);
+      final frameInfo = await codec.getNextFrame();
+      imageCache[path] = frameInfo.image;
+      notifyListeners();
+    } catch (e) {
+      debugPrint("Error loading image: $e");
+    }
+  }
+
+  // 画像パスを設定する (ロード含む)
+  Future<void> setImagePath(String id, String path) async {
+    await loadImage(path);
+    activeDocument.updateDrawingProperties(id, filePath: path);
+  }
+
+  void deleteDrawing(String id) {
+    activeDocument.deleteDrawing(id);
+  }
+
   // Getters
   String get uiFontFamily => _uiFontFamily;
   double get uiFontSize => _uiFontSize;
@@ -316,6 +349,9 @@ class EditorController extends ChangeNotifier {
 
   // 図形操作中かどうか (移動 or リサイズ)
   bool get isInteractingWithDrawing => activeDocument.isInteractingWithDrawing;
+
+  // 描画中かどうか
+  bool get isDrawing => activeDocument.isDrawing;
 
   EditorController() {
     // 初期ドキュメント作成
@@ -922,6 +958,7 @@ class EditorController extends ChangeNotifier {
     bool? arrowStart,
     bool? arrowEnd,
     bool? isUpperRoute,
+    String? filePath,
   }) {
     if (selectedDrawingId == null) return;
     activeDocument.updateDrawingProperties(
@@ -936,6 +973,7 @@ class EditorController extends ChangeNotifier {
       arrowStart: arrowStart,
       arrowEnd: arrowEnd,
       isUpperRoute: isUpperRoute,
+      filePath: filePath,
     );
   }
 
