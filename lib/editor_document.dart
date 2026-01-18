@@ -72,10 +72,14 @@ class EditorDocument extends ChangeNotifier {
   List<AnchorPoint>? _initialDrawingPoints; // 移動開始時の図形座標（移動量の基準）
   int? _dragStartRow; // ドラッグ開始時の行
   int? _dragStartCol; // ドラッグ開始時の列
+  int? _activeTableDividerIndex; // 操作中のテーブル区切り線のインデックス
+  bool _activeTableDividerIsRow = false; // true: 行(横線), false: 列(縦線)
 
   // 図形操作中かどうか
   bool get isInteractingWithDrawing =>
-      _activeHandleIndex != null || _isMovingDrawing;
+      _activeHandleIndex != null ||
+      _isMovingDrawing ||
+      _activeTableDividerIndex != null;
 
   // 描画中かどうか (ストロークが存在するか)
   bool get isDrawing => _currentStroke != null && _currentStroke!.isNotEmpty;
@@ -398,6 +402,7 @@ class EditorDocument extends ChangeNotifier {
 
     saveHistory(); // 履歴保存
     drawings.add(newDrawing);
+    selectedDrawingId = newDrawing.id; // 新規図形を選択状態にする
 
     // 描画中の一時ストロークをクリア
     _currentStroke = null;
@@ -485,6 +490,7 @@ class EditorDocument extends ChangeNotifier {
 
     saveHistory(); // 履歴保存
     drawings.add(newDrawing);
+    selectedDrawingId = newDrawing.id; // 新規図形を選択状態にする
     _currentStroke = null;
     strokes.clear();
     notifyListeners();
@@ -513,6 +519,8 @@ class EditorDocument extends ChangeNotifier {
     bool? arrowEnd,
     bool? isUpperRoute,
     String? filePath,
+    List<double>? tableRowPositions,
+    List<double>? tableColPositions,
   }) {
     final index = drawings.indexWhere((d) => d.id == id);
     if (index == -1) return;
@@ -531,6 +539,8 @@ class EditorDocument extends ChangeNotifier {
     if (arrowEnd != null) drawing.hasArrowEnd = arrowEnd;
     if (isUpperRoute != null) drawing.isUpperRoute = isUpperRoute;
     if (filePath != null) drawing.filePath = filePath;
+    if (tableRowPositions != null) drawing.tableRowPositions = tableRowPositions;
+    if (tableColPositions != null) drawing.tableColPositions = tableColPositions;
 
     // パディング更新 (矩形系のみ)
     if ((paddingX != null || paddingY != null) &&
@@ -571,6 +581,34 @@ class EditorDocument extends ChangeNotifier {
       }
     }
     return false;
+  }
+
+  // 指定された矩形範囲に含まれる（交差する）図形のIDリストを取得
+  List<String> getDrawingsInRect(Rect selectionRect, double charWidth, double lineHeight) {
+    List<String> result = [];
+    for (final drawing in drawings) {
+      // 図形のバウンディングボックスを計算
+      double minX = double.infinity, maxX = -double.infinity;
+      double minY = double.infinity, maxY = -double.infinity;
+      
+      final points = drawing.points.map((p) => _resolveAnchor(p, charWidth, lineHeight)).toList();
+      if (points.isEmpty) continue;
+
+      for (final p in points) {
+        if (p.dx < minX) minX = p.dx;
+        if (p.dx > maxX) maxX = p.dx;
+        if (p.dy < minY) minY = p.dy;
+        if (p.dy > maxY) maxY = p.dy;
+      }
+      
+      final drawingRect = Rect.fromLTRB(minX, minY, maxX, maxY);
+      
+      // 交差判定 (少しでもかかっていれば対象とする)
+      if (selectionRect.overlaps(drawingRect)) {
+        result.add(drawing.id);
+      }
+    }
+    return result;
   }
 
   // --- Eraser Logic ---
@@ -1430,7 +1468,39 @@ class EditorDocument extends ChangeNotifier {
             }
           }
 
-          // B. 図形本体判定 (移動)
+          // B. テーブル罫線判定
+          if (drawing.type == DrawingType.table) {
+            final rect = Rect.fromPoints(points[0], points[1]);
+            const double hitThreshold = 8.0;
+
+            // 横線
+            for (int i = 0; i < drawing.tableRowPositions.length; i++) {
+              double y = rect.top + rect.height * drawing.tableRowPositions[i];
+              double snappedY = (y / lineHeight).round() * lineHeight;
+              if ((localPosition.dy - snappedY).abs() < hitThreshold &&
+                  localPosition.dx >= rect.left &&
+                  localPosition.dx <= rect.right) {
+                _activeTableDividerIndex = i;
+                _activeTableDividerIsRow = true;
+                return;
+              }
+            }
+
+            // 縦線
+            for (int i = 0; i < drawing.tableColPositions.length; i++) {
+              double x = rect.left + rect.width * drawing.tableColPositions[i];
+              double snappedX = (x / charWidth).round() * charWidth;
+              if ((localPosition.dx - snappedX).abs() < hitThreshold &&
+                  localPosition.dy >= rect.top &&
+                  localPosition.dy <= rect.bottom) {
+                _activeTableDividerIndex = i;
+                _activeTableDividerIsRow = false;
+                return;
+              }
+            }
+          }
+
+          // C. 図形本体判定 (移動)
           if (_isHit(drawing, localPosition, charWidth, lineHeight)) {
             _isMovingDrawing = true;
             _initialDrawingPoints = drawing.points
@@ -1457,6 +1527,46 @@ class EditorDocument extends ChangeNotifier {
     notifyListeners();
   }
 
+  // テーブルのカーソルタイプ判定 (0:なし, 1:Row, 2:Col)
+  int getTableCursorType(Offset pos, double charWidth, double lineHeight) {
+    if (selectedDrawingId == null) return 0;
+    final index = drawings.indexWhere((d) => d.id == selectedDrawingId);
+    if (index == -1) return 0;
+    final drawing = drawings[index];
+    if (drawing.type != DrawingType.table) return 0;
+
+    final points = drawing.points
+        .map((p) => _resolveAnchor(p, charWidth, lineHeight))
+        .toList();
+    if (points.length < 2) return 0;
+    final rect = Rect.fromPoints(points[0], points[1]);
+
+    const double hitThreshold = 8.0;
+
+    // 横線判定
+    for (final ratio in drawing.tableRowPositions) {
+      double y = rect.top + rect.height * ratio;
+      double snappedY = (y / lineHeight).round() * lineHeight;
+      if ((pos.dy - snappedY).abs() < hitThreshold &&
+          pos.dx >= rect.left &&
+          pos.dx <= rect.right) {
+        return 1; // Resize Row
+      }
+    }
+
+    // 縦線判定
+    for (final ratio in drawing.tableColPositions) {
+      double x = rect.left + rect.width * ratio;
+      double snappedX = (x / charWidth).round() * charWidth;
+      if ((pos.dx - snappedX).abs() < hitThreshold &&
+          pos.dy >= rect.top &&
+          pos.dy <= rect.bottom) {
+        return 2; // Resize Col
+      }
+    }
+    return 0;
+  }
+
   void handlePanUpdate(
     Offset localPosition,
     double charWidth,
@@ -1480,7 +1590,62 @@ class EditorDocument extends ChangeNotifier {
       return;
     }
 
-    // B. 移動中
+    // B. テーブル罫線移動中
+    if (_activeTableDividerIndex != null && selectedDrawingId != null) {
+      final index = drawings.indexWhere((d) => d.id == selectedDrawingId);
+      if (index != -1) {
+        final drawing = drawings[index];
+        final points = drawing.points
+            .map((p) => _resolveAnchor(p, charWidth, lineHeight))
+            .toList();
+        final rect = Rect.fromPoints(points[0], points[1]);
+
+        if (_activeTableDividerIsRow) {
+          // 横線移動
+          double newY = localPosition.dy;
+          // グリッドスナップ
+          newY = (newY / lineHeight).round() * lineHeight;
+
+          // 範囲制限 (前の線 < 自分 < 次の線)
+          double minRatio = 0.0;
+          if (_activeTableDividerIndex! > 0) {
+            minRatio = drawing.tableRowPositions[_activeTableDividerIndex! - 1];
+          }
+          double maxRatio = 1.0;
+          if (_activeTableDividerIndex! <
+              drawing.tableRowPositions.length - 1) {
+            maxRatio = drawing.tableRowPositions[_activeTableDividerIndex! + 1];
+          }
+
+          double newRatio = (newY - rect.top) / rect.height;
+          // 少し余裕を持たせる (0.01)
+          newRatio = newRatio.clamp(minRatio + 0.01, maxRatio - 0.01);
+          drawing.tableRowPositions[_activeTableDividerIndex!] = newRatio;
+        } else {
+          // 縦線移動
+          double newX = localPosition.dx;
+          newX = (newX / charWidth).round() * charWidth;
+
+          double minRatio = 0.0;
+          if (_activeTableDividerIndex! > 0) {
+            minRatio = drawing.tableColPositions[_activeTableDividerIndex! - 1];
+          }
+          double maxRatio = 1.0;
+          if (_activeTableDividerIndex! <
+              drawing.tableColPositions.length - 1) {
+            maxRatio = drawing.tableColPositions[_activeTableDividerIndex! + 1];
+          }
+
+          double newRatio = (newX - rect.left) / rect.width;
+          newRatio = newRatio.clamp(minRatio + 0.01, maxRatio - 0.01);
+          drawing.tableColPositions[_activeTableDividerIndex!] = newRatio;
+        }
+        notifyListeners();
+      }
+      return;
+    }
+
+    // C. 移動中
     if (_isMovingDrawing &&
         selectedDrawingId != null &&
         _initialDrawingPoints != null) {
@@ -1506,18 +1671,21 @@ class EditorDocument extends ChangeNotifier {
       return;
     }
 
-    // C. テキスト選択中
+    // D. テキスト選択中
     handleTap(localPosition, charWidth, lineHeight);
   }
 
   void handlePanEnd() {
-    if (_activeHandleIndex != null || _isMovingDrawing) {
+    if (_activeHandleIndex != null ||
+        _isMovingDrawing ||
+        _activeTableDividerIndex != null) {
       saveHistory(); // 操作完了時に履歴保存
       _activeHandleIndex = null;
       _isMovingDrawing = false;
       _initialDrawingPoints = null;
       _dragStartRow = null;
       _dragStartCol = null;
+      _activeTableDividerIndex = null;
     }
   }
 

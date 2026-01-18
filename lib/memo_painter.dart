@@ -31,6 +31,10 @@ class MemoPainter extends CustomPainter {
   final double shapePaddingY; // ★図形パディングY (行高さ比率)
   final bool showDrawings; // ★図形表示フラグ
   final bool showAllHandles; // ★全ハンドル表示フラグ
+  final String? highlightedDrawingId; // ★ハイライト中の図形ID
+  final DrawingType? highlightedDrawingType; // ★ハイライト中の図形タイプ (フィルタ用)
+  final Rect? areaSelectionRect; // ★範囲選択中の矩形
+  final int editorBackgroundColor; // ★エディタ背景色 (補色計算用)
   final Map<String, ui.Image> imageCache; // ★画像キャッシュ
 
   MemoPainter({
@@ -57,6 +61,10 @@ class MemoPainter extends CustomPainter {
     required this.shapePaddingY,
     required this.showDrawings,
     required this.showAllHandles,
+    this.highlightedDrawingId,
+    this.highlightedDrawingType,
+    this.areaSelectionRect,
+    required this.editorBackgroundColor,
     this.imageCache = const {},
   });
 
@@ -194,6 +202,26 @@ class MemoPainter extends CustomPainter {
     // --------------------------------------------------------
     if (showDrawings) {
       _drawDrawings(canvas);
+    }
+
+    // --------------------------------------------------------
+    // 6. 範囲選択ラバーバンドの描画 (最前面)
+    // --------------------------------------------------------
+    if (areaSelectionRect != null) {
+      final paint = Paint()
+        ..color = Colors.blueAccent
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.0;
+      // 破線で描画
+      final path = Path()..addRect(areaSelectionRect!);
+      final dashedPath = _createDashedPath(path, 4, 4);
+      canvas.drawPath(dashedPath, paint);
+
+      // 薄い塗りつぶし
+      canvas.drawRect(
+        areaSelectionRect!,
+        Paint()..color = Colors.blueAccent.withOpacity(0.1),
+      );
     }
   }
 
@@ -366,12 +394,37 @@ class MemoPainter extends CustomPainter {
       // パス生成
       Path path = Path();
 
+      // 矢印がある場合の線の短縮量計算
+      double arrowShortenLen = 0.0;
+      if (drawing.type == DrawingType.line ||
+          drawing.type == DrawingType.elbow) {
+        double baseWidth = paint.strokeWidth;
+        if (drawing.lineStyle == LineStyle.doubleLine) {
+          baseWidth *= 3.0;
+        }
+        double arrowSize = max(12.0, baseWidth * 3.0);
+        // 矢印の高さ分(cos30°)だけ短縮。
+        arrowShortenLen = (arrowSize * cos(pi / 6));
+        if (arrowShortenLen < 0) arrowShortenLen = 0;
+      }
+
       // 図形タイプごとの描画
       switch (drawing.type) {
         case DrawingType.line:
           if (points.length >= 2) {
-            path.moveTo(points[0].dx, points[0].dy);
-            path.lineTo(points[1].dx, points[1].dy);
+            Offset p1 = points[0];
+            Offset p2 = points[1];
+
+            // 矢印がある場合、線を短くする
+            if (drawing.hasArrowStart) {
+              p1 = _shortenPoint(p1, p2, arrowShortenLen);
+            }
+            if (drawing.hasArrowEnd) {
+              p2 = _shortenPoint(p2, p1, arrowShortenLen);
+            }
+
+            path.moveTo(p1.dx, p1.dy);
+            path.lineTo(p2.dx, p2.dy);
           }
           break;
         case DrawingType.elbow: // L型線
@@ -386,9 +439,21 @@ class MemoPainter extends CustomPainter {
             // つまり、cornerY == p1.dy なら、まずは横移動なので cornerX = p2.dx
             final double cornerX = (cornerY == p1.dy) ? p2.dx : p1.dx;
 
-            path.moveTo(p1.dx, p1.dy);
+            final corner = Offset(cornerX, cornerY);
+            Offset drawP1 = p1;
+            Offset drawP2 = p2;
+
+            // 矢印がある場合、線を短くする
+            if (drawing.hasArrowStart) {
+              drawP1 = _shortenPoint(p1, corner, arrowShortenLen);
+            }
+            if (drawing.hasArrowEnd) {
+              drawP2 = _shortenPoint(p2, corner, arrowShortenLen);
+            }
+
+            path.moveTo(drawP1.dx, drawP1.dy);
             path.lineTo(cornerX, cornerY);
-            path.lineTo(p2.dx, p2.dy);
+            path.lineTo(drawP2.dx, drawP2.dy);
           }
           break;
         case DrawingType.rectangle:
@@ -428,14 +493,6 @@ class MemoPainter extends CustomPainter {
               if (i == 0) path.moveTo(x, y); else path.lineTo(x, y);
             }
             path.close();
-          }
-          break;
-        case DrawingType.freehand:
-          if (points.length > 1) {
-            path.moveTo(points[0].dx, points[0].dy);
-            for (int i = 0; i < points.length - 1; i++) {
-              path.lineTo(points[i + 1].dx, points[i + 1].dy);
-            }
           }
           break;
         case DrawingType.marker:
@@ -489,6 +546,38 @@ class MemoPainter extends CustomPainter {
               canvas.drawRect(rect, placeholderPaint);
             }
           }
+          break;
+        case DrawingType.table:
+          if (points.length >= 2) {
+            final rect = Rect.fromPoints(points[0], points[1]);
+            // 外枠
+            path.addRect(rect);
+
+            // 内部線 (横) - グリッド吸着
+            for (final ratio in drawing.tableRowPositions) {
+              double y = rect.top + rect.height * ratio;
+              // 行境界にスナップ
+              double snappedY = (y / lineHeight).round() * lineHeight;
+              // 枠内に収まる場合のみ描画
+              if (snappedY > rect.top + 1 && snappedY < rect.bottom - 1) {
+                path.moveTo(rect.left, snappedY);
+                path.lineTo(rect.right, snappedY);
+              }
+            }
+
+            // 内部線 (縦) - グリッド吸着
+            for (final ratio in drawing.tableColPositions) {
+              double x = rect.left + rect.width * ratio;
+              // 文字境界にスナップ
+              double snappedX = (x / charWidth).round() * charWidth;
+              if (snappedX > rect.left + 1 && snappedX < rect.right - 1) {
+                path.moveTo(snappedX, rect.top);
+                path.lineTo(snappedX, rect.bottom);
+              }
+            }
+          }
+          break;
+        default:
           break;
       }
 
@@ -568,6 +657,16 @@ class MemoPainter extends CustomPainter {
       if (drawing.id == selectedDrawingId || showAllHandles) {
         _drawHandles(canvas, points, drawing.type, drawing);
       }
+
+      // フィルタ中の図形タイプを強調表示 (薄い黄色)
+      if (drawing.type == highlightedDrawingType) {
+        _drawTypeHighlight(canvas, points, drawing.type);
+      }
+
+      // リストでホバー中の図形を強調表示
+      if (drawing.id == highlightedDrawingId) {
+        _drawHighlight(canvas, points, drawing.type, drawing);
+      }
     }
   }
 
@@ -616,6 +715,17 @@ class MemoPainter extends CustomPainter {
     canvas.drawPath(path, arrowPaint);
   }
 
+  // 始点から終点に向かって指定距離だけ進んだ点を返す (線の短縮用)
+  Offset _shortenPoint(Offset start, Offset target, double shortenLen) {
+    final double dist = (target - start).distance;
+    if (dist <= shortenLen) return target; // 距離が短すぎる場合は点にする
+    final double t = shortenLen / dist;
+    return Offset(
+      start.dx + (target.dx - start.dx) * t,
+      start.dy + (target.dy - start.dy) * t,
+    );
+  }
+
   // ★ハンドル描画ロジック
   void _drawHandles(
     Canvas canvas,
@@ -633,7 +743,6 @@ class MemoPainter extends CustomPainter {
 
     // 線やフリーハンドは中心に描画（内側という概念が曖昧なため）
     if (type == DrawingType.line ||
-        type == DrawingType.freehand ||
         type == DrawingType.elbow ||
         points.length < 2) {
       for (int i = 0; i < points.length; i++) {
@@ -688,6 +797,85 @@ class MemoPainter extends CustomPainter {
     );
   }
 
+  // ★ハイライト描画ロジック (リストホバー用)
+  void _drawHighlight(
+    Canvas canvas,
+    List<Offset> points,
+    DrawingType type,
+    DrawingObject drawing,
+  ) {
+    // 背景色の補色を計算
+    final bgColor = Color(editorBackgroundColor);
+    final compColor = Color.fromARGB(255, 255 - bgColor.red, 255 - bgColor.green, 255 - bgColor.blue);
+
+    final paint = Paint()
+      ..color = compColor // 補色を使用
+      ..strokeWidth = 3.0
+      ..style = PaintingStyle.stroke;
+
+    if (points.isEmpty) return;
+
+    // 簡易的に矩形または線で囲む
+    if (type == DrawingType.line ||
+        type == DrawingType.elbow ||
+        points.length < 2) {
+      // 線系: パスをなぞるのが理想だが、簡易的に各点を結ぶか、バウンディングボックスを表示
+      // ここではバウンディングボックスを表示
+      double minX = double.infinity, maxX = -double.infinity;
+      double minY = double.infinity, maxY = -double.infinity;
+      for (final p in points) {
+        if (p.dx < minX) minX = p.dx;
+        if (p.dx > maxX) maxX = p.dx;
+        if (p.dy < minY) minY = p.dy;
+        if (p.dy > maxY) maxY = p.dy;
+      }
+      // 少し広げる
+      final rect = Rect.fromLTRB(minX, minY, maxX, maxY).inflate(4.0);
+      canvas.drawRect(rect, paint);
+    } else {
+      // 矩形系
+      final rect = Rect.fromPoints(points[0], points[1]).inflate(4.0);
+      if (type == DrawingType.oval) {
+        canvas.drawOval(rect, paint);
+      } else if (type == DrawingType.roundedRectangle) {
+        final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(8));
+        canvas.drawRRect(rrect, paint);
+      } else {
+        canvas.drawRect(rect, paint);
+      }
+    }
+  }
+
+  // ★タイプ別ハイライト描画ロジック (フィルタ用)
+  void _drawTypeHighlight(
+    Canvas canvas,
+    List<Offset> points,
+    DrawingType type,
+  ) {
+    // 背景色の補色を計算 (少し透明度を入れて区別するか、同じ補色を使う)
+    final bgColor = Color(editorBackgroundColor);
+    final compColor = Color.fromARGB(255, 255 - bgColor.red, 255 - bgColor.green, 255 - bgColor.blue);
+
+    final paint = Paint()
+      ..color = compColor.withOpacity(0.6) // フィルタは少し薄めの補色
+      ..strokeWidth = 3.0
+      ..style = PaintingStyle.stroke;
+
+    if (points.isEmpty) return;
+
+    // 簡易的にバウンディングボックスを表示
+    double minX = double.infinity, maxX = -double.infinity;
+    double minY = double.infinity, maxY = -double.infinity;
+    for (final p in points) {
+      if (p.dx < minX) minX = p.dx;
+      if (p.dx > maxX) maxX = p.dx;
+      if (p.dy < minY) minY = p.dy;
+      if (p.dy > maxY) maxY = p.dy;
+    }
+    final rect = Rect.fromLTRB(minX, minY, maxX, maxY).inflate(2.0);
+    canvas.drawRect(rect, paint);
+  }
+
   // ★AnchorPoint -> Offset 変換 (MemoPainter内での簡易実装)
   Offset _resolveAnchor(AnchorPoint anchor) {
     // 行が存在しない場合のガード
@@ -734,6 +922,10 @@ class MemoPainter extends CustomPainter {
         oldDelegate.shapePaddingY != shapePaddingY ||
         oldDelegate.showDrawings != showDrawings ||
         oldDelegate.showAllHandles != showAllHandles ||
+        oldDelegate.highlightedDrawingId != highlightedDrawingId ||
+        oldDelegate.highlightedDrawingType != highlightedDrawingType ||
+        oldDelegate.areaSelectionRect != areaSelectionRect ||
+        oldDelegate.editorBackgroundColor != editorBackgroundColor ||
         oldDelegate.imageCache != imageCache;
   }
 }

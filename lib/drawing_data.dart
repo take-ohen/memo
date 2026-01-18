@@ -2,7 +2,6 @@ import 'dart:ui';
 
 /// 図形の種類
 enum DrawingType {
-  freehand, // フリーハンド線
   line, // 直線
   rectangle, // 矩形
   oval, // 楕円
@@ -11,6 +10,7 @@ enum DrawingType {
   elbow, // L型線
   marker, // マーカー
   image, // 画像
+  table, // テーブル (表)
 }
 
 /// 線の種類
@@ -68,7 +68,6 @@ class DrawingObject {
   DrawingType type; // 変更可能にするため final を削除
 
   // 図形を構成する点群
-  // - freehand: ストロークの全点
   // - line/rectangle: [始点, 終点] の2点
   final List<AnchorPoint> points;
 
@@ -83,6 +82,8 @@ class DrawingObject {
   bool hasArrowEnd;
   bool isUpperRoute; // L字線のルート (true: 上/左優先, false: 下/右優先)
   String? filePath; // 画像ファイルのパス
+  List<double> tableRowPositions; // テーブルの水平区切り線位置 (0.0-1.0)
+  List<double> tableColPositions; // テーブルの垂直区切り線位置 (0.0-1.0)
 
   DrawingObject({
     required this.id,
@@ -98,6 +99,8 @@ class DrawingObject {
     this.hasArrowEnd = false,
     this.isUpperRoute = true,
     this.filePath,
+    this.tableRowPositions = const [],
+    this.tableColPositions = const [],
   });
 
   // コピー用 (Undo/Redo時のディープコピーに使用)
@@ -116,6 +119,8 @@ class DrawingObject {
       hasArrowEnd: hasArrowEnd,
       isUpperRoute: isUpperRoute,
       filePath: filePath,
+      tableRowPositions: List.from(tableRowPositions),
+      tableColPositions: List.from(tableColPositions),
     );
   }
 
@@ -137,6 +142,8 @@ class DrawingObject {
     'hasArrowEnd': hasArrowEnd,
     'isUpperRoute': isUpperRoute,
     'filePath': filePath,
+    'tableRowPositions': tableRowPositions,
+    'tableColPositions': tableColPositions,
   };
 
   factory DrawingObject.fromJson(Map<String, dynamic> json) {
@@ -158,6 +165,14 @@ class DrawingObject {
       hasArrowEnd: json['hasArrowEnd'] as bool? ?? false,
       isUpperRoute: json['isUpperRoute'] as bool? ?? true,
       filePath: json['filePath'] as String?,
+      tableRowPositions: (json['tableRowPositions'] as List?)
+              ?.map((e) => (e as num).toDouble())
+              .toList() ??
+          [],
+      tableColPositions: (json['tableColPositions'] as List?)
+              ?.map((e) => (e as num).toDouble())
+              .toList() ??
+          [],
     );
   }
 }

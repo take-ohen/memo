@@ -26,6 +26,8 @@ class DrawingToolAttributes {
   int paddingX;
   double paddingY;
   bool isUpperRoute;
+  int tableRows;
+  int tableCols;
 
   DrawingToolAttributes({
     required this.color,
@@ -37,6 +39,8 @@ class DrawingToolAttributes {
     this.paddingX = 0,
     this.paddingY = 0.0,
     this.isUpperRoute = true,
+    this.tableRows = 3,
+    this.tableCols = 3,
   });
 
   DrawingToolAttributes copyWith({
@@ -49,6 +53,8 @@ class DrawingToolAttributes {
     int? paddingX,
     double? paddingY,
     bool? isUpperRoute,
+    int? tableRows,
+    int? tableCols,
   }) {
     return DrawingToolAttributes(
       color: color ?? this.color,
@@ -60,6 +66,8 @@ class DrawingToolAttributes {
       paddingX: paddingX ?? this.paddingX,
       paddingY: paddingY ?? this.paddingY,
       isUpperRoute: isUpperRoute ?? this.isUpperRoute,
+      tableRows: tableRows ?? this.tableRows,
+      tableCols: tableCols ?? this.tableCols,
     );
   }
 }
@@ -154,6 +162,15 @@ class EditorController extends ChangeNotifier {
   List<List<Offset>> get strokes => activeDocument.strokes;
   List<DrawingObject> get drawings => activeDocument.drawings;
   String? get selectedDrawingId => activeDocument.selectedDrawingId;
+  String? _highlightedDrawingId; // リストでホバー中の図形ID
+  String? get highlightedDrawingId => _highlightedDrawingId;
+  
+  // フィルタリング・範囲選択用
+  DrawingType? highlightedDrawingType; // フィルタ中の図形タイプ（強調表示用）
+  List<String>? filteredDrawingIds; // 範囲選択で絞り込まれた図形IDリスト
+  bool isAreaSelectionMode = false; // 範囲選択モード中かどうか
+  Rect? areaSelectionRect; // 範囲選択中の矩形
+  Offset? _areaSelectionStartPos; // 範囲選択の開始位置
 
   // --- エディタカラー設定 ---
   int editorBackgroundColor = 0xFFFFFFFF; // 白
@@ -222,6 +239,22 @@ class EditorController extends ChangeNotifier {
       paddingX: 0,
       paddingY: 0.0,
     ),
+    DrawingType.table: DrawingToolAttributes(
+      color: const Color(0xCCF44336), // 他の図形と同じ赤系
+      strokeWidth: 1.0, // 枠線は細めがデフォルト
+      markerHeight: 1.0,
+      paddingX: 0,
+      paddingY: 0.0,
+    ),
+    DrawingType.table: DrawingToolAttributes(
+      color: const Color(0xCCF44336),
+      strokeWidth: 1.0,
+      markerHeight: 1.0,
+      paddingX: 0,
+      paddingY: 0.0,
+      tableRows: 3,
+      tableCols: 3,
+    ),
   };
 
   // 現在のアクティブな属性を取得（選択中ならその図形、なければデフォルト）
@@ -241,6 +274,8 @@ class EditorController extends ChangeNotifier {
           paddingX: drawing.paddingX,
           paddingY: drawing.paddingY,
           isUpperRoute: drawing.isUpperRoute,
+          tableRows: drawing.type == DrawingType.table ? drawing.tableRowPositions.length + 1 : 3,
+          tableCols: drawing.type == DrawingType.table ? drawing.tableColPositions.length + 1 : 3,
         );
       } catch (_) {}
     }
@@ -945,6 +980,39 @@ class EditorController extends ChangeNotifier {
       attrs.hasArrowStart,
       attrs.hasArrowEnd,
     );
+
+    // テーブルの場合、作成直後にデフォルトのグリッド設定を適用
+    if (currentShapeType == DrawingType.table && selectedDrawingId != null) {
+      setTableGrid(attrs.tableRows, attrs.tableCols);
+    }
+  }
+
+  // テーブルの行数・列数を設定（均等配置）
+  void setTableGrid(int rows, int cols) {
+    // デフォルト値を更新
+    if (_defaults.containsKey(DrawingType.table)) {
+      _defaults[DrawingType.table] = _defaults[DrawingType.table]!.copyWith(
+        tableRows: rows,
+        tableCols: cols,
+      );
+    }
+
+    if (selectedDrawingId == null) return;
+
+    List<double> rowPos = [];
+    for (int i = 1; i < rows; i++) {
+      rowPos.add(i / rows);
+    }
+
+    List<double> colPos = [];
+    for (int i = 1; i < cols; i++) {
+      colPos.add(i / cols);
+    }
+
+    updateSelectedDrawingProperties(
+      tableRowPositions: rowPos,
+      tableColPositions: colPos,
+    );
   }
 
   void updateSelectedDrawingProperties({
@@ -959,6 +1027,8 @@ class EditorController extends ChangeNotifier {
     bool? arrowEnd,
     bool? isUpperRoute,
     String? filePath,
+    List<double>? tableRowPositions,
+    List<double>? tableColPositions,
   }) {
     if (selectedDrawingId == null) return;
     activeDocument.updateDrawingProperties(
@@ -974,11 +1044,109 @@ class EditorController extends ChangeNotifier {
       arrowEnd: arrowEnd,
       isUpperRoute: isUpperRoute,
       filePath: filePath,
+      tableRowPositions: tableRowPositions,
+      tableColPositions: tableColPositions,
     );
+  }
+
+  // 選択中の図形のスタイルをデフォルトとして設定する
+  void setSelectionAsDefault() {
+    if (selectedDrawingId == null) return;
+
+    try {
+      final drawing = activeDocument.drawings.firstWhere(
+        (d) => d.id == selectedDrawingId,
+      );
+
+      int rows = 3;
+      int cols = 3;
+      if (drawing.type == DrawingType.table) {
+        rows = drawing.tableRowPositions.length + 1;
+        cols = drawing.tableColPositions.length + 1;
+      }
+
+      // 現在の図形タイプに対応するデフォルト設定を更新
+      _defaults[drawing.type] = DrawingToolAttributes(
+        color: drawing.color,
+        strokeWidth: drawing.strokeWidth,
+        markerHeight: drawing.markerHeight,
+        lineStyle: drawing.lineStyle,
+        hasArrowStart: drawing.hasArrowStart,
+        hasArrowEnd: drawing.hasArrowEnd,
+        paddingX: drawing.paddingX,
+        paddingY: drawing.paddingY,
+        isUpperRoute: drawing.isUpperRoute,
+        tableRows: rows,
+        tableCols: cols,
+      );
+
+      notifyListeners();
+    } catch (_) {}
   }
 
   bool isPointOnDrawing(Offset pos, double charWidth, double lineHeight) {
     return activeDocument.isPointOnDrawing(pos, charWidth, lineHeight);
+  }
+
+  int getTableCursorType(Offset pos, double charWidth, double lineHeight) {
+    return activeDocument.getTableCursorType(pos, charWidth, lineHeight);
+  }
+
+  // ID指定で図形を選択する
+  void selectDrawing(String id) {
+    activeDocument.selectedDrawingId = id;
+    notifyListeners();
+  }
+
+  // 図形のハイライト設定（リストのホバー用）
+  void setHighlightedDrawing(String? id) {
+    _highlightedDrawingId = id;
+    notifyListeners();
+  }
+
+  // フィルタ中の図形タイプを設定
+  void setHighlightedDrawingType(DrawingType? type) {
+    highlightedDrawingType = type;
+    notifyListeners();
+  }
+
+  // 範囲選択モード開始
+  void startAreaSelectionMode() {
+    isAreaSelectionMode = true;
+    filteredDrawingIds = null; // 絞り込みリセット
+    notifyListeners();
+  }
+
+  // 範囲選択中の更新
+  void updateAreaSelection(Offset start, Offset current) {
+    _areaSelectionStartPos = start;
+    areaSelectionRect = Rect.fromPoints(start, current);
+    notifyListeners();
+  }
+
+  // 範囲選択終了（絞り込み実行）
+  void endAreaSelection(double charWidth, double lineHeight) {
+    if (areaSelectionRect != null) {
+      filteredDrawingIds = activeDocument.getDrawingsInRect(areaSelectionRect!, charWidth, lineHeight);
+    }
+    isAreaSelectionMode = false;
+    areaSelectionRect = null;
+    _areaSelectionStartPos = null;
+    notifyListeners();
+  }
+
+  // フィルタ解除
+  void clearFilter() {
+    filteredDrawingIds = null;
+    highlightedDrawingType = null;
+    notifyListeners();
+  }
+
+  // ドロワー閉鎖時にハイライトをリセット
+  void resetDrawerHighlights() {
+    _highlightedDrawingId = null;
+    highlightedDrawingType = null;
+    notifyListeners();
   }
 
   void setNewLineType(NewLineType type) {
@@ -2266,6 +2434,11 @@ class EditorController extends ChangeNotifier {
     double lineHeight,
   ) {
     activeDocument.trySelectDrawing(localPosition, charWidth, lineHeight);
+  }
+
+  /// 図形選択を解除
+  void clearDrawingSelection() {
+    activeDocument.clearDrawingSelection();
   }
 
   /// 選択中の図形を削除

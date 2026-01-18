@@ -74,14 +74,24 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   static const double _minimapWidth = 100.0;
 
   final GlobalKey _painterKey = GlobalKey();
+  
+  // ドロワー操作用のキー
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   // プロパティバー用コントローラー
   late TextEditingController _widthController;
   late TextEditingController _paddingXController;
   late TextEditingController _paddingYController;
+  late TextEditingController _rowsController;
+  late TextEditingController _colsController;
   final FocusNode _widthFocus = FocusNode();
   final FocusNode _paddingXFocus = FocusNode();
   final FocusNode _paddingYFocus = FocusNode();
+  final FocusNode _rowsFocus = FocusNode();
+  final FocusNode _colsFocus = FocusNode();
+
+  // 図形リスト用フィルタ
+  DrawingType? _drawingListFilter;
 
   // コントローラーの設定値を使用するように変更
   TextStyle get _textStyle => TextStyle(
@@ -130,6 +140,8 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     _widthController = TextEditingController();
     _paddingXController = TextEditingController();
     _paddingYController = TextEditingController();
+    _rowsController = TextEditingController();
+    _colsController = TextEditingController();
 
     _syncPropertyInputs(); // 初期値反映
 
@@ -144,6 +156,12 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     });
     _paddingYFocus.addListener(() {
       if (!_paddingYFocus.hasFocus) _commitPadding();
+    });
+    _rowsFocus.addListener(() {
+      if (!_rowsFocus.hasFocus) _commitTableGrid();
+    });
+    _colsFocus.addListener(() {
+      if (!_colsFocus.hasFocus) _commitTableGrid();
     });
 
     // 設定読み込み
@@ -196,9 +214,13 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     _widthController.dispose();
     _paddingXController.dispose();
     _paddingYController.dispose();
+    _rowsController.dispose();
+    _colsController.dispose();
     _widthFocus.dispose();
     _paddingXFocus.dispose();
     _paddingYFocus.dispose();
+    _rowsFocus.dispose();
+    _colsFocus.dispose();
     super.dispose();
   }
 
@@ -337,11 +359,40 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   void _handleHover(PointerHoverEvent event) {
     // 1. Drawモード: 十字カーソル (図形上は移動カーソル)
     if (_controller.currentMode == EditorMode.draw) {
-      final bool isHit = _controller.isPointOnDrawing(
+      // Ctrl押下時は常に描画カーソル (強制新規描画モード)
+      bool isControl = HardwareKeyboard.instance.isControlPressed ||
+          HardwareKeyboard.instance.isMetaPressed;
+      if (isControl) {
+        setState(() => _currentMouseCursor = SystemMouseCursors.precise);
+        return;
+      }
+
+      bool isHit = _controller.isPointOnDrawing(
         event.localPosition,
         _charWidth,
         _lineHeight,
       );
+
+      // テーブルの罫線判定
+      if (_controller.currentShapeType == DrawingType.table &&
+          _controller.selectedDrawingId != null) {
+        final tableCursor = _controller.getTableCursorType(
+          event.localPosition,
+          _charWidth,
+          _lineHeight,
+        );
+        if (tableCursor == 1) isHit = true; // Row Resize
+        if (tableCursor == 2) isHit = true; // Col Resize
+
+        if (tableCursor == 1) {
+          setState(() => _currentMouseCursor = SystemMouseCursors.resizeRow);
+          return;
+        } else if (tableCursor == 2) {
+          setState(() => _currentMouseCursor = SystemMouseCursors.resizeColumn);
+          return;
+        }
+      }
+
       setState(() {
         _currentMouseCursor = isHit
             ? SystemMouseCursors.move
@@ -1612,6 +1663,13 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
             onPressed: () => _controller.toggleShowDrawings(),
             tooltip: s.menuShowDrawings,
           ),
+          IconButton(
+            icon: const Icon(Icons.list),
+            onPressed: () {
+              _scaffoldKey.currentState?.openEndDrawer();
+            },
+            tooltip: 'Drawing List',
+          ),
           PopupMenuButton<int>(
             tooltip: 'タブ幅設定',
             icon: const Icon(Icons.space_bar),
@@ -1700,6 +1758,272 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
         _paddingYController.text = newText;
       }
     }
+
+    // Table Rows/Cols
+    if (_controller.currentShapeType == DrawingType.table) {
+      int rows = 3;
+      int cols = 3;
+
+      if (_controller.selectedDrawingId != null) {
+        final drawing = _controller.activeDocument
+            .getDrawing(_controller.selectedDrawingId!);
+        rows = drawing.tableRowPositions.length + 1;
+        cols = drawing.tableColPositions.length + 1;
+      } else {
+        // 未選択時はデフォルト値
+        rows = _controller.currentAttributes.tableRows;
+        cols = _controller.currentAttributes.tableCols;
+      }
+      
+      if (!_rowsFocus.hasFocus) {
+        String newRows = rows.toString();
+        if (_rowsController.text != newRows) {
+          _rowsController.text = newRows;
+        }
+      }
+      if (!_colsFocus.hasFocus) {
+        String newCols = cols.toString();
+        if (_colsController.text != newCols) {
+          _colsController.text = newCols;
+        }
+      }
+    }
+  }
+
+  // 図形一覧ドロワーの構築
+  Widget _buildDrawingListDrawer() {
+    final s = AppLocalizations.of(context)!;
+    
+    // フィルタリング
+    List<DrawingObject> drawings = _controller.drawings;
+    if (_drawingListFilter != null) {
+      drawings = drawings.where((d) => d.type == _drawingListFilter).toList();
+    }
+    // 範囲選択による絞り込み
+    if (_controller.filteredDrawingIds != null) {
+      drawings = drawings.where((d) => _controller.filteredDrawingIds!.contains(d.id)).toList();
+    }
+    // 新しい順に並べ替え
+    final reversedDrawings = drawings.reversed.toList();
+
+    return Drawer(
+      width: 300,
+      child: Column(
+        children: [
+          // ヘッダー
+          Container(
+            height: kToolbarHeight,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            alignment: Alignment.centerLeft,
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Drawing List',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+          ),
+          // フィルタ & 範囲選択
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            color: Colors.grey.shade100,
+            child: Row(
+              children: [
+                const Icon(Icons.filter_list, size: 16, color: Colors.grey),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: DropdownButton<DrawingType?>(
+                    isExpanded: true,
+                    isDense: true,
+                    value: _drawingListFilter,
+                    hint: const Text("All Types", style: TextStyle(fontSize: 12)),
+                    underline: Container(),
+                    items: [
+                      const DropdownMenuItem(
+                        value: null,
+                        child: Text("All Types", style: TextStyle(fontSize: 12)),
+                      ),
+                      ...DrawingType.values.map((type) {
+                        return DropdownMenuItem(
+                          value: type,
+                          child: Text(type.toString().split('.').last, style: const TextStyle(fontSize: 12)),
+                        );
+                      }),
+                    ],
+                    onChanged: (val) {
+                      setState(() {
+                        _drawingListFilter = val;
+                        _controller.setHighlightedDrawingType(val);
+                      });
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // 範囲選択ボタン
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            color: Colors.grey.shade100,
+            child: OutlinedButton.icon(
+              icon: const Icon(Icons.select_all, size: 16),
+              label: const Text("Select Area to Filter", style: TextStyle(fontSize: 12)),
+              style: OutlinedButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+              ),
+              onPressed: () {
+                Navigator.of(context).pop(); // ドロワーを閉じる
+                _controller.startAreaSelectionMode(); // 範囲選択モード開始
+              },
+            ),
+          ),
+          const Divider(height: 1),
+          // リスト
+          Expanded(
+            child: reversedDrawings.isEmpty
+                ? const Center(child: Text('No drawings'))
+                : ListView.separated(
+                    itemCount: reversedDrawings.length,
+                    separatorBuilder: (context, index) => const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final drawing = reversedDrawings[index];
+                      final isSelected =
+                          drawing.id == _controller.selectedDrawingId;
+
+                      IconData icon;
+                      String label;
+                      switch (drawing.type) {
+                        case DrawingType.line:
+                          icon = Icons.show_chart;
+                          label = 'Line';
+                          break;
+                        case DrawingType.elbow:
+                          icon = Icons.turn_right;
+                          label = 'Elbow';
+                          break;
+                        case DrawingType.rectangle:
+                          icon = Icons.crop_square;
+                          label = 'Rectangle';
+                          break;
+                        case DrawingType.roundedRectangle:
+                          icon = Icons.rounded_corner;
+                          label = 'Rounded Rect';
+                          break;
+                        case DrawingType.oval:
+                          icon = Icons.circle_outlined;
+                          label = 'Oval';
+                          break;
+                        case DrawingType.burst:
+                          icon = Icons.new_releases;
+                          label = 'Burst';
+                          break;
+                        case DrawingType.marker:
+                          icon = Icons.format_paint;
+                          label = 'Marker';
+                          break;
+                        case DrawingType.image:
+                          icon = Icons.image;
+                          label = 'Image';
+                          break;
+                        case DrawingType.table:
+                          icon = Icons.grid_4x4;
+                          label = 'Table';
+                          break;
+                        default:
+                          icon = Icons.edit;
+                          label = 'Drawing';
+                      }
+
+                      return MouseRegion(
+                        onEnter: (_) => _controller.setHighlightedDrawing(drawing.id),
+                        onExit: (_) => _controller.setHighlightedDrawing(null),
+                        child: ListTile(
+                          dense: true,
+                          visualDensity: const VisualDensity(vertical: -4),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                          minLeadingWidth: 20,
+                          horizontalTitleGap: 8,
+                          leading: Icon(icon, size: 16),
+                          title: Row(
+                            children: [
+                              Text(label, style: const TextStyle(fontSize: 12)),
+                              const SizedBox(width: 8),
+                              Text(
+                                'R:${drawing.points.first.row} C:${drawing.points.first.col}',
+                                style: const TextStyle(fontSize: 11, color: Colors.grey),
+                              ),
+                            ],
+                          ),
+                          selected: isSelected,
+                          selectedTileColor: Colors.blue.withOpacity(0.1),
+                          onTap: () => _jumpToDrawing(drawing),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete, size: 16, color: Colors.grey),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                            onPressed: () => _controller.deleteDrawing(drawing.id),
+                            tooltip: 'Delete',
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 図形へのジャンプ処理
+  void _jumpToDrawing(DrawingObject drawing) {
+    // 1. 図形を選択状態にする
+    _controller.selectDrawing(drawing.id);
+    // Drawモードに切り替え
+    if (_controller.currentMode != EditorMode.draw) {
+      _controller.setMode(EditorMode.draw);
+    }
+
+    // 2. 座標計算 (簡易的に始点を使用)
+    if (drawing.points.isNotEmpty) {
+      final p = drawing.points.first;
+      double y = p.row * _lineHeight;
+      // 文字列幅の計算はコストがかかるので、簡易的に文字数 * 平均幅で推定するか、
+      // 正確に計算するか。ここでは正確さを優先して計算する。
+      String line = "";
+      if (p.row < _controller.lines.length) {
+        line = _controller.lines[p.row];
+      }
+      String textBefore = "";
+      if (p.col <= line.length) {
+        textBefore = line.substring(0, p.col);
+      } else {
+        textBefore = line + (' ' * (p.col - line.length));
+      }
+      double x = TextUtils.calcTextWidth(textBefore) * _charWidth;
+
+      // 3. スクロール (画面中央に来るように)
+      if (_verticalScrollController.hasClients) {
+        double viewportH = _verticalScrollController.position.viewportDimension;
+        double targetY = max(0.0, y - viewportH / 2);
+        _verticalScrollController.jumpTo(targetY);
+      }
+      if (_horizontalScrollController.hasClients) {
+        double viewportW = _horizontalScrollController.position.viewportDimension;
+        double targetX = max(0.0, x - viewportW / 2);
+        _horizontalScrollController.jumpTo(targetX);
+      }
+    }
+
+    // ドロワーを閉じる（お好みで）
+    // Navigator.of(context).pop(); 
   }
 
   void _commitWidth() {
@@ -1732,6 +2056,15 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     }
   }
 
+  void _commitTableGrid() {
+    final rows = int.tryParse(_rowsController.text);
+    final cols = int.tryParse(_colsController.text);
+
+    if (rows != null && cols != null && rows > 0 && cols > 0) {
+      _controller.setTableGrid(rows, cols);
+    }
+  }
+
   // プロパティバーの構築 (Draw Mode用)
   Widget _buildPropertyBar() {
     if (_controller.currentMode != EditorMode.draw) {
@@ -1746,6 +2079,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
         type == DrawingType.oval ||
         type == DrawingType.burst;
     final isMarker = type == DrawingType.marker;
+    final isTable = type == DrawingType.table;
 
     return Container(
       width: double.infinity,
@@ -1774,6 +2108,8 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                   ? Icons.new_releases 
                   : _controller.currentShapeType == DrawingType.image
                   ? Icons.image
+                  : _controller.currentShapeType == DrawingType.table
+                  ? Icons.grid_4x4
                   : Icons.circle_outlined,
               size: 18,
             ),
@@ -1816,6 +2152,10 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                     const PopupMenuItem(
                       value: DrawingType.image,
                       child: Text('Image'),
+                    ),
+                    const PopupMenuItem(
+                      value: DrawingType.table,
+                      child: Text('Table'),
                     ),
                   ];
                 } else {
@@ -1860,6 +2200,10 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                   value: DrawingType.image,
                   child: Text('Image'),
                 ),
+                const PopupMenuItem(
+                  value: DrawingType.table,
+                  child: Text('Table'),
+                ),
               ];
             },
           ),
@@ -1882,6 +2226,47 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
             ),
           ),
           const SizedBox(width: 16),
+          // --- Table Settings ---
+          if (isTable) ...[
+            const Text('Rows:', style: TextStyle(fontSize: 12)),
+            const SizedBox(width: 4),
+            SizedBox(
+              width: 40,
+              child: TextField(
+                controller: _rowsController,
+                focusNode: _rowsFocus,
+                keyboardType: TextInputType.number,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 12),
+                decoration: const InputDecoration(
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+                  border: OutlineInputBorder(),
+                ),
+                onSubmitted: (_) => _commitTableGrid(),
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Text('Cols:', style: TextStyle(fontSize: 12)),
+            const SizedBox(width: 4),
+            SizedBox(
+              width: 40,
+              child: TextField(
+                controller: _colsController,
+                focusNode: _colsFocus,
+                keyboardType: TextInputType.number,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 12),
+                decoration: const InputDecoration(
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+                  border: OutlineInputBorder(),
+                ),
+                onSubmitted: (_) => _commitTableGrid(),
+              ),
+            ),
+            const SizedBox(width: 16),
+          ],
           Text(
             _controller.currentShapeType == DrawingType.marker
                 ? 'Height:'
@@ -2060,6 +2445,31 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
             ),
+
+          // デフォルト設定ボタン (図形選択時のみ表示)
+          if (_controller.selectedDrawingId != null) ...[
+            const SizedBox(width: 8),
+            Container(width: 1, height: 20, color: Colors.grey.shade400),
+            const SizedBox(width: 8),
+            IconButton(
+              icon: const Icon(Icons.save_as, size: 18),
+              onPressed: () {
+                _controller.setSelectionAsDefault();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Set current style as default'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+              },
+              tooltip: 'Set as Default Style',
+              constraints: const BoxConstraints(),
+              padding: const EdgeInsets.all(4),
+              style: IconButton.styleFrom(
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -2126,6 +2536,14 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     );
 
     return Scaffold(
+      key: _scaffoldKey,
+      endDrawer: _buildDrawingListDrawer(),
+      drawerScrimColor: Colors.transparent, // 背景を暗くしない
+      onEndDrawerChanged: (isOpened) {
+        if (!isOpened) {
+          _controller.resetDrawerHighlights();
+        }
+      },
       // appBar: AppBar(...), // 削除
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start, // 左寄せ
@@ -2232,14 +2650,21 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                                             onTapDown: (details) {
                                               _resetCursorBlink();
 
+                                              bool isControl = HardwareKeyboard.instance.isControlPressed ||
+                                                  HardwareKeyboard.instance.isMetaPressed;
+
                                               if (_controller.currentMode ==
                                                   EditorMode.draw) {
                                                 // Figureモード: 図形選択のみ
-                                                _controller.trySelectDrawing(
-                                                  details.localPosition,
-                                                  _charWidth,
-                                                  _lineHeight,
-                                                );
+                                                if (!isControl) {
+                                                  _controller.trySelectDrawing(
+                                                    details.localPosition,
+                                                    _charWidth,
+                                                    _lineHeight,
+                                                  );
+                                                } else {
+                                                  _controller.clearDrawingSelection();
+                                                }
                                               } else {
                                                 // Textモード: テキスト移動のみ
                                                 _controller.clearSelection();
@@ -2259,10 +2684,22 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                                             onPanStart: (details) {
                                               _resetCursorBlink();
 
+                                              // 範囲選択モード (フィルタ用)
+                                              if (_controller.isAreaSelectionMode) {
+                                                _controller.updateAreaSelection(
+                                                  details.localPosition,
+                                                  details.localPosition,
+                                                );
+                                                return;
+                                              }
+
+                                              bool isControl = HardwareKeyboard.instance.isControlPressed ||
+                                                  HardwareKeyboard.instance.isMetaPressed;
+
                                               if (_controller.currentMode ==
                                                   EditorMode.draw) {
                                                 // 図形上なら移動/変形、そうでなければ新規描画
-                                                if (_controller
+                                                if (!isControl && _controller
                                                     .isPointOnDrawing(
                                                       details.localPosition,
                                                       _charWidth,
@@ -2306,6 +2743,15 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                                             onPanUpdate: (details) {
                                               _resetCursorBlink();
 
+                                              // 範囲選択モード
+                                              if (_controller.isAreaSelectionMode && _controller.areaSelectionRect != null) {
+                                                _controller.updateAreaSelection(
+                                                  _controller.areaSelectionRect!.topLeft, // 始点は維持
+                                                  details.localPosition,
+                                                );
+                                                return;
+                                              }
+
                                               if (_controller.currentMode ==
                                                   EditorMode.draw) {
                                                 // 移動中なら移動処理、描画中なら描画処理
@@ -2336,6 +2782,16 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                                                   });
                                             },
                                             onPanEnd: (details) async {
+                                              // 範囲選択モード終了
+                                              if (_controller.isAreaSelectionMode) {
+                                                _controller.endAreaSelection(
+                                                  _charWidth,
+                                                  _lineHeight,
+                                                );
+                                                _scaffoldKey.currentState?.openEndDrawer(); // ドロワー再表示
+                                                return;
+                                              }
+
                                               if (_controller.currentMode ==
                                                   EditorMode.draw) {
                                                 if (_controller
@@ -2455,6 +2911,10 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                                                       showAllHandles:
                                                           _controller
                                                               .showAllHandles,
+                                                      highlightedDrawingId: _controller.highlightedDrawingId,
+                                                      highlightedDrawingType: _controller.highlightedDrawingType,
+                                                      areaSelectionRect: _controller.areaSelectionRect,
+                                                      editorBackgroundColor: _controller.editorBackgroundColor,
                                                       imageCache: _controller.imageCache,
                                                     ),
                                                     size: Size.infinite,

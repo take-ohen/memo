@@ -455,6 +455,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
                   shapePaddingY: _shapePaddingY,
                   showDrawings: true,
                   showAllHandles: widget.controller.showAllHandles,
+                  editorBackgroundColor: _editorBackgroundColor,
                 ),
                 size: Size.infinite,
               ),
@@ -847,6 +848,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
                                 showDrawings: true,
                                 showAllHandles:
                                     widget.controller.showAllHandles,
+                                editorBackgroundColor: _editorBackgroundColor,
                               ),
                               size: Size.infinite,
                             ),
