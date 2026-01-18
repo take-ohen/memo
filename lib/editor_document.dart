@@ -1461,8 +1461,47 @@ class EditorDocument extends ChangeNotifier {
           final points = drawing.points
               .map((p) => _resolveAnchor(p, charWidth, lineHeight))
               .toList();
-          for (int i = 0; i < points.length; i++) {
-            if ((points[i] - localPosition).distance < 20.0) {
+
+          // 修正: 描画されているハンドルの位置に合わせて判定座標を調整する
+          List<Offset> hitTestPoints = [];
+
+          if (drawing.type == DrawingType.line ||
+              drawing.type == DrawingType.elbow ||
+              points.length < 2) {
+            // 線などはそのまま
+            hitTestPoints = points;
+          } else {
+            // 矩形系（特にBurstなどパディングがあるもの）は、MemoPainterでハンドルが内側に描画されているため、
+            // 当たり判定もそれに合わせる。
+            final p1 = points[0];
+            final p2 = points[1];
+
+            final double padPixelX = drawing.paddingX * charWidth;
+            final double padPixelY = drawing.paddingY * lineHeight;
+            const double halfSize = 4.0; // ハンドルサイズ(8.0)の半分
+
+            double offsetX = halfSize + padPixelX;
+            double offsetY = halfSize + padPixelY;
+
+            double width = (p1.dx - p2.dx).abs();
+            double height = (p1.dy - p2.dy).abs();
+
+            if (width < offsetX * 2) offsetX = width / 2;
+            if (height < offsetY * 2) offsetY = height / 2;
+
+            // P1 (Top-Left側) -> 内側へ
+            double dx1 = (p1.dx < p2.dx) ? offsetX : -offsetX;
+            double dy1 = (p1.dy < p2.dy) ? offsetY : -offsetY;
+            hitTestPoints.add(p1 + Offset(dx1, dy1));
+
+            // P2 (Bottom-Right側) -> 内側へ
+            double dx2 = (p2.dx < p1.dx) ? offsetX : -offsetX;
+            double dy2 = (p2.dy < p1.dy) ? offsetY : -offsetY;
+            hitTestPoints.add(p2 + Offset(dx2, dy2));
+          }
+
+          for (int i = 0; i < hitTestPoints.length; i++) {
+            if ((hitTestPoints[i] - localPosition).distance < 20.0) {
               _activeHandleIndex = i;
               return;
             }
@@ -1576,12 +1615,53 @@ class EditorDocument extends ChangeNotifier {
     if (_activeHandleIndex != null && selectedDrawingId != null) {
       final index = drawings.indexWhere((d) => d.id == selectedDrawingId);
       if (index != -1) {
+        final drawing = drawings[index];
+
+        // パディングによる座標ズレの補正
+        // 画面上のハンドル位置(localPosition)から、論理的な枠の位置(points)を逆算する
+        double correctionX = 0.0;
+        double correctionY = 0.0;
+
+        // 線・Elbow以外（矩形系）で、かつ2点の場合
+        if (drawing.type != DrawingType.line &&
+            drawing.type != DrawingType.elbow &&
+            drawing.points.length == 2) {
+          final double padPixelX = drawing.paddingX * charWidth;
+          final double padPixelY = drawing.paddingY * lineHeight;
+          const double halfHandleSize = 4.0;
+
+          // MemoPainter._drawHandles で使用しているオフセット量
+          double offsetX = halfHandleSize + padPixelX;
+          double offsetY = halfHandleSize + padPixelY;
+
+          // 対角点（固定されている側の点）の座標を取得
+          int otherIndex = (_activeHandleIndex == 0) ? 1 : 0;
+          Offset otherPoint = _resolveAnchor(
+            drawing.points[otherIndex],
+            charWidth,
+            lineHeight,
+          );
+
+          // マウス位置が対角点に対してどちら側にあるかで補正方向を決定
+          // ハンドルは「内側」にあるので、本来の枠は「外側」にある
+          if (localPosition.dx < otherPoint.dx) {
+            correctionX = -offsetX;
+          } else {
+            correctionX = offsetX;
+          }
+
+          if (localPosition.dy < otherPoint.dy) {
+            correctionY = -offsetY;
+          } else {
+            correctionY = offsetY;
+          }
+        }
+
         // グリッドに吸着させる
-        int row = (localPosition.dy / lineHeight).round();
-        int visualX = (localPosition.dx / charWidth).round();
+        int row = ((localPosition.dy + correctionY) / lineHeight).round();
+        int visualX = ((localPosition.dx + correctionX) / charWidth).round();
 
         // 新しい座標を設定 (dx, dyは0にしてグリッドに合わせる)
-        // ※必要ならここでパディングを考慮した微調整を入れることも可能
         final newPoint = _createSnapAnchor(max(0, row), visualX, dy: 0.0);
         drawings[index].points[_activeHandleIndex!] = newPoint;
 
@@ -1652,19 +1732,33 @@ class EditorDocument extends ChangeNotifier {
       final index = drawings.indexWhere((d) => d.id == selectedDrawingId);
       if (index != -1) {
         int currentRow = (localPosition.dy / lineHeight).floor();
-        int currentCol = (localPosition.dx / charWidth).round();
+        int currentVisualX = (localPosition.dx / charWidth).round();
 
         int deltaRow = currentRow - _dragStartRow!;
-        int deltaCol = currentCol - _dragStartCol!;
+        int deltaVisualX = currentVisualX - _dragStartCol!;
 
         // 初期座標に差分を加えて更新
         for (int i = 0; i < drawings[index].points.length; i++) {
           final initial = _initialDrawingPoints![i];
           final current = drawings[index].points[i];
 
-          current.row = max(0, initial.row + deltaRow);
-          current.col = max(0, initial.col + deltaCol);
-          // dx, dy (相対位置) は維持する
+          // 1. 新しい行を計算
+          int newRow = max(0, initial.row + deltaRow);
+          current.row = newRow;
+
+          // 2. 初期のVisualX(見た目の位置)を計算
+          int initialVisualX = calcVisualX(initial.row, initial.col);
+
+          // 3. 新しいVisualXを計算
+          int targetVisualX = max(0, initialVisualX + deltaVisualX);
+
+          // 4. 新しい行のテキストに合わせて col (文字インデックス) を逆算
+          // これにより、全角/半角が混在していても見た目の位置・サイズが維持される
+          current.col = _getColFromVisualXInRow(newRow, targetVisualX);
+
+          // dx, dy (相対位置) は初期値を維持してズレを防ぐ
+          current.dx = initial.dx;
+          current.dy = initial.dy;
         }
         notifyListeners();
       }
@@ -1673,6 +1767,22 @@ class EditorDocument extends ChangeNotifier {
 
     // D. テキスト選択中
     handleTap(localPosition, charWidth, lineHeight);
+  }
+
+  // 指定行におけるVisualXからcolを逆算するヘルパー (虚空対応版)
+  int _getColFromVisualXInRow(int row, int targetVisualX) {
+    String line = "";
+    if (row < lines.length) {
+      line = lines[row];
+    }
+    int lineVisualWidth = TextUtils.calcTextWidth(line);
+    
+    if (targetVisualX <= lineVisualWidth) {
+      return TextUtils.getColFromVisualX(line, targetVisualX);
+    } else {
+      // 行末より右（虚空）の場合は、差分をそのまま加算
+      return line.length + (targetVisualX - lineVisualWidth);
+    }
   }
 
   void handlePanEnd() {

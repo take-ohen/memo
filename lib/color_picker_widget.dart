@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'l10n/app_localizations.dart';
 
 class ColorPickerWidget extends StatefulWidget {
   final Color initialColor;
@@ -39,6 +40,7 @@ class _ColorPickerWidgetState extends State<ColorPickerWidget> {
 
   @override
   Widget build(BuildContext context) {
+    final s = AppLocalizations.of(context)!;
     return Focus(
       focusNode: _focusNode,
       autofocus: true,
@@ -127,7 +129,7 @@ class _ColorPickerWidgetState extends State<ColorPickerWidget> {
               // Add Preset Button
               IconButton(
                 icon: const Icon(Icons.add_circle_outline),
-                tooltip: 'プリセットに追加',
+                tooltip: s.tooltipAddPreset,
                 onPressed: () {
                   widget.onSaveColor(_currentHsvColor.toColor());
                   _focusNode.requestFocus();
@@ -137,9 +139,9 @@ class _ColorPickerWidgetState extends State<ColorPickerWidget> {
           ),
           const Divider(),
           // 5. Presets
-          const Text(
-            "Presets (Select & Delete)",
-            style: TextStyle(fontSize: 11, color: Colors.grey),
+          Text(
+            s.labelPresets,
+            style: const TextStyle(fontSize: 11, color: Colors.grey),
           ),
           const SizedBox(height: 4),
           SizedBox(

@@ -1668,10 +1668,10 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
             onPressed: () {
               _scaffoldKey.currentState?.openEndDrawer();
             },
-            tooltip: 'Drawing List',
+            tooltip: s.tooltipDrawingList,
           ),
           PopupMenuButton<int>(
-            tooltip: 'タブ幅設定',
+            tooltip: s.tooltipTabWidth,
             icon: const Icon(Icons.space_bar),
             onSelected: (value) {
               _controller.setTabWidth(value);
@@ -1680,12 +1680,12 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
               CheckedPopupMenuItem(
                 checked: _controller.tabWidth == 2,
                 value: 2,
-                child: const Text('Tab Width: 2'),
+                child: Text(s.labelTabWidthItem('2')),
               ),
               CheckedPopupMenuItem(
                 checked: _controller.tabWidth == 4,
                 value: 4,
-                child: const Text('Tab Width: 4'),
+                child: Text(s.labelTabWidthItem('4')),
               ),
             ],
           ),
@@ -1695,13 +1695,14 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   }
 
   void _showColorPickerDialog() {
+    final s = AppLocalizations.of(context)!;
     showDialog(
       context: context,
       builder: (context) => ListenableBuilder(
         listenable: _controller,
         builder: (context, child) {
           return AlertDialog(
-            title: const Text('色の選択'),
+            title: Text(s.titleSelectColor),
             content: SizedBox(
               width: 340, // 幅を少し広げる
               child: ColorPickerWidget(
@@ -1720,7 +1721,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
-                child: const Text('閉じる'),
+                child: Text(s.btnClose),
               ),
             ],
           );
@@ -1819,8 +1820,8 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text(
-                  'Drawing List',
+                Text(
+                  s.titleDrawingList,
                   style: TextStyle(fontWeight: FontWeight.bold),
                 ),
                 IconButton(
@@ -1843,17 +1844,34 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                     isExpanded: true,
                     isDense: true,
                     value: _drawingListFilter,
-                    hint: const Text("All Types", style: TextStyle(fontSize: 12)),
+                    hint: Text(s.labelAllTypes, style: const TextStyle(fontSize: 12)),
                     underline: Container(),
                     items: [
-                      const DropdownMenuItem(
+                      DropdownMenuItem(
                         value: null,
-                        child: Text("All Types", style: TextStyle(fontSize: 12)),
+                        child: Text(s.labelAllTypes, style: const TextStyle(fontSize: 12)),
                       ),
                       ...DrawingType.values.map((type) {
+                        String label;
+                        IconData icon;
+                        switch (type) {
+                          case DrawingType.line: label = s.typeLine; icon = Icons.show_chart; break;
+                          case DrawingType.elbow: label = s.typeElbow; icon = Icons.turn_right; break;
+                          case DrawingType.rectangle: label = s.typeRectangle; icon = Icons.crop_square; break;
+                          case DrawingType.roundedRectangle: label = s.typeRoundedRect; icon = Icons.rounded_corner; break;
+                          case DrawingType.oval: label = s.typeOval; icon = Icons.circle_outlined; break;
+                          case DrawingType.burst: label = s.typeBurst; icon = Icons.new_releases; break;
+                          case DrawingType.marker: label = s.typeMarker; icon = Icons.format_paint; break;
+                          case DrawingType.image: label = s.typeImage; icon = Icons.image; break;
+                          case DrawingType.table: label = s.typeTable; icon = Icons.grid_4x4; break;
+                        }
                         return DropdownMenuItem(
                           value: type,
-                          child: Text(type.toString().split('.').last, style: const TextStyle(fontSize: 12)),
+                          child: Row(children: [
+                            Icon(icon, size: 16, color: Colors.black54),
+                            const SizedBox(width: 8),
+                            Text(label, style: const TextStyle(fontSize: 12)),
+                          ]),
                         );
                       }),
                     ],
@@ -1875,7 +1893,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
             color: Colors.grey.shade100,
             child: OutlinedButton.icon(
               icon: const Icon(Icons.select_all, size: 16),
-              label: const Text("Select Area to Filter", style: TextStyle(fontSize: 12)),
+              label: Text(s.btnSelectAreaFilter, style: const TextStyle(fontSize: 12)),
               style: OutlinedButton.styleFrom(
                 visualDensity: VisualDensity.compact,
               ),
@@ -1889,7 +1907,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
           // リスト
           Expanded(
             child: reversedDrawings.isEmpty
-                ? const Center(child: Text('No drawings'))
+                ? Center(child: Text(s.msgNoDrawings))
                 : ListView.separated(
                     itemCount: reversedDrawings.length,
                     separatorBuilder: (context, index) => const Divider(height: 1),
@@ -1903,39 +1921,39 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                       switch (drawing.type) {
                         case DrawingType.line:
                           icon = Icons.show_chart;
-                          label = 'Line';
+                          label = s.typeLine;
                           break;
                         case DrawingType.elbow:
                           icon = Icons.turn_right;
-                          label = 'Elbow';
+                          label = s.typeElbow;
                           break;
                         case DrawingType.rectangle:
                           icon = Icons.crop_square;
-                          label = 'Rectangle';
+                          label = s.typeRectangle;
                           break;
                         case DrawingType.roundedRectangle:
                           icon = Icons.rounded_corner;
-                          label = 'Rounded Rect';
+                          label = s.typeRoundedRect;
                           break;
                         case DrawingType.oval:
                           icon = Icons.circle_outlined;
-                          label = 'Oval';
+                          label = s.typeOval;
                           break;
                         case DrawingType.burst:
                           icon = Icons.new_releases;
-                          label = 'Burst';
+                          label = s.typeBurst;
                           break;
                         case DrawingType.marker:
                           icon = Icons.format_paint;
-                          label = 'Marker';
+                          label = s.typeMarker;
                           break;
                         case DrawingType.image:
                           icon = Icons.image;
-                          label = 'Image';
+                          label = s.typeImage;
                           break;
                         case DrawingType.table:
                           icon = Icons.grid_4x4;
-                          label = 'Table';
+                          label = s.typeTable;
                           break;
                         default:
                           icon = Icons.edit;
@@ -1970,7 +1988,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                             padding: EdgeInsets.zero,
                             constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
                             onPressed: () => _controller.deleteDrawing(drawing.id),
-                            tooltip: 'Delete',
+                            tooltip: s.tooltipDelete,
                           ),
                         ),
                       );
@@ -2071,6 +2089,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
       return const SizedBox.shrink();
     }
 
+    final s = AppLocalizations.of(context)!;
     final type = _controller.currentShapeType;
     final isLineFamily = type == DrawingType.line || type == DrawingType.elbow;
     final isRectFamily =
@@ -2087,10 +2106,10 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
       color: Colors.grey.shade200,
       child: Row(
         children: [
-          const Text('Shape:', style: TextStyle(fontSize: 12)),
+          Text('${s.labelShape}:', style: const TextStyle(fontSize: 12)),
           const SizedBox(width: 4),
           PopupMenuButton<DrawingType>(
-            tooltip: 'Shape Type',
+            tooltip: s.tooltipShapeType,
             icon: Icon(
               _controller.currentShapeType == DrawingType.line
                   ? Icons
@@ -2119,96 +2138,168 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
               if (_controller.selectedDrawingId != null) {
                 if (isLineFamily) {
                   return [
-                    const PopupMenuItem(
+                    PopupMenuItem(
                       value: DrawingType.line,
-                      child: Text('Line'),
+                      child: Row(children: [
+                        const Icon(Icons.show_chart, color: Colors.black54),
+                        const SizedBox(width: 8),
+                        Text(s.typeLine),
+                      ]),
                     ),
-                    const PopupMenuItem(
+                    PopupMenuItem(
                       value: DrawingType.elbow,
-                      child: Text('Elbow'),
+                      child: Row(children: [
+                        const Icon(Icons.turn_right, color: Colors.black54),
+                        const SizedBox(width: 8),
+                        Text(s.typeElbow),
+                      ]),
                     ),
                   ];
                 } else if (isRectFamily) {
                   return [
-                    const PopupMenuItem(
+                    PopupMenuItem(
                       value: DrawingType.rectangle,
-                      child: Text('Rectangle'),
+                      child: Row(children: [
+                        const Icon(Icons.crop_square, color: Colors.black54),
+                        const SizedBox(width: 8),
+                        Text(s.typeRectangle),
+                      ]),
                     ),
-                    const PopupMenuItem(
+                    PopupMenuItem(
                       value: DrawingType.roundedRectangle,
-                      child: Text('Rounded Rect'),
+                      child: Row(children: [
+                        const Icon(Icons.rounded_corner, color: Colors.black54),
+                        const SizedBox(width: 8),
+                        Text(s.typeRoundedRect),
+                      ]),
                     ),
-                    const PopupMenuItem(
+                    PopupMenuItem(
                       value: DrawingType.oval,
-                      child: Text('Oval'),
+                      child: Row(children: [
+                        const Icon(Icons.circle_outlined, color: Colors.black54),
+                        const SizedBox(width: 8),
+                        Text(s.typeOval),
+                      ]),
                     ),
-                    const PopupMenuItem(
+                    PopupMenuItem(
                       value: DrawingType.burst,
-                      child: Text('Burst'),
+                      child: Row(children: [
+                        const Icon(Icons.new_releases, color: Colors.black54),
+                        const SizedBox(width: 8),
+                        Text(s.typeBurst),
+                      ]),
                     ),
                   ];
                 } else if (_controller.currentShapeType == DrawingType.image) {
                   return [
-                    const PopupMenuItem(
+                    PopupMenuItem(
                       value: DrawingType.image,
-                      child: Text('Image'),
+                      child: Row(children: [
+                        const Icon(Icons.image, color: Colors.black54),
+                        const SizedBox(width: 8),
+                        Text(s.typeImage),
+                      ]),
                     ),
-                    const PopupMenuItem(
+                    PopupMenuItem(
                       value: DrawingType.table,
-                      child: Text('Table'),
+                      child: Row(children: [
+                        const Icon(Icons.grid_4x4, color: Colors.black54),
+                        const SizedBox(width: 8),
+                        Text(s.typeTable),
+                      ]),
                     ),
                   ];
                 } else {
                   return [
-                    const PopupMenuItem(
+                    PopupMenuItem(
                       value: DrawingType.marker,
-                      child: Text('Marker'),
+                      child: Row(children: [
+                        const Icon(Icons.format_paint, color: Colors.black54),
+                        const SizedBox(width: 8),
+                        Text(s.typeMarker),
+                      ]),
                     ),
                   ];
                 }
               }
               return [
-                const PopupMenuItem(
+                PopupMenuItem(
                   value: DrawingType.line,
-                  child: Text('Line'),
+                  child: Row(children: [
+                    const Icon(Icons.show_chart, color: Colors.black54),
+                    const SizedBox(width: 8),
+                    Text(s.typeLine),
+                  ]),
                 ),
-                const PopupMenuItem(
+                PopupMenuItem(
                   value: DrawingType.elbow,
-                  child: Text('Elbow'),
+                  child: Row(children: [
+                    const Icon(Icons.turn_right, color: Colors.black54),
+                    const SizedBox(width: 8),
+                    Text(s.typeElbow),
+                  ]),
                 ),
-                const PopupMenuItem(
+                PopupMenuItem(
                   value: DrawingType.marker,
-                  child: Text('Marker'),
+                  child: Row(children: [
+                    const Icon(Icons.format_paint, color: Colors.black54),
+                    const SizedBox(width: 8),
+                    Text(s.typeMarker),
+                  ]),
                 ),
-                const PopupMenuItem(
+                PopupMenuItem(
                   value: DrawingType.rectangle,
-                  child: Text('Rectangle'),
+                  child: Row(children: [
+                    const Icon(Icons.crop_square, color: Colors.black54),
+                    const SizedBox(width: 8),
+                    Text(s.typeRectangle),
+                  ]),
                 ),
-                const PopupMenuItem(
+                PopupMenuItem(
                   value: DrawingType.roundedRectangle,
-                  child: Text('Rounded Rect'),
+                  child: Row(children: [
+                    const Icon(Icons.rounded_corner, color: Colors.black54),
+                    const SizedBox(width: 8),
+                    Text(s.typeRoundedRect),
+                  ]),
                 ),
-                const PopupMenuItem(
+                PopupMenuItem(
                   value: DrawingType.oval,
-                  child: Text('Oval'),
+                  child: Row(children: [
+                    const Icon(Icons.circle_outlined, color: Colors.black54),
+                    const SizedBox(width: 8),
+                    Text(s.typeOval),
+                  ]),
                 ),
-                const PopupMenuItem(
+                PopupMenuItem(
                   value: DrawingType.burst,
-                  child: Text('Burst'),
+                  child: Row(children: [
+                    const Icon(Icons.new_releases, color: Colors.black54),
+                    const SizedBox(width: 8),
+                    Text(s.typeBurst),
+                  ]),
                 ),
-                const PopupMenuItem(
+                PopupMenuItem(
                   value: DrawingType.image,
-                  child: Text('Image'),
+                  child: Row(children: [
+                    const Icon(Icons.image, color: Colors.black54),
+                    const SizedBox(width: 8),
+                    Text(s.typeImage),
+                  ]),
                 ),
-                const PopupMenuItem(
+                PopupMenuItem(
                   value: DrawingType.table,
-                  child: Text('Table'),
+                  child: Row(children: [
+                    const Icon(Icons.grid_4x4, color: Colors.black54),
+                    const SizedBox(width: 8),
+                    Text(s.typeTable),
+                  ]),
                 ),
               ];
             },
           ),
           const SizedBox(width: 16),
-          const Text('Color:', style: TextStyle(fontSize: 12)),
+          Text('${s.labelColor}:', style: const TextStyle(fontSize: 12)),
           const SizedBox(width: 4),
           Material(
             color: Colors.transparent,
@@ -2228,7 +2319,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
           const SizedBox(width: 16),
           // --- Table Settings ---
           if (isTable) ...[
-            const Text('Rows:', style: TextStyle(fontSize: 12)),
+            Text('${s.labelRows}:', style: const TextStyle(fontSize: 12)),
             const SizedBox(width: 4),
             SizedBox(
               width: 40,
@@ -2247,7 +2338,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
               ),
             ),
             const SizedBox(width: 8),
-            const Text('Cols:', style: TextStyle(fontSize: 12)),
+            Text('${s.labelCols}:', style: const TextStyle(fontSize: 12)),
             const SizedBox(width: 4),
             SizedBox(
               width: 40,
@@ -2269,8 +2360,8 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
           ],
           Text(
             _controller.currentShapeType == DrawingType.marker
-                ? 'Height:'
-                : 'Width:',
+                ? '${s.labelHeight}:'
+                : '${s.labelWidth}:',
             style: const TextStyle(fontSize: 12),
           ),
           const SizedBox(width: 4),
@@ -2302,7 +2393,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
             style: const TextStyle(fontSize: 12),
           ),
           const SizedBox(width: 16),
-          const Text('Pad X:', style: TextStyle(fontSize: 12)),
+          Text('${s.labelPaddingX}:', style: const TextStyle(fontSize: 12)),
           const SizedBox(width: 4),
           SizedBox(
             width: 40,
@@ -2325,7 +2416,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
             ),
           ),
           const SizedBox(width: 8),
-          const Text('Y:', style: TextStyle(fontSize: 12)),
+          Text('${s.labelPaddingY}:', style: const TextStyle(fontSize: 12)),
           const SizedBox(width: 4),
           SizedBox(
             width: 40,
@@ -2350,10 +2441,10 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
             ),
           ),
           const SizedBox(width: 16),
-          const Text('Style:', style: TextStyle(fontSize: 12)),
+          Text('${s.labelStyle}:', style: const TextStyle(fontSize: 12)),
           PopupMenuButton<LineStyle>(
             enabled: !isMarker,
-            tooltip: 'Line Style',
+            tooltip: s.tooltipLineStyle,
             icon: Icon(
               _controller.currentLineStyle == LineStyle.solid
                   ? Icons.remove
@@ -2368,18 +2459,37 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
             onSelected: (style) =>
                 _controller.setDrawingStyle(lineStyle: style),
             itemBuilder: (context) => [
-              const PopupMenuItem(value: LineStyle.solid, child: Text('Solid')),
-              const PopupMenuItem(
+              PopupMenuItem(
+                value: LineStyle.solid,
+                child: Row(children: [
+                  const Icon(Icons.remove, color: Colors.black54),
+                  const SizedBox(width: 8),
+                  Text(s.styleSolid),
+                ]),
+              ),
+              PopupMenuItem(
                 value: LineStyle.dotted,
-                child: Text('Dotted'),
+                child: Row(children: [
+                  const Icon(Icons.more_horiz, color: Colors.black54),
+                  const SizedBox(width: 8),
+                  Text(s.styleDotted),
+                ]),
               ),
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: LineStyle.dashed,
-                child: Text('Dashed'),
+                child: Row(children: [
+                  const Icon(Icons.power_input, color: Colors.black54),
+                  const SizedBox(width: 8),
+                  Text(s.styleDashed),
+                ]),
               ),
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: LineStyle.doubleLine,
-                child: Text('Double'),
+                child: Row(children: [
+                  const Icon(Icons.drag_handle, color: Colors.black54),
+                  const SizedBox(width: 8),
+                  Text(s.styleDouble),
+                ]),
               ),
             ],
           ),
@@ -2398,7 +2508,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                     arrowStart: !_controller.currentArrowStart,
                   )
                 : null,
-            tooltip: 'Start Arrow',
+            tooltip: s.tooltipStartArrow,
             constraints: const BoxConstraints(),
             padding: const EdgeInsets.all(4),
             style: IconButton.styleFrom(
@@ -2419,7 +2529,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                     arrowEnd: !_controller.currentArrowEnd,
                   )
                 : null,
-            tooltip: 'End Arrow',
+            tooltip: s.tooltipEndArrow,
             constraints: const BoxConstraints(),
             padding: const EdgeInsets.all(4),
             style: IconButton.styleFrom(
@@ -2438,7 +2548,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
               onPressed: () => _controller.setDrawingStyle(
                 isUpperRoute: !_controller.currentIsUpperRoute,
               ),
-              tooltip: _controller.currentIsUpperRoute ? 'Route: Upper' : 'Route: Lower',
+              tooltip: _controller.currentIsUpperRoute ? s.tooltipRouteUpper : s.tooltipRouteLower,
               constraints: const BoxConstraints(),
               padding: const EdgeInsets.all(4),
               style: IconButton.styleFrom(
@@ -2456,13 +2566,13 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
               onPressed: () {
                 _controller.setSelectionAsDefault();
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Set current style as default'),
-                    duration: Duration(seconds: 1),
+                  SnackBar(
+                    content: Text(s.msgSetDefault),
+                    duration: const Duration(seconds: 1),
                   ),
                 );
               },
-              tooltip: 'Set as Default Style',
+              tooltip: s.tooltipSetDefault,
               constraints: const BoxConstraints(),
               padding: const EdgeInsets.all(4),
               style: IconButton.styleFrom(

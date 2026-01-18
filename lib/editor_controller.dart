@@ -323,6 +323,15 @@ class EditorController extends ChangeNotifier {
     activeDocument.updateDrawingProperties(id, filePath: path);
   }
 
+  // ドキュメント内の画像図形に必要な画像をロードする
+  Future<void> _loadImagesForDrawings() async {
+    for (final drawing in activeDocument.drawings) {
+      if (drawing.type == DrawingType.image && drawing.filePath != null) {
+        await loadImage(drawing.filePath!);
+      }
+    }
+  }
+
   void deleteDrawing(String id) {
     activeDocument.deleteDrawing(id);
   }
@@ -1968,6 +1977,7 @@ class EditorController extends ChangeNotifier {
   Future<void> openDocument(String path) async {
     newTab();
     await activeDocument.loadFromFile(path);
+    await _loadImagesForDrawings();
     notifyListeners();
   }
 
@@ -1975,6 +1985,7 @@ class EditorController extends ChangeNotifier {
     if (index >= 0 && index < documents.length) {
       switchTab(index);
       await activeDocument.loadFromFile(path);
+      await _loadImagesForDrawings();
     }
     notifyListeners();
   }
@@ -1985,6 +1996,7 @@ class EditorController extends ChangeNotifier {
         activeDocument.currentFilePath!,
         encoding: encoding,
       );
+      await _loadImagesForDrawings();
       notifyListeners();
     }
   }
