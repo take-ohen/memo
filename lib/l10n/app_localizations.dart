@@ -485,7 +485,7 @@ abstract class AppLocalizations {
   /// No description provided for @labelPresets.
   ///
   /// In en, this message translates to:
-  /// **'Presets'**
+  /// **'Presets (Select & Delete)'**
   String get labelPresets;
 
   /// No description provided for @labelCustom.
@@ -703,6 +703,252 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Reload'**
   String get btnReload;
+
+  /// No description provided for @labelShape.
+  ///
+  /// In en, this message translates to:
+  /// **'Shape'**
+  String get labelShape;
+
+  /// No description provided for @labelColor.
+  ///
+  /// In en, this message translates to:
+  /// **'Color'**
+  String get labelColor;
+
+  /// No description provided for @labelWidth.
+  ///
+  /// In en, this message translates to:
+  /// **'Width'**
+  String get labelWidth;
+
+  /// No description provided for @labelHeight.
+  ///
+  /// In en, this message translates to:
+  /// **'Height'**
+  String get labelHeight;
+
+  /// No description provided for @labelPaddingX.
+  ///
+  /// In en, this message translates to:
+  /// **'Pad X'**
+  String get labelPaddingX;
+
+  /// No description provided for @labelPaddingY.
+  ///
+  /// In en, this message translates to:
+  /// **'Pad Y'**
+  String get labelPaddingY;
+
+  /// No description provided for @labelStyle.
+  ///
+  /// In en, this message translates to:
+  /// **'Style'**
+  String get labelStyle;
+
+  /// No description provided for @labelRows.
+  ///
+  /// In en, this message translates to:
+  /// **'Rows'**
+  String get labelRows;
+
+  /// No description provided for @labelCols.
+  ///
+  /// In en, this message translates to:
+  /// **'Cols'**
+  String get labelCols;
+
+  /// No description provided for @typeLine.
+  ///
+  /// In en, this message translates to:
+  /// **'Line'**
+  String get typeLine;
+
+  /// No description provided for @typeElbow.
+  ///
+  /// In en, this message translates to:
+  /// **'Elbow'**
+  String get typeElbow;
+
+  /// No description provided for @typeRectangle.
+  ///
+  /// In en, this message translates to:
+  /// **'Rectangle'**
+  String get typeRectangle;
+
+  /// No description provided for @typeRoundedRect.
+  ///
+  /// In en, this message translates to:
+  /// **'Rounded Rect'**
+  String get typeRoundedRect;
+
+  /// No description provided for @typeOval.
+  ///
+  /// In en, this message translates to:
+  /// **'Oval'**
+  String get typeOval;
+
+  /// No description provided for @typeBurst.
+  ///
+  /// In en, this message translates to:
+  /// **'Burst'**
+  String get typeBurst;
+
+  /// No description provided for @typeMarker.
+  ///
+  /// In en, this message translates to:
+  /// **'Marker'**
+  String get typeMarker;
+
+  /// No description provided for @typeImage.
+  ///
+  /// In en, this message translates to:
+  /// **'Image'**
+  String get typeImage;
+
+  /// No description provided for @typeTable.
+  ///
+  /// In en, this message translates to:
+  /// **'Table'**
+  String get typeTable;
+
+  /// No description provided for @styleSolid.
+  ///
+  /// In en, this message translates to:
+  /// **'Solid'**
+  String get styleSolid;
+
+  /// No description provided for @styleDotted.
+  ///
+  /// In en, this message translates to:
+  /// **'Dotted'**
+  String get styleDotted;
+
+  /// No description provided for @styleDashed.
+  ///
+  /// In en, this message translates to:
+  /// **'Dashed'**
+  String get styleDashed;
+
+  /// No description provided for @styleDouble.
+  ///
+  /// In en, this message translates to:
+  /// **'Double'**
+  String get styleDouble;
+
+  /// No description provided for @tooltipShapeType.
+  ///
+  /// In en, this message translates to:
+  /// **'Shape Type'**
+  String get tooltipShapeType;
+
+  /// No description provided for @tooltipLineStyle.
+  ///
+  /// In en, this message translates to:
+  /// **'Line Style'**
+  String get tooltipLineStyle;
+
+  /// No description provided for @tooltipStartArrow.
+  ///
+  /// In en, this message translates to:
+  /// **'Start Arrow'**
+  String get tooltipStartArrow;
+
+  /// No description provided for @tooltipEndArrow.
+  ///
+  /// In en, this message translates to:
+  /// **'End Arrow'**
+  String get tooltipEndArrow;
+
+  /// No description provided for @tooltipRouteUpper.
+  ///
+  /// In en, this message translates to:
+  /// **'Route: Upper'**
+  String get tooltipRouteUpper;
+
+  /// No description provided for @tooltipRouteLower.
+  ///
+  /// In en, this message translates to:
+  /// **'Route: Lower'**
+  String get tooltipRouteLower;
+
+  /// No description provided for @tooltipSetDefault.
+  ///
+  /// In en, this message translates to:
+  /// **'Set as Default Style'**
+  String get tooltipSetDefault;
+
+  /// No description provided for @msgSetDefault.
+  ///
+  /// In en, this message translates to:
+  /// **'Set current style as default'**
+  String get msgSetDefault;
+
+  /// No description provided for @titleDrawingList.
+  ///
+  /// In en, this message translates to:
+  /// **'Drawing List'**
+  String get titleDrawingList;
+
+  /// No description provided for @labelAllTypes.
+  ///
+  /// In en, this message translates to:
+  /// **'All Types'**
+  String get labelAllTypes;
+
+  /// No description provided for @btnSelectAreaFilter.
+  ///
+  /// In en, this message translates to:
+  /// **'Select Area to Filter'**
+  String get btnSelectAreaFilter;
+
+  /// No description provided for @msgNoDrawings.
+  ///
+  /// In en, this message translates to:
+  /// **'No drawings'**
+  String get msgNoDrawings;
+
+  /// No description provided for @tooltipDelete.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete'**
+  String get tooltipDelete;
+
+  /// No description provided for @tooltipTabWidth.
+  ///
+  /// In en, this message translates to:
+  /// **'Tab Width Settings'**
+  String get tooltipTabWidth;
+
+  /// No description provided for @labelTabWidthItem.
+  ///
+  /// In en, this message translates to:
+  /// **'Tab Width: {width}'**
+  String labelTabWidthItem(Object width);
+
+  /// No description provided for @titleSelectColor.
+  ///
+  /// In en, this message translates to:
+  /// **'Select Color'**
+  String get titleSelectColor;
+
+  /// No description provided for @btnClose.
+  ///
+  /// In en, this message translates to:
+  /// **'Close'**
+  String get btnClose;
+
+  /// No description provided for @tooltipAddPreset.
+  ///
+  /// In en, this message translates to:
+  /// **'Add to Presets'**
+  String get tooltipAddPreset;
+
+  /// No description provided for @tooltipDrawingList.
+  ///
+  /// In en, this message translates to:
+  /// **'Drawing List'**
+  String get tooltipDrawingList;
 }
 
 class _AppLocalizationsDelegate
