@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 import 'dart:convert'; // Encoding用
 
 import 'package:flutter/material.dart';
+import 'package:window_manager/window_manager.dart';
 import 'package:flutter/services.dart';
 import 'dart:math';
 import 'dart:async';
@@ -1285,6 +1286,17 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                 ),
                 child: MenuAcceleratorLabel(s.menuSaveAs),
               ),
+              const Divider(),
+              MenuItemButton(
+                onPressed: () async {
+                  await windowManager.close();
+                },
+                shortcut: const SingleActivator(
+                  LogicalKeyboardKey.f4,
+                  alt: true,
+                ),
+                child: MenuAcceleratorLabel(s.menuExit),
+              ),
             ],
             child: MenuAcceleratorLabel(s.menuFile),
           ),
@@ -1309,9 +1321,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
               ),
               const Divider(), // 区切り線
               MenuItemButton(
-                onPressed: () {
-                  // 切り取り実装時はここ
-                },
+                onPressed: () => _controller.cutSelection(),
                 shortcut: const SingleActivator(
                   LogicalKeyboardKey.keyX,
                   control: true,
@@ -1389,93 +1399,110 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
             ],
             child: MenuAcceleratorLabel(s.menuEdit),
           ),
-          // Format (新規追加)
+          // Format
           SubmenuButton(
             menuChildren: [
-              MenuItemButton(
-                onPressed: () => _controller.drawBox(useHalfWidth: false),
-                child: MenuAcceleratorLabel(s.menuDrawBoxDouble),
+              // 1. Box & Table
+              SubmenuButton(
+                menuChildren: [
+                  MenuItemButton(
+                    onPressed: () => _controller.drawBox(useHalfWidth: false),
+                    child: MenuAcceleratorLabel(s.menuDrawBoxDouble),
+                  ),
+                  MenuItemButton(
+                    onPressed: () => _controller.drawBox(useHalfWidth: true),
+                    child: MenuAcceleratorLabel(s.menuDrawBoxSingle),
+                  ),
+                  const Divider(),
+                  MenuItemButton(
+                    onPressed: () => _controller.formatTable(useHalfWidth: false),
+                    child: MenuAcceleratorLabel(s.menuFormatTableDouble),
+                  ),
+                  MenuItemButton(
+                    onPressed: () => _controller.formatTable(useHalfWidth: true),
+                    child: MenuAcceleratorLabel(s.menuFormatTableSingle),
+                  ),
+                ],
+                child: MenuAcceleratorLabel(s.menuFormatBoxTable),
               ),
-              MenuItemButton(
-                onPressed: () => _controller.drawBox(useHalfWidth: true),
-                child: MenuAcceleratorLabel(s.menuDrawBoxSingle),
+              // 2. Line & Arrow
+              SubmenuButton(
+                menuChildren: [
+                  MenuItemButton(
+                    onPressed: () => _controller.drawLine(useHalfWidth: false),
+                    child: MenuAcceleratorLabel(s.menuDrawLineDouble),
+                  ),
+                  MenuItemButton(
+                    onPressed: () => _controller.drawLine(useHalfWidth: true),
+                    child: MenuAcceleratorLabel(s.menuDrawLineSingle),
+                  ),
+                  const Divider(),
+                  MenuItemButton(
+                    onPressed: () =>
+                        _controller.drawLine(useHalfWidth: false, arrowEnd: true),
+                    child: MenuAcceleratorLabel(s.menuArrowEndDouble),
+                  ),
+                  MenuItemButton(
+                    onPressed: () =>
+                        _controller.drawLine(useHalfWidth: true, arrowEnd: true),
+                    child: MenuAcceleratorLabel(s.menuArrowEndSingle),
+                  ),
+                  MenuItemButton(
+                    onPressed: () => _controller.drawLine(
+                      useHalfWidth: false,
+                      arrowStart: true,
+                      arrowEnd: true,
+                    ),
+                    child: MenuAcceleratorLabel(s.menuArrowBothDouble),
+                  ),
+                  MenuItemButton(
+                    onPressed: () => _controller.drawLine(
+                      useHalfWidth: true,
+                      arrowStart: true,
+                      arrowEnd: true,
+                    ),
+                    child: MenuAcceleratorLabel(s.menuArrowBothSingle),
+                  ),
+                ],
+                child: MenuAcceleratorLabel(s.menuFormatLineArrow),
               ),
-              const Divider(),
-              MenuItemButton(
-                onPressed: () => _controller.formatTable(useHalfWidth: false),
-                child: MenuAcceleratorLabel(s.menuFormatTableDouble),
-              ),
-              MenuItemButton(
-                onPressed: () => _controller.formatTable(useHalfWidth: true),
-                child: MenuAcceleratorLabel(s.menuFormatTableSingle),
-              ),
-              const Divider(),
-              MenuItemButton(
-                onPressed: () => _controller.drawLine(useHalfWidth: false),
-                child: MenuAcceleratorLabel(s.menuDrawLineDouble),
-              ),
-              MenuItemButton(
-                onPressed: () => _controller.drawLine(useHalfWidth: true),
-                child: MenuAcceleratorLabel(s.menuDrawLineSingle),
-              ),
-              const Divider(),
-              MenuItemButton(
-                onPressed: () =>
-                    _controller.drawLine(useHalfWidth: false, arrowEnd: true),
-                child: MenuAcceleratorLabel(s.menuArrowEndDouble),
-              ),
-              MenuItemButton(
-                onPressed: () =>
-                    _controller.drawLine(useHalfWidth: true, arrowEnd: true),
-                child: MenuAcceleratorLabel(s.menuArrowEndSingle),
-              ),
-              MenuItemButton(
-                onPressed: () => _controller.drawLine(
-                  useHalfWidth: false,
-                  arrowStart: true,
-                  arrowEnd: true,
-                ),
-                child: MenuAcceleratorLabel(s.menuArrowBothDouble),
-              ),
-              MenuItemButton(
-                onPressed: () => _controller.drawLine(
-                  useHalfWidth: true,
-                  arrowStart: true,
-                  arrowEnd: true,
-                ),
-                child: MenuAcceleratorLabel(s.menuArrowBothSingle),
-              ),
-              MenuItemButton(
-                onPressed: () => _controller.drawElbowLine(
-                  isUpperRoute: true,
-                  useHalfWidth: false,
-                  arrowEnd: true,
-                ),
-                child: MenuAcceleratorLabel(s.menuElbowUpperDouble),
-              ),
-              MenuItemButton(
-                onPressed: () => _controller.drawElbowLine(
-                  isUpperRoute: true,
-                  useHalfWidth: true,
-                  arrowEnd: true,
-                ),
-                child: MenuAcceleratorLabel(s.menuElbowUpperSingle),
-              ),
-              MenuItemButton(
-                onPressed: () => _controller.drawElbowLine(
-                  isUpperRoute: false,
-                  useHalfWidth: false,
-                  arrowEnd: true,
-                ),
-                child: MenuAcceleratorLabel(s.menuElbowLowerDouble),
-              ),
-              MenuItemButton(
-                onPressed: () => _controller.drawElbowLine(
-                  isUpperRoute: false,
-                  useHalfWidth: true,
-                  arrowEnd: true,
-                ),
-                child: MenuAcceleratorLabel(s.menuElbowLowerSingle),
+              // 3. Elbow Line
+              SubmenuButton(
+                menuChildren: [
+                  MenuItemButton(
+                    onPressed: () => _controller.drawElbowLine(
+                      isUpperRoute: true,
+                      useHalfWidth: false,
+                      arrowEnd: true,
+                    ),
+                    child: MenuAcceleratorLabel(s.menuElbowUpperDouble),
+                  ),
+                  MenuItemButton(
+                    onPressed: () => _controller.drawElbowLine(
+                      isUpperRoute: true,
+                      useHalfWidth: true,
+                      arrowEnd: true,
+                    ),
+                    child: MenuAcceleratorLabel(s.menuElbowUpperSingle),
+                  ),
+                  MenuItemButton(
+                    onPressed: () => _controller.drawElbowLine(
+                      isUpperRoute: false,
+                      useHalfWidth: false,
+                      arrowEnd: true,
+                    ),
+                    child: MenuAcceleratorLabel(s.menuElbowLowerDouble),
+                  ),
+                  MenuItemButton(
+                    onPressed: () => _controller.drawElbowLine(
+                      isUpperRoute: false,
+                      useHalfWidth: true,
+                      arrowEnd: true,
+                    ),
+                    child: MenuAcceleratorLabel(s.menuElbowLowerSingle),
+                  ),
+                ],
+                child: MenuAcceleratorLabel(s.menuFormatElbow),
               ),
             ],
             child: MenuAcceleratorLabel(s.menuFormat),
@@ -1606,6 +1633,10 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
           // Help
           SubmenuButton(
             menuChildren: [
+              MenuItemButton(
+                onPressed: () async => await _controller.openHelpTab(),
+                child: MenuAcceleratorLabel(s.menuHelpUsage),
+              ),
               MenuItemButton(
                 onPressed: () {
                   showAboutDialog(
@@ -2631,18 +2662,49 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     double textContentWidth = maxLineWidth * _charWidth;
     double textContentHeight = _controller.lines.length * _lineHeight;
 
-    // 2. エディタ領域のサイズ決定 (画面サイズ以上の余白を持たせる)
+    // 2. 図形の最大範囲を計算
+    double maxDrawingX = 0;
+    double maxDrawingY = 0;
+
+    for (final drawing in _controller.drawings) {
+      for (final point in drawing.points) {
+        // Y座標の計算
+        double y = (point.row + point.dy) * _lineHeight;
+        if (y > maxDrawingY) maxDrawingY = y;
+
+        // X座標の計算 (行テキストを考慮)
+        String line = "";
+        if (point.row < _controller.lines.length) {
+          line = _controller.lines[point.row];
+        }
+        String textBefore = "";
+        if (point.col <= line.length) {
+          textBefore = line.substring(0, point.col);
+        } else {
+          textBefore = line + (' ' * (point.col - line.length));
+        }
+        double x = (TextUtils.calcTextWidth(textBefore) + point.dx) * _charWidth;
+        if (x > maxDrawingX) maxDrawingX = x;
+      }
+      // パディング分を考慮して少し広げる
+      if (drawing.paddingX > 0 || drawing.paddingY > 0) {
+        maxDrawingX += drawing.paddingX * _charWidth;
+        maxDrawingY += drawing.paddingY * _lineHeight;
+      }
+    }
+
+    // 3. エディタ領域のサイズ決定 (テキストと図形の両方を包含し、画面サイズ以上の余白を持たせる)
     Size screenSize = MediaQuery.of(context).size;
     double minCanvasWidth = _controller.minColumns * _charWidth;
     double minCanvasHeight = _controller.minLines * _lineHeight;
 
     double editorWidth = max(
       minCanvasWidth,
-      textContentWidth + screenSize.width / 2,
+      max(textContentWidth, maxDrawingX) + screenSize.width / 2,
     );
     double editorHeight = max(
       minCanvasHeight,
-      textContentHeight + screenSize.height / 2,
+      max(textContentHeight, maxDrawingY) + screenSize.height / 2,
     );
 
     return Scaffold(

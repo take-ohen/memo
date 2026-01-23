@@ -40,6 +40,8 @@ class EditorDocument extends ChangeNotifier {
   bool isDirty = false;
   String currentEncoding = 'utf-8';
   NewLineType newLineType = NewLineType.lf;
+  bool isReadOnly = false; // 読み取り専用フラグ
+  String? title; // ドキュメントタイトル (ファイル名より優先)
 
   // 自動生成されたタイトル
   static int _untitledCounter = 1;
@@ -95,6 +97,7 @@ class EditorDocument extends ChangeNotifier {
 
   // 表示名を取得
   String get displayName {
+    if (title != null) return title!;
     if (currentFilePath != null) {
       return currentFilePath!.split(Platform.pathSeparator).last;
     }
@@ -200,6 +203,7 @@ class EditorDocument extends ChangeNotifier {
     bool isRegex = false,
     bool isCaseSensitive = false,
   }) {
+    if (isReadOnly) return;
     if (searchResults.isEmpty || currentSearchIndex == -1) return;
     final result = searchResults[currentSearchIndex];
 
@@ -222,6 +226,7 @@ class EditorDocument extends ChangeNotifier {
     bool isRegex = false,
     bool isCaseSensitive = false,
   }) {
+    if (isReadOnly) return;
     if (query.isEmpty) return;
     saveHistory();
 
@@ -254,12 +259,14 @@ class EditorDocument extends ChangeNotifier {
   // --- Drawing Logic ---
 
   void startStroke(Offset pos) {
+    if (isReadOnly) return;
     _currentStroke = [pos];
     strokes.add(_currentStroke!);
     notifyListeners();
   }
 
   void updateStroke(Offset pos) {
+    if (isReadOnly) return;
     if (_currentStroke != null) {
       _currentStroke!.add(pos);
       notifyListeners();
@@ -279,6 +286,7 @@ class EditorDocument extends ChangeNotifier {
     bool arrowStart,
     bool arrowEnd,
   ) {
+    if (isReadOnly) return;
     if (_currentStroke == null || _currentStroke!.isEmpty) return;
 
     final startPoint = _currentStroke!.first;
@@ -522,6 +530,7 @@ class EditorDocument extends ChangeNotifier {
     List<double>? tableRowPositions,
     List<double>? tableColPositions,
   }) {
+    if (isReadOnly) return;
     final index = drawings.indexWhere((d) => d.id == id);
     if (index == -1) return;
 
@@ -614,6 +623,7 @@ class EditorDocument extends ChangeNotifier {
   // --- Eraser Logic ---
 
   void eraseDrawing(Offset pos, double charWidth, double lineHeight) {
+    if (isReadOnly) return;
     // 逆順で走査（上にあるものを優先して消す）
     for (int i = drawings.length - 1; i >= 0; i--) {
       final drawing = drawings[i];
@@ -636,6 +646,7 @@ class EditorDocument extends ChangeNotifier {
 
   // 選択中の図形を削除
   void deleteSelectedDrawing() {
+    if (isReadOnly) return;
     if (selectedDrawingId == null) return;
     saveHistory();
     drawings.removeWhere((d) => d.id == selectedDrawingId);
@@ -645,6 +656,7 @@ class EditorDocument extends ChangeNotifier {
 
   // 指定IDの図形を削除 (画像挿入キャンセル時など)
   void deleteDrawing(String id) {
+    if (isReadOnly) return;
     saveHistory();
     drawings.removeWhere((d) => d.id == id);
     if (selectedDrawingId == id) selectedDrawingId = null;
@@ -838,6 +850,7 @@ class EditorDocument extends ChangeNotifier {
   }
 
   void insertText(String text) {
+    if (isReadOnly) return;
     if (text.isEmpty) return;
 
     ensureVirtualSpace(cursorRow, cursorCol);
@@ -888,6 +901,7 @@ class EditorDocument extends ChangeNotifier {
   }
 
   void deleteSelection() {
+    if (isReadOnly) return;
     if (!hasSelection) return;
 
     if (isRectangularSelection) {
@@ -1022,6 +1036,7 @@ class EditorDocument extends ChangeNotifier {
   }
 
   void replaceRectangularSelection(String text) {
+    if (isReadOnly) return;
     if (!hasSelection) return;
 
     int startRow = min(selectionOriginRow!, cursorRow);
@@ -1081,6 +1096,7 @@ class EditorDocument extends ChangeNotifier {
   }
 
   void undo() {
+    if (isReadOnly) return;
     final entry = historyManager.undo(lines, cursorRow, cursorCol, drawings);
     if (entry != null) {
       isDirty = true;
@@ -1089,6 +1105,7 @@ class EditorDocument extends ChangeNotifier {
   }
 
   void redo() {
+    if (isReadOnly) return;
     final entry = historyManager.redo(lines, cursorRow, cursorCol, drawings);
     if (entry != null) {
       isDirty = true;
@@ -1119,12 +1136,14 @@ class EditorDocument extends ChangeNotifier {
   }
 
   void indent() {
+    if (isReadOnly) return;
     saveHistory();
     deleteSelection();
     insertText(' ' * tabWidth);
   }
 
   void trimTrailingWhitespace() {
+    if (isReadOnly) return;
     saveHistory();
     bool changed = false;
     for (int i = 0; i < lines.length; i++) {
@@ -1145,6 +1164,7 @@ class EditorDocument extends ChangeNotifier {
 
   // 改行挿入
   void insertNewLine() {
+    if (isReadOnly) return;
     saveHistory();
     deleteSelection();
     ensureVirtualSpace(cursorRow, cursorCol);
@@ -1178,6 +1198,7 @@ class EditorDocument extends ChangeNotifier {
 
   // Backspace
   void backspace() {
+    if (isReadOnly) return;
     saveHistory();
     if (hasSelection) {
       deleteSelection();
@@ -1242,6 +1263,7 @@ class EditorDocument extends ChangeNotifier {
 
   // Delete
   void delete() {
+    if (isReadOnly) return;
     saveHistory();
     if (hasSelection) {
       deleteSelection();
@@ -1450,6 +1472,7 @@ class EditorDocument extends ChangeNotifier {
   }) {
     // 1. 図形操作 (Figureモードの場合のみ)
     if (isFigureMode) {
+      if (isReadOnly) return; // 読み取り専用なら図形操作（移動・リサイズ）は禁止
       if (selectedDrawingId != null) {
         final drawingIndex = drawings.indexWhere(
           (d) => d.id == selectedDrawingId,
@@ -1611,6 +1634,7 @@ class EditorDocument extends ChangeNotifier {
     double charWidth,
     double lineHeight,
   ) {
+    if (isReadOnly) return;
     // A. リサイズ中
     if (_activeHandleIndex != null && selectedDrawingId != null) {
       final index = drawings.indexWhere((d) => d.id == selectedDrawingId);
@@ -1805,6 +1829,7 @@ class EditorDocument extends ChangeNotifier {
   }
 
   void input(String text) {
+    if (isReadOnly) return;
     if (text.isEmpty) return;
 
     saveHistory();

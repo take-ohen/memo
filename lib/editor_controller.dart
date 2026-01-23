@@ -462,6 +462,54 @@ class EditorController extends ChangeNotifier {
     notifyListeners();
   }
 
+  // --- Help ---
+  Future<void> openHelpTab() async {
+    // 既にヘルプが開いているかチェック
+    for (int i = 0; i < documents.length; i++) {
+      if (documents[i].title == 'Help') {
+        switchTab(i);
+        return;
+      }
+    }
+
+    final doc = EditorDocument()
+      ..tabWidth = tabWidth
+      ..newLineType = defaultNewLineType
+      ..title = 'Help'
+      ..isReadOnly = false; // 体験用に編集可能にする
+
+    try {
+      // アセットからテキストを読み込む
+      final text = await rootBundle.loadString('assets/help.txt');
+      doc.lines = const LineSplitter().convert(text);
+    } catch (e) {
+      doc.lines = ["Help file not found."];
+      debugPrint("Error loading help asset: $e");
+    }
+
+    try {
+      // アセットから図形データを読み込む
+      final jsonString = await rootBundle.loadString('assets/help_draw.json');
+      final List<dynamic> jsonList = jsonDecode(jsonString);
+
+      if (jsonList.isNotEmpty) {
+        doc.drawings = jsonList
+            .map((e) => DrawingObject.fromJson(e as Map<String, dynamic>))
+            .toList();
+      }
+    } catch (e) {
+      debugPrint("Error loading help drawings: $e");
+    }
+
+    // ファイルパスをnullにして、保存時に「名前を付けて保存」になるようにする（原本保護）
+    doc.currentFilePath = null;
+
+    documents.add(doc);
+    activeDocumentIndex = documents.length - 1;
+    doc.addListener(_onDocumentChanged);
+    notifyListeners();
+  }
+
   // --- Settings Persistence (設定の保存) ---
 
   /// 設定を読み込む (アプリ起動時に呼ぶ)
@@ -2020,6 +2068,13 @@ class EditorController extends ChangeNotifier {
   }
 
   // --- Clipboard ---
+  Future<void> cutSelection() async {
+    if (!hasSelection) return;
+    saveHistory();
+    await copySelection();
+    deleteSelection();
+  }
+
   Future<void> copySelection() async {
     if (!hasSelection) return;
 
@@ -2351,6 +2406,10 @@ class EditorController extends ChangeNotifier {
 
     // --- Ctrl/Cmd Key Combos ---
     if (isControl) {
+      if (physicalKey == PhysicalKeyboardKey.keyX) {
+        cutSelection();
+        return KeyEventResult.handled;
+      }
       if (physicalKey == PhysicalKeyboardKey.keyC) {
         copySelection();
         return KeyEventResult.handled;
