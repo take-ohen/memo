@@ -349,11 +349,17 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   // --- UNDO (Ctrl+Z) ---
   void _undo() {
     _controller.undo();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollToCursor();
+    });
   }
 
   // --- REDO (Ctrl+Y) ---
   void _redo() {
     _controller.redo();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollToCursor();
+    });
   }
 
   // マウスホバー時の処理（カーソル形状の切り替え）
@@ -472,9 +478,10 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     final result = _controller.handleKeyPress(event);
     if (result == KeyEventResult.handled) {
       // コントローラーが処理したので、IME窓の位置を更新して終了
-      WidgetsBinding.instance.addPostFrameCallback(
-        (_) => _updateImeWindowPosition(),
-      );
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _updateImeWindowPosition();
+        _scrollToCursor();
+      });
       return KeyEventResult.handled;
     }
 
@@ -486,6 +493,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
           // IME窓の更新はControllerではできないのでここで行う
           WidgetsBinding.instance.addPostFrameCallback((_) {
             _updateImeWindowPosition();
+            _scrollToCursor();
           });
           return KeyEventResult.handled;
         }
@@ -589,10 +597,16 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
       if (shouldReload == true) {
         await _controller.reloadDocument(index, path);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _scrollToCursor();
+        });
       }
     } else {
       // 4. 重複なし -> 新規タブ
       await _controller.openDocument(path);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scrollToCursor();
+      });
     }
   }
 
@@ -1064,7 +1078,10 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                 final title = doc.displayName + (doc.isDirty ? ' *' : '');
 
                 return InkWell(
-                  onTap: () => _controller.switchTab(index),
+                  onTap: () {
+                    _controller.switchTab(index);
+                    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToCursor());
+                  },
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     alignment: Alignment.center,
@@ -1092,7 +1109,10 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
           ),
           IconButton(
             icon: const Icon(Icons.add, size: 20),
-            onPressed: () => _controller.newTab(),
+            onPressed: () {
+              _controller.newTab();
+              WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToCursor());
+            },
             tooltip: AppLocalizations.of(context)!.tooltipNewTab,
           ),
           IconButton(
@@ -3275,6 +3295,9 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
       if (value.text.isNotEmpty) {
         _controller.input(value.text);
         _controller.updateComposingText("");
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _scrollToCursor();
+        });
       }
       if (_inputConnection != null && _inputConnection!.attached) {
         _inputConnection!.setEditingState(TextEditingValue.empty);
@@ -3286,6 +3309,9 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     } else {
       _controller.updateComposingText(value.text);
       _updateImeWindowPosition();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scrollToCursor();
+      });
     }
   }
 

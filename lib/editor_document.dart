@@ -582,6 +582,42 @@ class EditorDocument extends ChangeNotifier {
     notifyListeners();
   }
 
+  // 画像サイズに合わせて図形（終点）をリサイズ
+  void resizeDrawingToImageSize(
+    String id,
+    double imageWidth,
+    double imageHeight,
+    double charWidth,
+    double lineHeight,
+  ) {
+    if (isReadOnly) return;
+    final index = drawings.indexWhere((d) => d.id == id);
+    if (index == -1) return;
+
+    saveHistory();
+    final drawing = drawings[index];
+
+    // 始点のピクセル座標を取得
+    if (drawing.points.isEmpty) return;
+    final startPoint = drawing.points[0];
+    final startOffset = _resolveAnchor(startPoint, charWidth, lineHeight);
+
+    // 終点のピクセル座標を計算
+    final endOffset = startOffset + Offset(imageWidth, imageHeight);
+
+    // 終点をAnchorPointに変換
+    final endPoint = _convertToAnchor(endOffset, charWidth, lineHeight);
+
+    // 図形のポイントを更新 (始点はそのまま、終点を更新)
+    if (drawing.points.length < 2) {
+      drawing.points.add(endPoint);
+    } else {
+      drawing.points[1] = endPoint;
+    }
+
+    notifyListeners();
+  }
+
   // 指定座標に図形があるか判定（UIのカーソル変更用）
   bool isPointOnDrawing(Offset pos, double charWidth, double lineHeight) {
     for (int i = drawings.length - 1; i >= 0; i--) {

@@ -300,8 +300,8 @@ class EditorController extends ChangeNotifier {
   Map<String, ui.Image> imageCache = {};
 
   // 画像をロードしてキャッシュする
-  Future<void> loadImage(String path) async {
-    if (imageCache.containsKey(path)) return;
+  Future<void> loadImage(String path, {bool forceReload = false}) async {
+    if (!forceReload && imageCache.containsKey(path)) return;
 
     try {
       final file = File(path);
@@ -317,9 +317,26 @@ class EditorController extends ChangeNotifier {
     }
   }
 
+  // 最後に使用した文字サイズ（画像リサイズ用）
+  double _lastCharWidth = 0.0;
+  double _lastLineHeight = 0.0;
+
   // 画像パスを設定する (ロード含む)
   Future<void> setImagePath(String id, String path) async {
-    await loadImage(path);
+    await loadImage(path, forceReload: true);
+
+    // 画像サイズに合わせて図形をリサイズ
+    if (imageCache.containsKey(path) && _lastCharWidth > 0 && _lastLineHeight > 0) {
+      final image = imageCache[path]!;
+      activeDocument.resizeDrawingToImageSize(
+        id,
+        image.width.toDouble(),
+        image.height.toDouble(),
+        _lastCharWidth,
+        _lastLineHeight,
+      );
+    }
+
     activeDocument.updateDrawingProperties(id, filePath: path);
   }
 
@@ -1023,6 +1040,9 @@ class EditorController extends ChangeNotifier {
   }
 
   void endStroke(double charWidth, double lineHeight) {
+    _lastCharWidth = charWidth;
+    _lastLineHeight = lineHeight;
+
     final attrs = currentAttributes;
     activeDocument.endStroke(
       charWidth,
@@ -1587,30 +1607,13 @@ class EditorController extends ChangeNotifier {
     } else if (dy == 0) {
       // 水平 (y2 = y1 なので何もしない)
     } else {
-      if (!useHalfWidth) {
-        // 全角モード: 斜め線を廃止し、水平または垂直に強制する
-        if ((dx.abs() / aspect) >= dy.abs()) {
-          // 横移動が大きい -> 水平線
-          y2 = y1;
-        } else {
-          // 縦移動が大きい -> 垂直線
-          x2 = x1;
-        }
+      // 全角・半角問わず、斜め線を廃止し、水平または垂直に強制する
+      if ((dx.abs() / aspect) >= dy.abs()) {
+        // 横移動が大きい -> 水平線
+        y2 = y1;
       } else {
-        // 半角モード: 斜め (45度)
-        int signX = dx >= 0 ? 1 : -1;
-        int signY = dy >= 0 ? 1 : -1;
-
-        // 移動量が大きい軸を基準に合わせて、他方を調整する
-        if (dx.abs() / aspect > dy.abs()) {
-          // 横移動が大きい -> xに合わせてyを決める
-          int newDy = (dx.abs() / aspect).round();
-          y2 = y1 + newDy * signY;
-        } else {
-          // 縦移動が大きい -> yに合わせてxを決める
-          int newDx = (dy.abs() * aspect).round();
-          x2 = x1 + newDx * signX;
-        }
+        // 縦移動が大きい -> 垂直線
+        x2 = x1;
       }
     }
 
@@ -1844,18 +1847,36 @@ class EditorController extends ChangeNotifier {
       // --- 矢印描画ロジック ---
       // 始点かつ矢印ありの場合 (線と逆方向の矢印)
       if (arrowStart && i == 0) {
-        String? arrow = TextUtils.getArrowChar(-signX, -signY, useHalfWidth);
-        if (arrow != null) {
-          charToPut = arrow;
+        // 半角縦線の特例 (上=A, 下=V)
+        if (useHalfWidth && signX == 0 && signY != 0) {
+          // 始点は逆方向 (-signY)
+          // 線が下向き(1)なら始点は上向き(-1) -> 'A'
+          // 線が上向き(-1)なら始点は下向き(1) -> 'V'
+          charToPut = (signY > 0) ? 'A' : 'V';
           isArrow = true;
+        } else {
+          String? arrow = TextUtils.getArrowChar(-signX, -signY, useHalfWidth);
+          if (arrow != null) {
+            charToPut = arrow;
+            isArrow = true;
+          }
         }
       }
       // 終点かつ矢印ありの場合 (線と同じ方向の矢印)
       else if (arrowEnd && i == points.length - 1) {
-        String? arrow = TextUtils.getArrowChar(signX, signY, useHalfWidth);
-        if (arrow != null) {
-          charToPut = arrow;
+        // 半角縦線の特例 (上=A, 下=V)
+        if (useHalfWidth && signX == 0 && signY != 0) {
+          // 終点は順方向 (signY)
+          // 線が下向き(1)なら終点は下向き(1) -> 'V'
+          // 線が上向き(-1)なら終点は上向き(-1) -> 'A'
+          charToPut = (signY > 0) ? 'V' : 'A';
           isArrow = true;
+        } else {
+          String? arrow = TextUtils.getArrowChar(signX, signY, useHalfWidth);
+          if (arrow != null) {
+            charToPut = arrow;
+            isArrow = true;
+          }
         }
       }
 
