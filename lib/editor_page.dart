@@ -4,9 +4,12 @@ import 'dart:convert'; // Encoding用
 
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'dart:math';
 import 'dart:async';
+import 'package:desktop_drop/desktop_drop.dart';
+import 'package:cross_file/cross_file.dart';
 
 import 'l10n/app_localizations.dart';
 // 分割したファイルをインポート
@@ -67,6 +70,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   final ScrollController _grepScrollController = ScrollController(); // Grep結果用
   final ScrollController _grepHorizontalScrollController =
       ScrollController(); // Grep結果横スクロール用
+  final ScrollController _tabScrollController = ScrollController(); // タブバー用
   final FocusNode _focusNode = FocusNode();
 
   // ミニマップ用
@@ -131,6 +135,19 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
   @visibleForTesting
   EditorController get debugController => _controller;
+
+  @visibleForTesting
+  Future<void> openFileForTesting() => _openFile();
+
+  @visibleForTesting
+  Future<void> saveAsFileForTesting() => _saveAsFile();
+
+  @visibleForTesting
+  Future<void> handleCloseTabForTesting(int index) => _handleCloseTab(index);
+
+  @visibleForTesting
+  Future<void> handleDroppedFilesForTesting(List<XFile> files) =>
+      _handleDroppedFiles(files);
 
   @override
   void initState() {
@@ -211,6 +228,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     _scrollbarScrollController.dispose();
     _grepScrollController.dispose();
     _grepHorizontalScrollController.dispose();
+    _tabScrollController.dispose();
     _cursorBlinkTimer?.cancel(); // カーソル点滅用
     _widthController.dispose();
     _paddingXController.dispose();
@@ -731,6 +749,49 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
     }
   }
 
+  // ドロップされたファイルを処理する
+  Future<void> _handleDroppedFiles(List<XFile> files) async {
+    for (final file in files) {
+      final path = file.path;
+      // 重複チェック
+      final int index = _controller.findDocumentIndex(path);
+
+      if (index != -1) {
+        // 重複あり -> 確認ダイアログ
+        if (!mounted) return;
+        final s = AppLocalizations.of(context)!;
+
+        final bool? shouldReload = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text(s.titleConfirmation),
+            content: Text("${s.msgFileAlreadyOpen}\n$path"),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false), // キャンセル
+                child: Text(s.labelCancel),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true), // 読み直す
+                child: Text(s.btnReload),
+              ),
+            ],
+          ),
+        );
+
+        if (shouldReload == true) {
+          await _controller.reloadDocument(index, path);
+        }
+      } else {
+        // 重複なし -> 新規タブ
+        await _controller.openDocument(path);
+      }
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollToCursor();
+    });
+  }
+
   void _activateIme(BuildContext context) {
     if (_inputConnection == null || !_inputConnection!.attached) {
       final viewId = View.of(context).viewId;
@@ -1119,44 +1180,96 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
       color: Colors.grey.shade300,
       child: Row(
         children: [
-          Expanded(
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              itemCount: _controller.documents.length,
-              itemBuilder: (context, index) {
-                final doc = _controller.documents[index];
-                final isActive = index == _controller.activeDocumentIndex;
-                final title = doc.displayName + (doc.isDirty ? ' *' : '');
-
-                return InkWell(
-                  onTap: () {
-                    _controller.switchTab(index);
-                    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToCursor());
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    alignment: Alignment.center,
-                    color: isActive ? Colors.white : Colors.grey.shade300,
-                    child: Row(
-                      children: [
-                        Text(
-                          title,
-                          style: tabTextStyle.copyWith(
-                            // アクティブなタブは太字にする（設定で既に太字なら太字のまま）
-                            fontWeight: isActive ? FontWeight.bold : null,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        InkWell(
-                          onTap: () => _handleCloseTab(index),
-                          child: const Icon(Icons.close, size: 16),
-                        ),
-                      ],
-                    ),
-                  ),
+          // 左スクロールボタン
+          IconButton(
+            icon: const Icon(Icons.chevron_left, size: 20),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 24, minHeight: 32),
+            onPressed: () {
+              if (_tabScrollController.hasClients) {
+                _tabScrollController.animateTo(
+                  max(0, _tabScrollController.offset - 150),
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeOut,
                 );
+              }
+            },
+            tooltip: 'Scroll Left',
+          ),
+          Expanded(
+            child: Listener(
+              onPointerSignal: (event) {
+                if (event is PointerScrollEvent) {
+                  if (_tabScrollController.hasClients) {
+                    final newOffset = _tabScrollController.offset + event.scrollDelta.dy;
+                    if (newOffset < 0) {
+                      _tabScrollController.jumpTo(0);
+                    } else if (newOffset > _tabScrollController.position.maxScrollExtent) {
+                      _tabScrollController.jumpTo(_tabScrollController.position.maxScrollExtent);
+                    } else {
+                      _tabScrollController.jumpTo(newOffset);
+                    }
+                  }
+                }
               },
+              child: ListView.builder(
+                controller: _tabScrollController,
+                scrollDirection: Axis.horizontal,
+                itemCount: _controller.documents.length,
+                itemBuilder: (context, index) {
+                  final doc = _controller.documents[index];
+                  final isActive = index == _controller.activeDocumentIndex;
+                  final title = doc.displayName + (doc.isDirty ? ' *' : '');
+
+                  return InkWell(
+                    onTap: () {
+                      _controller.switchTab(index);
+                      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToCursor());
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      alignment: Alignment.center,
+                      color: isActive ? Colors.white : Colors.grey.shade300,
+                      child: Row(
+                        children: [
+                          Text(
+                            title,
+                            style: tabTextStyle.copyWith(
+                              // アクティブなタブは太字にする（設定で既に太字なら太字のまま）
+                              fontWeight: isActive ? FontWeight.bold : null,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          InkWell(
+                            onTap: () => _handleCloseTab(index),
+                            child: const Icon(Icons.close, size: 16),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
             ),
+          ),
+          // 右スクロールボタン
+          IconButton(
+            icon: const Icon(Icons.chevron_right, size: 20),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 24, minHeight: 32),
+            onPressed: () {
+              if (_tabScrollController.hasClients) {
+                _tabScrollController.animateTo(
+                  min(
+                    _tabScrollController.position.maxScrollExtent,
+                    _tabScrollController.offset + 150,
+                  ),
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeOut,
+                );
+              }
+            },
+            tooltip: 'Scroll Right',
           ),
           IconButton(
             icon: const Icon(Icons.add, size: 20),
@@ -2778,7 +2891,9 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
       max(textContentHeight, maxDrawingY) + screenSize.height / 2,
     );
 
-    return Scaffold(
+    return DropTarget(
+      onDragDone: (details) => _handleDroppedFiles(details.files),
+      child: Scaffold(
       key: _scaffoldKey,
       endDrawer: _buildDrawingListDrawer(),
       drawerScrimColor: Colors.transparent, // 背景を暗くしない
@@ -3332,6 +3447,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
             ),
           ),
         ],
+      ),
       ),
     );
   }

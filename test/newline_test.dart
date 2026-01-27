@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:free_memo_editor/editor_document.dart';
 import 'package:free_memo_editor/file_io_helper.dart';
@@ -13,6 +14,11 @@ class MockFileIOHelper implements FileIOHelper {
     return mockPickPath;
   }
 
+  @override
+  Future<String?> pickImagePath() async {
+    return mockPickPath;
+  }
+
   // 以下のメソッドはEditorDocumentから直接呼ばれなくなるため、実装は不要（または空）
   @override
   Future<String> readFileAsString(String path) async => '';
@@ -23,6 +29,24 @@ class MockFileIOHelper implements FileIOHelper {
 
   @override
   Future<void> writeStringToFile(String path, String content) async {}
+
+  @override
+  Future<Uint8List> readFileAsBytes(String path) async {
+    return File(path).readAsBytesSync();
+  }
+
+  @override
+  Future<void> writeBytesToFile(String path, List<int> bytes) async {
+    File(path).writeAsBytesSync(bytes);
+  }
+
+  @override
+  Future<bool> fileExists(String path) async {
+    return File(path).existsSync();
+  }
+
+  @override
+  Future<void> deleteFile(String path) async {}
 }
 
 void main() {

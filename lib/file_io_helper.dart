@@ -1,6 +1,7 @@
 // lib/file_io_helper.dart
 import 'package:file_selector/file_selector.dart';
 import 'dart:io';
+import 'dart:typed_data';
 
 /// ファイル入出力を抽象化するヘルパークラス
 /// テスト時にモックに差し替えることで、FilePickerへの直接依存を回避する。
@@ -71,4 +72,24 @@ class FileIOHelper {
     final file = File(path);
     await file.writeAsString(content);
   }
+
+    // lib/file_io_helper.dart の FileIOHelper クラス内に追加
+  
+    Future<Uint8List> readFileAsBytes(String path) async {
+      return File(path).readAsBytes();
+    }
+  
+    Future<void> writeBytesToFile(String path, List<int> bytes) async {
+      await File(path).writeAsBytes(bytes);
+    }
+
+    /// ファイルの存在確認
+    Future<bool> fileExists(String path) async {
+      return File(path).exists();
+    }
+
+    /// ファイルの削除
+    Future<void> deleteFile(String path) async {
+      await File(path).delete();
+    }
 }

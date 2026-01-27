@@ -1883,8 +1883,7 @@ class EditorDocument extends ChangeNotifier {
   // --- File I/O ---
   Future<void> loadFromFile(String path, {String? encoding}) async {
     try {
-      final file = File(path);
-      final bytes = await file.readAsBytes();
+      final bytes = await FileIOHelper.instance.readFileAsBytes(path);
       String content;
 
       if (encoding != null) {
@@ -1908,10 +1907,10 @@ class EditorDocument extends ChangeNotifier {
 
       // 図形データの読み込み
       drawings = []; // 初期化
-      final drawFile = File(_getDrawFilePath(path));
-      if (await drawFile.exists()) {
+      final drawFilePath = _getDrawFilePath(path);
+      if (await FileIOHelper.instance.fileExists(drawFilePath)) {
         try {
-          final jsonString = await drawFile.readAsString();
+          final jsonString = await FileIOHelper.instance.readFileAsString(drawFilePath);
           final List<dynamic> jsonList = jsonDecode(jsonString);
           drawings = jsonList
               .map((e) => DrawingObject.fromJson(e as Map<String, dynamic>))
@@ -1967,14 +1966,13 @@ class EditorDocument extends ChangeNotifier {
           separator = '\n';
       }
       String content = lines.join(separator);
-      final file = File(currentFilePath!);
       List<int> encodedBytes;
       if (currentEncoding.toLowerCase() == 'utf-8') {
         encodedBytes = utf8.encode(content);
       } else {
         encodedBytes = await CharsetConverter.encode(currentEncoding, content);
       }
-      await file.writeAsBytes(encodedBytes);
+      await FileIOHelper.instance.writeBytesToFile(currentFilePath!, encodedBytes);
 
       // 図形データの保存
       await _saveDrawings(currentFilePath!);
@@ -2008,7 +2006,6 @@ class EditorDocument extends ChangeNotifier {
             separator = '\n';
         }
         String content = lines.join(separator);
-        final file = File(outputFile);
         List<int> encodedBytes;
         if (currentEncoding.toLowerCase() == 'utf-8') {
           encodedBytes = utf8.encode(content);
@@ -2018,7 +2015,7 @@ class EditorDocument extends ChangeNotifier {
             content,
           );
         }
-        await file.writeAsBytes(encodedBytes);
+        await FileIOHelper.instance.writeBytesToFile(outputFile, encodedBytes);
 
         // 図形データの保存
         await _saveDrawings(outputFile);
@@ -2044,20 +2041,20 @@ class EditorDocument extends ChangeNotifier {
 
   // 図形保存のヘルパーメソッド
   Future<void> _saveDrawings(String txtPath) async {
-    final drawFile = File(_getDrawFilePath(txtPath));
+    final drawFilePath = _getDrawFilePath(txtPath);
     if (drawings.isNotEmpty) {
       try {
         final jsonList = drawings.map((d) => d.toJson()).toList();
         final jsonString = jsonEncode(jsonList);
-        await drawFile.writeAsString(jsonString);
+        await FileIOHelper.instance.writeStringToFile(drawFilePath, jsonString);
       } catch (e) {
         debugPrint('Error saving drawing data: $e');
       }
     } else {
       // 図形がない場合、古いファイルがあれば削除する（ゴミを残さない）
-      if (await drawFile.exists()) {
+      if (await FileIOHelper.instance.fileExists(drawFilePath)) {
         try {
-          await drawFile.delete();
+          await FileIOHelper.instance.deleteFile(drawFilePath);
         } catch (e) {
           debugPrint('Error deleting drawing file: $e');
         }

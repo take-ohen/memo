@@ -1,5 +1,7 @@
 // test/editor_logic_test.dart
 import 'dart:io'; // ファイル操作用
+import 'dart:typed_data'; // Uint8List用
+import 'package:cross_file/cross_file.dart'; // XFile用
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -807,9 +809,9 @@ void main() {
     final state = tester.state(find.byType(EditorPage)) as dynamic;
 
     // --- Test: ファイルを開く ---
-    // UIの「開く」ボタンをタップ
-    await tester.tap(find.byIcon(Icons.folder_open));
-    // タイマーを無効化したので、pumpAndSettle で安全に非同期処理の完了と描画安定を待てる
+    // UIボタンのタップでは非同期処理(ファイル読み込み)の完了を待てないため、
+    // Stateのメソッドを直接呼び出して完了を待つ
+    await state.openFileForTesting();
     await tester.pumpAndSettle();
 
     // 検証: ファイルの内容が読み込まれているか
@@ -831,8 +833,8 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.keyT);
     await tester.pump();
 
-    // UIの「名前を付けて保存」ボタンをタップ (Icons.save_as)
-    await tester.tap(find.byIcon(Icons.save_as));
+    // UIの「名前を付けて保存」ボタンをタップ
+    await state.saveAsFileForTesting();
     await tester.pumpAndSettle();
 
     // 検証: 保存先のファイルに書き込まれているか
@@ -1125,6 +1127,180 @@ void main() {
     expect(controller.searchResults.length, 0, reason: "'abc' はもう無いはず");
   });
 
+  testWidgets('Undo/Redo Logic (Paste & Rectangular Paste)', (WidgetTester tester) async {
+    // 1. クリップボードのモック化
+    String? mockClipboardData;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (MethodCall methodCall) async {
+        if (methodCall.method == 'Clipboard.setData') {
+          final args = methodCall.arguments as Map<String, dynamic>;
+          mockClipboardData = args['text'] as String?;
+        } else if (methodCall.method == 'Clipboard.getData') {
+          return {'text': mockClipboardData};
+        }
+        return null;
+      },
+    );
+
+    // 2. アプリ起動
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1.0;
+    await tester.pumpWidget(createTestWidget(const EditorPage()));
+    await tester.pump();
+
+    final state = tester.state(find.byType(EditorPage)) as dynamic;
+    final EditorController controller = state.debugController;
+
+    // 3. 準備: テキスト入力 "A"
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    await tester.pump();
+    expect(controller.lines[0], "a");
+
+    // 4. 通常貼り付けのUndo
+    // クリップボードに "B" をセット
+    mockClipboardData = "B";
+    
+    // 貼り付け (Ctrl+V) -> "aB"
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.control);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.control);
+    await tester.pump();
+    expect(controller.lines[0], "aB");
+
+    // Undo (Ctrl+Z) -> "a"
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.control);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.control);
+    await tester.pump();
+    expect(controller.lines[0], "a", reason: "通常貼り付けのUndoで元の状態に戻ること");
+
+    // Redo (Ctrl+Y) -> "aB"
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.control);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyY);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.control);
+    await tester.pump();
+    expect(controller.lines[0], "aB", reason: "Redoで貼り付け状態に戻ること");
+
+    // 5. 矩形貼り付けのUndo
+    // 状態リセット: 全削除して "1\n2" を作る
+    controller.lines = ["1", "2"];
+    controller.cursorRow = 0;
+    controller.cursorCol = 0;
+    await tester.pump();
+
+    // クリップボードに "X\nY" (矩形データ)
+    mockClipboardData = "X\nY";
+
+    // 矩形貼り付け (Ctrl+Alt+V) -> "X1\nY2"
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.control);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.alt);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.alt);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.control);
+    await tester.pump();
+
+    expect(controller.lines[0], "X1");
+    expect(controller.lines[1], "Y2");
+
+    // Undo -> "1\n2"
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.control);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.control);
+    await tester.pump();
+
+    expect(controller.lines[0], "1", reason: "矩形貼り付けのUndo(Row0)");
+    expect(controller.lines[1], "2", reason: "矩形貼り付けのUndo(Row1)");
+
+    // モック解除
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      null,
+    );
+  });
+
+  testWidgets('Drag & Drop Logic', (WidgetTester tester) async {
+    // 1. モックの設定
+    final tempDir = Directory.systemTemp.createTempSync('memo_dnd_test');
+    final file1 = File('${tempDir.path}/file1.txt');
+    file1.writeAsStringSync('Content 1');
+    final file2 = File('${tempDir.path}/file2.txt');
+    file2.writeAsStringSync('Content 2');
+
+    // FileIOHelperのモック (読み込み用)
+    final mockHelper = MockFileIOHelper();
+    FileIOHelper.instance = mockHelper;
+
+    // 2. アプリ起動
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1.0;
+    await tester.pumpWidget(createTestWidget(const EditorPage()));
+    await tester.pumpAndSettle();
+
+    final state = tester.state(find.byType(EditorPage)) as dynamic;
+    final EditorController controller = state.debugController;
+
+    // 初期状態: 1つの空タブ
+    expect(controller.documents.length, 1);
+
+    // --- Case 1: 新規ファイルドロップ (file1) ---
+    final xFile1 = XFile(file1.path);
+    await state.handleDroppedFilesForTesting([xFile1]);
+    await tester.pumpAndSettle();
+
+    // タブが増えていること
+    expect(controller.documents.length, 2);
+    expect(controller.activeDocumentIndex, 1);
+    expect(controller.lines[0], 'Content 1');
+    expect(controller.currentFilePath, file1.path);
+
+    // --- Case 2: 重複ファイルドロップ (file1) -> キャンセル ---
+    // ファイル内容を外部で変更
+    file1.writeAsStringSync('Content 1 Modified');
+
+    // ダイアログが出るため、awaitせずにFutureを保持
+    Future<void> dropFuture = state.handleDroppedFilesForTesting([xFile1]);
+    await tester.pumpAndSettle(); // ダイアログ表示
+
+    expect(find.text('確認'), findsOneWidget);
+    expect(find.text('キャンセル'), findsOneWidget);
+
+    // キャンセル
+    await tester.tap(find.text('キャンセル'));
+    await tester.pumpAndSettle();
+    await dropFuture; // 処理完了待ち
+
+    // リロードされていないはず (元の内容のまま)
+    expect(controller.lines[0], 'Content 1');
+
+    // --- Case 3: 重複ファイルドロップ (file1) -> リロード ---
+    dropFuture = state.handleDroppedFilesForTesting([xFile1]);
+    await tester.pumpAndSettle();
+
+    // 読み直す
+    await tester.tap(find.text('読み直す'));
+    await tester.pumpAndSettle();
+    await dropFuture; // 処理完了待ち
+
+    // リロードされて内容が更新されているはず
+    expect(controller.lines[0], 'Content 1 Modified');
+
+    // --- Case 4: 複数ファイルドロップ (file2, 新規file3) ---
+    final file3 = File('${tempDir.path}/file3.txt');
+    file3.writeAsStringSync('Content 3');
+    final xFile2 = XFile(file2.path);
+    final xFile3 = XFile(file3.path);
+
+    await state.handleDroppedFilesForTesting([xFile2, xFile3]);
+    await tester.pumpAndSettle();
+
+    // タブが2つ増えて合計4つになっているはず (Untitled, file1, file2, file3)
+    expect(controller.documents.length, 4);
+
+    // 後始末
+    tempDir.deleteSync(recursive: true);
+  });
+
   testWidgets('Tab Close Confirmation Logic', (WidgetTester tester) async {
     // 1. モックの設定
     final tempDir = Directory.systemTemp.createTempSync('memo_tab_test');
@@ -1132,6 +1308,17 @@ void main() {
     final mockHelper = MockFileIOHelper();
     mockHelper.mockSavePath = savePath;
     FileIOHelper.instance = mockHelper;
+
+    // window_manager のモック設定 (アプリ終了処理でハングしないようにする)
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      const MethodChannel('window_manager'),
+      (MethodCall methodCall) async {
+        if (methodCall.method == 'close') {
+          return true;
+        }
+        return null;
+      },
+    );
 
     // 2. アプリ起動
     tester.view.physicalSize = const Size(1200, 800);
@@ -1151,8 +1338,9 @@ void main() {
 
     // タブの閉じるボタンをタップ
     // 検索バーは非表示なので、Icons.close はタブのものだけのはず
-    await tester.tap(find.byIcon(Icons.close).first);
-    await tester.pumpAndSettle();
+    // ダイアログの結果を待つため、メソッドを直接呼び出し、Futureを保持する
+    Future<void> closeFuture = state.handleCloseTabForTesting(0);
+    await tester.pumpAndSettle(); // ダイアログ表示待ち
 
     // ダイアログが表示されているか
     expect(find.text('確認'), findsOneWidget);
@@ -1161,6 +1349,7 @@ void main() {
     // キャンセルをタップ
     await tester.tap(find.text('キャンセル'));
     await tester.pumpAndSettle();
+    await closeFuture; // 処理完了待ち
 
     // ダイアログが消え、タブが残っていること
     expect(find.text('確認'), findsNothing);
@@ -1169,17 +1358,20 @@ void main() {
 
     // --- ケース2: 保存しない (Don't Save) ---
     // 再度閉じるボタン
-    await tester.tap(find.byIcon(Icons.close).first);
+    closeFuture = state.handleCloseTabForTesting(0);
     await tester.pumpAndSettle();
 
     // 「保存しない」をタップ
     await tester.tap(find.text('保存しない'));
     await tester.pumpAndSettle();
+    await closeFuture;
 
-    // タブが閉じられ、新しい空のタブ（Untitled, isDirty=false）になっているはず
+    // 最後のタブの場合、アプリ終了処理(windowManager.close)が呼ばれる。
+    // テスト環境ではプロセスは終了しないため、タブとデータは残るが、
+    // 保存しないを選択したので isDirty は false にクリアされているはず。
     expect(controller.documents.length, 1);
     expect(controller.isDirty, isFalse);
-    expect(controller.lines[0], isEmpty); // "a" は消えている
+    expect(controller.lines[0], contains('a')); // データは残っている
 
     // --- ケース3: 保存する (Save) ---
     // 再度変更を加える ("b")
@@ -1188,22 +1380,23 @@ void main() {
     expect(controller.isDirty, isTrue);
 
     // 閉じるボタン
-    await tester.tap(find.byIcon(Icons.close).first);
+    closeFuture = state.handleCloseTabForTesting(0);
     await tester.pumpAndSettle();
 
     // 「保存する」をタップ
     await tester.tap(find.text('保存する'));
-    await tester.pumpAndSettle(); // 保存ダイアログ -> 保存処理 -> タブ閉じる -> 新規タブ作成
+    await tester.pumpAndSettle();
+    await closeFuture;
 
     // ファイルが保存されたか確認
     final file = File(savePath);
     expect(file.existsSync(), isTrue, reason: "ファイルが保存されていること");
     expect(file.readAsStringSync(), contains('b'), reason: "保存内容が正しいこと");
 
-    // タブの状態確認 (保存して閉じたので、新規タブになっている)
+    // タブの状態確認 (保存して終了処理へ移行したので、isDirtyはfalse)
     expect(controller.documents.length, 1);
     expect(controller.isDirty, isFalse);
-    expect(controller.lines[0], isEmpty);
+    // expect(controller.lines[0], isEmpty); // データは残る
 
     // 後始末
     tempDir.deleteSync(recursive: true);
@@ -1236,5 +1429,29 @@ class MockFileIOHelper extends FileIOHelper {
   Future<void> writeStringToFile(String path, String content) async {
     // テスト時は同期的に書き込むことでハングを防ぐ
     File(path).writeAsStringSync(content);
+  }
+
+  @override
+  Future<Uint8List> readFileAsBytes(String path) async {
+    // テスト時は同期的に読み込む
+    return File(path).readAsBytesSync();
+  }
+
+  @override
+  Future<void> writeBytesToFile(String path, List<int> bytes) async {
+    // テスト時は同期的に書き込む
+    File(path).writeAsBytesSync(bytes);
+  }
+
+  @override
+  Future<bool> fileExists(String path) async {
+    return File(path).existsSync();
+  }
+
+  @override
+  Future<void> deleteFile(String path) async {
+    if (File(path).existsSync()) {
+      File(path).deleteSync();
+    }
   }
 }

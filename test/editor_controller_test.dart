@@ -304,7 +304,7 @@ void main() {
       expect(controller.preferredVisualX, 6);
     });
 
-    test('直線描画 drawLine (半角・左斜め)', () {
+    test('直線描画 drawLine (半角・左斜め -> 水平強制)', () {
       // 1. 準備
       controller.lines = ['     ', '     ', '     '];
 
@@ -320,14 +320,13 @@ void main() {
 
       // 4. 検証
       // (2,2) -> (0,0)
-      // dx=-2, dy=-2. 斜め判定。
-      // 傾き正 -> バックスラッシュ '\'
-      // (0,0) \
-      // (1,1)  \
-      // (2,2)   \
-      expect(controller.lines[0], startsWith('\\'));
-      expect(controller.lines[1], startsWith(' \\'));
-      expect(controller.lines[2], startsWith('  \\'));
+      // dx=-2, dy=-2. |dx| >= |dy| なので水平線に強制される (y2=y1=2)
+      // (2,2) -> (0,2) の水平線
+      // 0行目、1行目は変化なし
+      expect(controller.lines[0], equals('     '));
+      expect(controller.lines[1], equals('     '));
+      // 2行目に水平線 (VisualX 0~2)
+      expect(controller.lines[2], startsWith('--'));
     });
 
     test('直線描画 drawLine (全角・範囲外クリッピング)', () {
@@ -408,14 +407,14 @@ void main() {
       expect(controller.lines[0], startsWith('│'));
     });
 
-    test('直線描画 drawLine (極端なアスペクト比での斜め判定・半角)', () {
+    test('直線描画 drawLine (極端なアスペクト比 -> 水平/垂直強制)', () {
       // 1. 準備
       // 十分な広さのキャンバスを用意
       controller.lines = List.generate(12, (_) => '          ');
 
       // 2. 操作: 横長 (0,0) -> (1, 10) 半角モード
       // dx=10, dy=1.
-      // 水平(dy=0)ではないので、斜め線になるはず。
+      // 横移動が大きい -> 水平線
       controller.selectionOriginRow = 0;
       controller.selectionOriginCol = 0;
       controller.cursorRow = 1;
@@ -425,8 +424,8 @@ void main() {
       controller.drawLine(useHalfWidth: true);
 
       // 4. 検証
-      // 始点(0,0)が '\' (バックスラッシュ) になっていること
-      expect(controller.lines[0], startsWith('\\'));
+      // 水平線
+      expect(controller.lines[0], startsWith('-'));
 
       // 5. 操作: 縦長 (0,0) -> (10, 1) 半角モード
       // dx=1, dy=10.
@@ -439,8 +438,8 @@ void main() {
 
       controller.drawLine(useHalfWidth: true);
 
-      // 始点(0,0)が '\' になっていること
-      expect(controller.lines[0], startsWith('\\'));
+      // 縦移動が大きい -> 垂直線
+      expect(controller.lines[0], startsWith('|'));
     });
 
     test('L字線描画 drawElbowLine (上折れ・下折れ)', () {
@@ -656,16 +655,16 @@ void main() {
 
     test('半角矢印・下向き (垂直)', () {
       // (0,0) -> (2,0)
-      // 両端: ^ ... v
+      // 両端: A ... V (半角縦線の特例)
       controller.lines = [' ', ' ', ' '];
       controller.selectionOriginRow = 0;
       controller.selectionOriginCol = 0;
       controller.cursorRow = 2;
       controller.cursorCol = 0;
       controller.drawLine(useHalfWidth: true, arrowStart: true, arrowEnd: true);
-      expect(controller.lines[0], startsWith('^'));
+      expect(controller.lines[0], startsWith('A'));
       expect(controller.lines[1], startsWith('|'));
-      expect(controller.lines[2], startsWith('v'));
+      expect(controller.lines[2], startsWith('V'));
     });
 
     // --- タブ管理機能テスト ---
