@@ -110,6 +110,7 @@ class EditorController extends ChangeNotifier {
   set currentFilePath(String? value) => activeDocument.currentFilePath = value;
 
   String get composingText => activeDocument.composingText;
+  TextRange get composingSelection => activeDocument.composingSelection;
 
   bool get isDirty => activeDocument.isDirty;
   set isDirty(bool value) => activeDocument.isDirty = value;
@@ -2167,6 +2168,8 @@ class EditorController extends ChangeNotifier {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     if (data == null || data.text == null) return;
 
+    saveHistory();
+
     String text = data.text!.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
     List<String> parts = text.split('\n');
 
@@ -2226,6 +2229,8 @@ class EditorController extends ChangeNotifier {
 
       final List<String> pasteLines = const LineSplitter().convert(data.text!);
       if (pasteLines.isEmpty) return;
+
+      saveHistory();
 
       int startRow = cursorRow;
       String currentLine = (cursorRow < lines.length) ? lines[cursorRow] : "";
@@ -2600,8 +2605,8 @@ class EditorController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void updateComposingText(String text) {
-    activeDocument.updateComposingText(text);
+  void updateComposingText(String text, {TextRange selection = TextRange.empty}) {
+    activeDocument.updateComposingText(text, selection: selection);
   }
 
   /// 文字入力処理（履歴保存、選択削除、挿入を統合）

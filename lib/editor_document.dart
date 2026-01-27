@@ -37,6 +37,7 @@ class EditorDocument extends ChangeNotifier {
   bool isOverwriteMode = false;
   String? currentFilePath;
   String composingText = "";
+  TextRange composingSelection = TextRange.empty;
   bool isDirty = false;
   String currentEncoding = 'utf-8';
   NewLineType newLineType = NewLineType.lf;
@@ -1859,8 +1860,9 @@ class EditorDocument extends ChangeNotifier {
     }
   }
 
-  void updateComposingText(String text) {
+  void updateComposingText(String text, {TextRange selection = TextRange.empty}) {
     composingText = text;
+    composingSelection = selection;
     notifyListeners();
   }
 

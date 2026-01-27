@@ -19,6 +19,7 @@ class MemoPainter extends CustomPainter {
   final int cursorCol;
   final TextStyle textStyle; // TextPainter に渡すスタイル
   final String composingText; // 未確定文字
+  final TextRange composingSelection; // 未確定文字内の選択範囲（注目文節）
   final int? selectionOriginRow; // 選択開始位置Row
   final int? selectionOriginCol; // 選択開始位置Col
   final bool showCursor;
@@ -48,6 +49,7 @@ class MemoPainter extends CustomPainter {
     required this.lineHeight,
     required this.textStyle,
     required this.composingText,
+    this.composingSelection = TextRange.empty,
     this.selectionOriginRow,
     this.selectionOriginCol,
     required this.showCursor,
@@ -151,21 +153,61 @@ class MemoPainter extends CustomPainter {
     // 3. 未確定文字 (composingText) の描画
     // --------------------------------------------------------
     if (composingText.isNotEmpty) {
-      final composingStyle = TextStyle(
-        color: Colors.black,
-        fontSize: textStyle.fontSize,
-        fontFamily: textStyle.fontFamily,
-        decoration: TextDecoration.underline,
-        decorationStyle: TextDecorationStyle.solid,
-        decorationColor: Colors.blue,
-        backgroundColor: Colors.white.withValues(alpha: 0.8),
-      );
+      final double composingTextX = cursorPixelX;
+      final double composingTextY = cursorPixelY;
 
-      final span = TextSpan(text: composingText, style: composingStyle);
-      final tp = TextPainter(text: span, textDirection: TextDirection.ltr);
+      // ベーススタイル（装飾なし）
+      final baseStyle = textStyle.copyWith(decoration: TextDecoration.none);
+
+      // 未確定文字列全体をレイアウト
+      final tp = TextPainter(
+        text: TextSpan(text: composingText, style: baseStyle),
+        textDirection: TextDirection.ltr,
+      );
       tp.layout();
 
-      tp.paint(canvas, Offset(cursorPixelX, cursorPixelY));
+      // 1. 未確定文字列全体の下線 (点線)
+      final path = Path()
+        ..moveTo(composingTextX, composingTextY + lineHeight)
+        ..lineTo(composingTextX + tp.width, composingTextY + lineHeight);
+      final dashedPath = _createDashedPath(path, 2, 2);
+      canvas.drawPath(
+        dashedPath,
+        Paint()..color = Colors.black54 ..strokeWidth = 1.0 ..style = PaintingStyle.stroke,
+      );
+
+      // 2. 注目文節のハイライト (範囲情報がある場合のみ)
+      if (!composingSelection.isCollapsed) {
+        final selection = TextSelection(baseOffset: composingSelection.start, extentOffset: composingSelection.end);
+        final selectionRects = tp.getBoxesForSelection(selection);
+        for (final box in selectionRects) {
+          final rect = box.toRect().shift(Offset(composingTextX, composingTextY));
+          // 注目文節の下線（実線）
+          canvas.drawLine(
+            rect.bottomLeft,
+            rect.bottomRight,
+            Paint()..color = Colors.blue[800]! ..strokeWidth = 2.0,
+          );
+        }
+      }
+
+      // 3. カーソル位置のキャレット (常に表示)
+      // 範囲選択がない場合でも、現在位置を示すために表示する
+      int caretIndex = composingSelection.end.clamp(0, composingText.length);
+      final caretOffset = tp.getOffsetForCaret(
+        TextPosition(offset: caretIndex),
+        Rect.zero,
+      );
+      final double caretX = composingTextX + caretOffset.dx;
+
+      canvas.drawLine(
+        Offset(caretX, composingTextY),
+        Offset(caretX, composingTextY + lineHeight),
+        Paint()..color = Colors.black ..strokeWidth = 2.0,
+      );
+
+      // 4. 文字描画
+      tp.paint(canvas, Offset(composingTextX, composingTextY));
     }
 
     // --------------------------------------------------------
@@ -912,6 +954,7 @@ class MemoPainter extends CustomPainter {
         oldDelegate.selectionOriginCol != selectionOriginCol ||
         oldDelegate.isRectangularSelection != isRectangularSelection ||
         oldDelegate.composingText != composingText ||
+        oldDelegate.composingSelection != composingSelection ||
         oldDelegate.showCursor != showCursor ||
         oldDelegate.searchResults != searchResults ||
         oldDelegate.currentSearchIndex != currentSearchIndex ||

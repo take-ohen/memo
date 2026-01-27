@@ -634,6 +634,57 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
   // タブを閉じる処理（未保存チェック付き）
   Future<void> _handleCloseTab(int index) async {
+    // 最後のタブの場合、アプリを終了する
+    if (_controller.documents.length == 1) {
+      final doc = _controller.documents[index];
+      if (doc.isDirty) {
+        // 未保存の変更がある場合、ダイアログを表示
+        final result = await showDialog<int>(
+          context: context,
+          builder: (context) {
+            return AlertDialog(
+              title: const Text('確認'),
+              content: Text('${doc.displayName} への変更を保存しますか？'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(0), // キャンセル
+                  child: const Text('キャンセル'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(1), // 保存しない
+                  child: const Text('保存しない'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(context).pop(2), // 保存する
+                  child: const Text('保存する'),
+                ),
+              ],
+            );
+          },
+        );
+
+        if (result == null || result == 0) {
+          // キャンセル
+          return;
+        } else if (result == 1) {
+          // 保存せずに終了
+          // アプリ終了処理で再度聞かれないようにフラグをクリア
+          doc.isDirty = false;
+          await windowManager.close();
+        } else if (result == 2) {
+          // 保存して終了
+          final savedPath = await doc.saveFile();
+          if (savedPath != null) {
+            await windowManager.close();
+          }
+        }
+      } else {
+        // 変更なし -> アプリ終了
+        await windowManager.close();
+      }
+      return;
+    }
+
     final doc = _controller.documents[index];
     if (doc.isDirty) {
       // 未保存の変更がある場合、ダイアログを表示
@@ -3067,6 +3118,7 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
                                                       textStyle: _textStyle,
                                                       composingText: _controller
                                                           .composingText,
+                                                      composingSelection: _controller.composingSelection,
                                                       selectionOriginRow:
                                                           _controller
                                                               .selectionOriginRow,
@@ -3290,7 +3342,6 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
 
   @override
   void updateEditingValue(TextEditingValue value) {
-    print("IMEからの入力: text=${value.text}, composing=${value.composing}");
     if (!value.composing.isValid) {
       if (value.text.isNotEmpty) {
         _controller.input(value.text);
@@ -3307,7 +3358,18 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
         _focusNode.requestFocus();
       }
     } else {
-      _controller.updateComposingText(value.text);
+      // 未確定部分の文字列のみを抽出
+      final String composingContent = value.composing.textInside(value.text);
+
+      // 選択範囲（注目文節）を、未確定部分の先頭からの相対位置に変換
+      int relativeStart = value.selection.start - value.composing.start;
+      int relativeEnd = value.selection.end - value.composing.start;
+
+      // 念のための範囲クランプ
+      relativeStart = relativeStart.clamp(0, composingContent.length);
+      relativeEnd = relativeEnd.clamp(0, composingContent.length);
+
+      _controller.updateComposingText(composingContent, selection: TextRange(start: relativeStart, end: relativeEnd));
       _updateImeWindowPosition();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _scrollToCursor();
