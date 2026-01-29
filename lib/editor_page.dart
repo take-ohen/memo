@@ -149,6 +149,12 @@ class _EditorPageState extends State<EditorPage> with TextInputClient {
   Future<void> handleDroppedFilesForTesting(List<XFile> files) =>
       _handleDroppedFiles(files);
 
+  @visibleForTesting
+  double get charWidthForTesting => _charWidth;
+
+  @visibleForTesting
+  double get lineHeightForTesting => _lineHeight;
+
   @override
   void initState() {
     super.initState();

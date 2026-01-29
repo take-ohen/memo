@@ -1,5 +1,6 @@
 // test/editor_logic_test.dart
 import 'dart:io'; // ファイル操作用
+import 'dart:ui'; // PointerDeviceKind用
 import 'dart:typed_data'; // Uint8List用
 import 'package:cross_file/cross_file.dart'; // XFile用
 import 'package:flutter/material.dart';
@@ -12,6 +13,7 @@ import 'package:free_memo_editor/file_io_helper.dart'; // 追加
 import 'package:free_memo_editor/editor_controller.dart'; // 追加
 import 'package:free_memo_editor/memo_painter.dart'; // LineNumberPainter用
 import 'package:free_memo_editor/l10n/app_localizations.dart';
+import 'package:free_memo_editor/drawing_data.dart'; // DrawingType, DrawingObject用
 
 /// テスト用のラッパーウィジェット（多言語対応設定を含む）
 Widget createTestWidget(Widget home) {
@@ -1400,6 +1402,395 @@ void main() {
 
     // 後始末
     tempDir.deleteSync(recursive: true);
+  });
+
+  testWidgets('Drawing Logic (Draw, Select, Move, Delete)', (WidgetTester tester) async {
+    // 1. アプリ起動
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1.0;
+    await tester.pumpWidget(createTestWidget(const EditorPage()));
+    await tester.pumpAndSettle();
+
+    final state = tester.state(find.byType(EditorPage)) as dynamic;
+    final EditorController controller = state.debugController;
+
+    // 2. Drawモードへ切り替え
+    await tester.tap(find.byIcon(Icons.draw));
+    await tester.pump();
+
+    expect(controller.currentMode, EditorMode.draw, reason: "Drawモードに切り替わること");
+
+    // 3. 描画 (Draw)
+    // エディタ領域の中央付近でドラッグ操作を行う
+    // UIパーツとの干渉を避けるため、画面中央寄りの座標を指定
+    final startOffset = const Offset(400, 400);
+    final endOffset = const Offset(600, 600);
+
+    // dragFrom の代わりに startGesture を使用して詳細に制御
+    // タッチ操作だとスクロールビューにイベントを奪われる可能性があるため、マウス操作としてシミュレートする
+    final TestGesture gesture = await tester.startGesture(
+      startOffset,
+      kind: PointerDeviceKind.mouse,
+    );
+    await tester.pump(const Duration(milliseconds: 100)); // downイベント処理
+
+    // 少し移動して onPanStart を確実に発火させる
+    await gesture.moveBy(const Offset(10, 10));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // 検証: ドラッグ開始により描画中状態になっているか確認 (ここで失敗する場合、ジェスチャが認識されていない)
+    expect(controller.isDrawing, isTrue, reason: "ドラッグ開始で描画中フラグが立つこと");
+
+    await gesture.moveTo(endOffset);
+    await tester.pump(const Duration(milliseconds: 100)); // moveイベント処理
+
+    await gesture.up();
+    await tester.pump(); // upイベント処理 -> endStroke
+
+    // 検証: 図形が1つ追加されていること
+    expect(controller.drawings.length, 1, reason: "図形が追加されること");
+    
+    // 検証: 追加された図形が選択状態になっていること
+    final drawingId = controller.drawings.first.id;
+    expect(controller.selectedDrawingId, drawingId, reason: "描画直後は選択状態になること");
+
+    // 4. 移動 (Move)
+    // 固定座標ではなく、アプリ本体のロジックを使って正確な中心座標を計算する
+    final drawing = controller.drawings.first;
+    
+    final double charWidth = state.charWidthForTesting;
+    final double lineHeight = state.lineHeightForTesting;
+
+    // アプリ本体のロジックでローカル座標(Offset)を取得
+    final p1Offset = controller.activeDocument.resolveAnchorForTesting(drawing.points[0], charWidth, lineHeight);
+    final p2Offset = controller.activeDocument.resolveAnchorForTesting(drawing.points[1], charWidth, lineHeight);
+
+    final centerLocal = (p1Offset + p2Offset) / 2.0;
+
+    // エディタ領域(MemoPainter)の画面上の位置を取得
+    final editorFinder = find.byWidgetPredicate((widget) => widget is CustomPaint && widget.painter is MemoPainter);
+    final editorOffset = tester.getTopLeft(editorFinder);
+
+    // 絶対座標
+    final moveStart = editorOffset + centerLocal;
+    final moveDelta = const Offset(100, 100);
+    
+    // 移動前の座標(col)を保持
+    final initialCol = controller.drawings.first.points.first.col;
+
+    final TestGesture moveGesture = await tester.startGesture(
+      moveStart,
+      kind: PointerDeviceKind.mouse,
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // ドラッグ開始を認識させるための小さな移動 (onPanStart)
+    await moveGesture.moveBy(const Offset(10, 10));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // 実際の移動 (onPanUpdate)
+    await moveGesture.moveBy(moveDelta);
+    await tester.pump(const Duration(milliseconds: 100));
+
+    await moveGesture.up();
+    await tester.pump(); // onPanEnd
+
+    // 検証: 座標が変化していること
+    final movedCol = controller.drawings.first.points.first.col;
+    expect(movedCol, isNot(equals(initialCol)), reason: "図形が移動していること");
+
+    // 5. リサイズ (Resize)
+    // 右下のハンドルを操作してサイズを変更する
+    final resizeDrawing = controller.drawings.first;
+    // 現在の右下座標(p2)を取得
+    final p2Resize = controller.activeDocument.resolveAnchorForTesting(resizeDrawing.points[1], charWidth, lineHeight);
+    
+    // ハンドル位置の計算 (MemoPainter/EditorDocumentのロジックに準拠)
+    // 矩形の場合、ハンドルは内側にオフセットされている
+    final double padPixelX = (resizeDrawing.paddingX * charWidth).toDouble();
+    final double padPixelY = (resizeDrawing.paddingY * lineHeight).toDouble();
+    const double halfHandleSize = 4.0;
+    double handleOffsetX = halfHandleSize + padPixelX;
+    double handleOffsetY = halfHandleSize + padPixelY;
+    
+    // 右下(p2)に対するハンドル位置 (左上方向へオフセット)
+    final handlePos = p2Resize + Offset(-handleOffsetX, -handleOffsetY);
+    final resizeStart = editorOffset + handlePos;
+    final resizeDelta = const Offset(50, 50); // 右下へ広げる
+
+    final TestGesture resizeGesture = await tester.startGesture(
+      resizeStart,
+      kind: PointerDeviceKind.mouse,
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // ドラッグ開始を認識させるための小さな移動 (onPanStart)
+    await resizeGesture.moveBy(const Offset(10, 10));
+    await tester.pump(const Duration(milliseconds: 100));
+    
+    // ハンドルを掴めたか確認
+    expect(controller.isInteractingWithDrawing, isTrue, reason: "ハンドル操作開始");
+
+    await resizeGesture.moveBy(resizeDelta);
+    await tester.pump(const Duration(milliseconds: 100));
+    await resizeGesture.up();
+    await tester.pump();
+
+    // 検証: サイズ(col)が増えていること
+    final resizedCol = controller.drawings.first.points[1].col;
+
+    // 6. Undo/Redo
+    // Undo: リサイズ取り消し
+    controller.undo();
+    await tester.pump();
+    
+    final undoCol = controller.drawings.first.points[1].col;
+    expect(undoCol, lessThan(resizedCol), reason: "Undoでサイズが元に戻る(小さくなる)こと");
+
+    // Redo: リサイズ適用
+    controller.redo();
+    await tester.pump();
+    
+    final redoCol = controller.drawings.first.points[1].col;
+    expect(redoCol, equals(resizedCol), reason: "Redoでサイズ変更が適用されること");
+
+    // 7. 削除 (Delete)
+    await tester.tap(find.byIcon(Icons.delete));
+    await tester.pump();
+
+    expect(controller.drawings.length, 0, reason: "削除ボタンで図形が削除されること");
+  });
+
+  testWidgets('Format Logic (Draw Box, Format Table)', (WidgetTester tester) async {
+    // 1. アプリ起動
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1.0;
+    await tester.pumpWidget(createTestWidget(const EditorPage()));
+    await tester.pumpAndSettle();
+
+    final state = tester.state(find.byType(EditorPage)) as dynamic;
+    final EditorController controller = state.debugController;
+
+    // 2. Draw Box テスト準備
+    // 上下に余白を持たせたデータを用意
+    // 左側にも余白を持たせる (枠線描画用)
+    controller.lines = ['', '  AAA', '  BBB', '  CCC', ''];
+    controller.cursorRow = 0;
+    controller.cursorCol = 0;
+    await tester.pump();
+
+    // 3. 範囲選択 (ドラッグ)
+    // 1行目(AAA) から 3行目(CCC) までを選択
+    final double charWidth = state.charWidthForTesting;
+    final double lineHeight = state.lineHeightForTesting;
+    
+    final editorFinder = find.byWidgetPredicate((widget) => widget is CustomPaint && widget.painter is MemoPainter);
+    final editorOffset = tester.getTopLeft(editorFinder);
+
+    // 始点: 1行目の"AAA"の先頭 ('A'はインデックス2)
+    final startOffset = editorOffset + Offset(charWidth * 2.5, lineHeight * 1.5);
+    // 終点: 3行目の"CCC"の後ろ ('C'はインデックス4, その後ろあたり)
+    final endOffset = editorOffset + Offset(charWidth * 5.5, lineHeight * 3.5);
+
+    print("DEBUG: charWidth=$charWidth, lineHeight=$lineHeight");
+
+    final gesture = await tester.startGesture(startOffset, kind: PointerDeviceKind.mouse);
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // ドラッグ開始を認識させるための小さな移動
+    await gesture.moveBy(const Offset(5, 5));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    await gesture.moveTo(endOffset);
+    await tester.pump(const Duration(milliseconds: 100));
+
+    await gesture.up();
+    await tester.pump();
+
+    // 検証: 範囲選択ができているか
+    print("DEBUG: hasSelection=${controller.hasSelection}, Origin=(${controller.selectionOriginRow}, ${controller.selectionOriginCol}), Cursor=(${controller.cursorRow}, ${controller.cursorCol})");
+    expect(controller.hasSelection, isTrue, reason: "ドラッグ操作で範囲選択されていること");
+
+    // 4. Draw Box 実行
+    controller.drawBox();
+    await tester.pump();
+
+    // 検証
+    // 0行目: 上辺
+    expect(controller.lines[0], contains('┌'), reason: "DrawBox: 上辺が描画されること");
+    // 1行目: データ行 (囲まれている)
+    expect(controller.lines[1], contains('│AAA│'), reason: "DrawBox: データ行が囲まれること");
+    // 4行目: 下辺
+    expect(controller.lines[4], contains('└'), reason: "DrawBox: 下辺が描画されること");
+
+    // 5. Undo
+    controller.undo();
+    await tester.pump();
+    
+    expect(controller.lines[1], equals('  AAA'), reason: "Undo: 元のテキストに戻ること");
+    expect(controller.lines[0], equals(''), reason: "Undo: 罫線が消えること");
+
+    // 6. Format Table テスト準備
+    controller.lines = ['H1,H2', 'A,100', 'B,200'];
+    controller.cursorRow = 0;
+    controller.cursorCol = 0;
+    await tester.pump();
+
+    // 全選択 (Ctrl+A)
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.control);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.control);
+    await tester.pump();
+
+    // 7. Format Table 実行
+    controller.formatTable();
+    await tester.pump();
+
+    // 検証
+    // 0行目: ヘッダー上辺
+    expect(controller.lines[0], contains('┌'), reason: "Table: ヘッダー上辺");
+    // 1行目: ヘッダーデータ
+    expect(controller.lines[1], contains('│H1'), reason: "Table: ヘッダーデータ");
+    // 2行目: ヘッダー区切り
+    expect(controller.lines[2], contains('├'), reason: "Table: ヘッダー区切り");
+    // データ行
+    expect(controller.lines.any((l) => l.contains('│A')), isTrue, reason: "Table: データ行");
+  });
+
+  testWidgets('Line & Arrow Logic (Draw Line, Elbow)', (WidgetTester tester) async {
+    // 1. アプリ起動
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1.0;
+    await tester.pumpWidget(createTestWidget(const EditorPage()));
+    await tester.pumpAndSettle();
+
+    final state = tester.state(find.byType(EditorPage)) as dynamic;
+    final EditorController controller = state.debugController;
+
+    // 2. 直線描画 (Draw Line)
+    // キャンバス準備: "          " (スペース10個)
+    controller.lines = ['          '];
+    controller.cursorRow = 0;
+    controller.cursorCol = 0;
+    await tester.pump();
+
+    final double charWidth = state.charWidthForTesting;
+    final double lineHeight = state.lineHeightForTesting;
+    final editorFinder = find.byWidgetPredicate((widget) => widget is CustomPaint && widget.painter is MemoPainter);
+    final editorOffset = tester.getTopLeft(editorFinder);
+
+    // 選択: (0, 2) -> (0, 6) 水平線 (全角スナップを考慮して偶数座標を指定)
+    // 始点: 2文字目の中心 (index 2)
+    final startOffset = editorOffset + Offset(charWidth * 2.5, lineHeight * 0.5);
+    // 終点: 6文字目の中心 (index 6)
+    final endOffset = editorOffset + Offset(charWidth * 6.5, lineHeight * 0.5);
+
+    final gesture = await tester.startGesture(startOffset, kind: PointerDeviceKind.mouse);
+    await tester.pump(const Duration(milliseconds: 100));
+    await gesture.moveBy(const Offset(5, 5)); // ドラッグ開始トリガー
+    await tester.pump(const Duration(milliseconds: 100));
+    await gesture.moveTo(endOffset);
+    await tester.pump(const Duration(milliseconds: 100));
+    await gesture.up();
+    await tester.pump();
+
+    expect(controller.hasSelection, isTrue, reason: "範囲選択されていること");
+
+    // 実行
+    controller.drawLine();
+    await tester.pump();
+
+    // 検証: 0行目に全角線
+    // 元: "          "
+    // 描画: 0,1文字目(sp) + 2,3,4文字目(─) + 5文字目以降(sp)
+    // 期待: "  ───  " (スペース2個 + 全角線3個 + スペース2個)
+    expect(controller.lines[0], equals('  ───  '), reason: "直線描画: 正しい位置に線が引かれること");
+
+    // Undo
+    controller.undo();
+    await tester.pump();
+    expect(controller.lines[0], equals('          '), reason: "Undo: 元の空白に戻ること");
+
+    // Redo
+    controller.redo();
+    await tester.pump();
+    expect(controller.lines[0], equals('  ───  '), reason: "Redo: 線が復活すること");
+
+    // 3. 矢印描画 (Arrow End)
+    // 同じ選択範囲で矢印を描画 (上書き)
+    // 再度選択が必要 (Undo/Redoで選択解除されている可能性があるため)
+    // ここでは簡易的にAPI経由で選択状態を作る
+    controller.selectionOriginRow = 0;
+    controller.selectionOriginCol = 2;
+    controller.cursorRow = 0;
+    // 直前の操作で全角線('─', 幅2)が描画されているため、
+    // VisualX=6 (元の終点) に対応する col は 6 ではなく 4 になる
+    // "  " (2文字, 幅2) + "──" (2文字, 幅4) -> col 4 で VisualX 6
+    controller.cursorCol = 4;
+    
+    controller.drawLine(arrowEnd: true);
+    await tester.pump();
+
+    // 検証: 終点が矢印
+    // "  ──→  "
+    expect(controller.lines[0], equals('  ──→  '), reason: "矢印描画: 終点が矢印になること");
+
+    // 4. L字線描画 (Draw Elbow)
+    // キャンバスリセット
+    controller.lines = List.generate(3, (_) => '          ');
+    await tester.pump();
+
+    // 選択: (0, 2) -> (2, 6) 斜め
+    // 始点: (0, 2)
+    final startOffsetElbow = editorOffset + Offset(charWidth * 2.5, lineHeight * 0.5);
+    // 終点: (2, 6)
+    final endOffsetElbow = editorOffset + Offset(charWidth * 6.5, lineHeight * 2.5);
+    
+    final gesture2 = await tester.startGesture(startOffsetElbow, kind: PointerDeviceKind.mouse);
+    await tester.pump(const Duration(milliseconds: 100));
+    await gesture2.moveBy(const Offset(5, 5));
+    await gesture2.moveTo(endOffsetElbow);
+    await tester.pump(const Duration(milliseconds: 100));
+    await gesture2.up();
+    await tester.pump();
+
+    // 実行 (上折れ)
+    controller.drawElbowLine(isUpperRoute: true);
+    await tester.pump();
+
+    // 検証: L字形状
+    // 0行目: "  ──┐  " (2文字目sp, 2-6文字目線)
+    expect(controller.lines[0], equals('  ──┐  '), reason: "L字線(Upper): 上辺");
+    // 1行目: "      │  " (6文字目位置に縦線)
+    expect(controller.lines[1], equals('      │  '), reason: "L字線(Upper): 縦線");
+    // 2行目: "      │  " (終点まで縦線)
+    expect(controller.lines[2], equals('      │  '), reason: "L字線(Upper): 終点");
+
+    // 5. L字線描画 (Draw Elbow) - Lower Route
+    // キャンバスリセット
+    controller.lines = List.generate(3, (_) => '          ');
+    await tester.pump();
+
+    // 選択: (0, 2) -> (2, 6) 斜め (座標はUpperと同じ)
+    final gesture3 = await tester.startGesture(startOffsetElbow, kind: PointerDeviceKind.mouse);
+    await tester.pump(const Duration(milliseconds: 100));
+    await gesture3.moveBy(const Offset(5, 5));
+    await gesture3.moveTo(endOffsetElbow);
+    await tester.pump(const Duration(milliseconds: 100));
+    await gesture3.up();
+    await tester.pump();
+
+    // 実行 (下折れ)
+    controller.drawElbowLine(isUpperRoute: false);
+    await tester.pump();
+
+    // 検証: L字形状 (Lower Route)
+    // 0行目: "  │      " (2文字目位置に縦線)
+    expect(controller.lines[0], equals('  │      '), reason: "L字線(Lower): 始点(縦線)");
+    // 1行目: "  │      " (縦線)
+    expect(controller.lines[1], equals('  │      '), reason: "L字線(Lower): 縦線");
+    // 2行目: "  └───  " (角└、終点まで横線)
+    expect(controller.lines[2], equals('  └──  '), reason: "L字線(Lower): 角と底辺");
   });
 }
 

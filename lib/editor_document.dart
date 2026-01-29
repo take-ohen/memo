@@ -814,6 +814,10 @@ class EditorDocument extends ChangeNotifier {
     return AnchorPoint(row: row, col: col, dx: dx, dy: dy);
   }
 
+  @visibleForTesting
+  Offset resolveAnchorForTesting(AnchorPoint anchor, double charWidth, double lineHeight) =>
+      _resolveAnchor(anchor, charWidth, lineHeight);
+
   // AnchorPoint -> Offset 変換ロジック (当たり判定用)
   Offset _resolveAnchor(
     AnchorPoint anchor,
@@ -871,7 +875,9 @@ class EditorDocument extends ChangeNotifier {
   }
 
   void saveHistory() {
-    historyManager.save(lines, cursorRow, cursorCol, drawings);
+    // 図形データは参照型なので、履歴保存時にディープコピーを作成して渡す必要がある
+    final deepCopiedDrawings = drawings.map((d) => d.copy()).toList();
+    historyManager.save(lines, cursorRow, cursorCol, deepCopiedDrawings);
   }
 
   void ensureVirtualSpace(int row, int col) {
@@ -1562,6 +1568,7 @@ class EditorDocument extends ChangeNotifier {
 
           for (int i = 0; i < hitTestPoints.length; i++) {
             if ((hitTestPoints[i] - localPosition).distance < 20.0) {
+              saveHistory();
               _activeHandleIndex = i;
               return;
             }
@@ -1579,6 +1586,7 @@ class EditorDocument extends ChangeNotifier {
               if ((localPosition.dy - snappedY).abs() < hitThreshold &&
                   localPosition.dx >= rect.left &&
                   localPosition.dx <= rect.right) {
+                saveHistory();
                 _activeTableDividerIndex = i;
                 _activeTableDividerIsRow = true;
                 return;
@@ -1592,6 +1600,7 @@ class EditorDocument extends ChangeNotifier {
               if ((localPosition.dx - snappedX).abs() < hitThreshold &&
                   localPosition.dy >= rect.top &&
                   localPosition.dy <= rect.bottom) {
+                saveHistory();
                 _activeTableDividerIndex = i;
                 _activeTableDividerIsRow = false;
                 return;
@@ -1601,6 +1610,7 @@ class EditorDocument extends ChangeNotifier {
 
           // C. 図形本体判定 (移動)
           if (_isHit(drawing, localPosition, charWidth, lineHeight)) {
+            saveHistory();
             _isMovingDrawing = true;
             _initialDrawingPoints = drawing.points
                 .map(
@@ -1610,6 +1620,7 @@ class EditorDocument extends ChangeNotifier {
                 .toList();
             _dragStartRow = (localPosition.dy / lineHeight).floor();
             _dragStartCol = (localPosition.dx / charWidth).round();
+
             return;
           }
         }
@@ -1850,7 +1861,6 @@ class EditorDocument extends ChangeNotifier {
     if (_activeHandleIndex != null ||
         _isMovingDrawing ||
         _activeTableDividerIndex != null) {
-      saveHistory(); // 操作完了時に履歴保存
       _activeHandleIndex = null;
       _isMovingDrawing = false;
       _initialDrawingPoints = null;
