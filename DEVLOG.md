@@ -205,3 +205,37 @@
 
 #### `test/editor_logic_test.dart`
 * `Line & Arrow Logic` テストケース内の `expect` 文を修正。
+
+## [202X-XX-XX] 高度な検索・移動ロジックのテスト追加
+
+### 1. 要求
+* 検索機能（Grep）、正規表現、大文字小文字区別、検索結果ジャンプ、一括置換などのロジックが正しく動作するか検証したい。
+
+### 2. 方針
+* **テストコード追加**: `Advanced Search & Grep Logic` テストケースを追加し、`EditorDocument` の検索・置換メソッドを直接呼び出して挙動を検証する。
+
+### 3. 説明
+* 既存のテストでは単純なキーワード検索のみだったため、正規表現やオプション指定、移動ロジックの網羅性を高めた。
+
+### 4. 変更内容
+
+#### `test/editor_logic_test.dart`
+* `Advanced Search & Grep Logic` テストケースを追加。
+
+## [202X-XX-XX] Advanced Search & Grep Logic テストの修正
+
+### 1. 要求
+* `Advanced Search & Grep Logic` テストにおいて、検索結果ジャンプの検証（Test 4）が失敗する問題を修正したい。
+
+### 2. 方針
+* **テストコード修正**: 検索ロジックは「現在のカーソル位置以降」を検索するため、直前のテストによるカーソル移動の影響を受けていた。検索実行前にカーソルを先頭 `(0, 0)` にリセットする処理を追加する。
+
+### 3. 説明
+* Test 3 で "def" (Row 1) を検索した後、カーソルは Row 1 にあった。
+* 続けて "abc" (Row 0, Row 2) を検索すると、Row 1 以降の最初のヒットである Row 2 (index 1) が選択されていた。
+* テストの期待値は index 0 (Row 0) だったため、不一致が発生した。
+
+### 4. 変更内容
+
+#### `test/editor_logic_test.dart`
+* `Advanced Search & Grep Logic` テストケース内の Test 4 直前にカーソルリセットを追加。

@@ -1792,6 +1792,118 @@ void main() {
     // 2行目: "  └───  " (角└、終点まで横線)
     expect(controller.lines[2], equals('  └──  '), reason: "L字線(Lower): 角と底辺");
   });
+
+  testWidgets('Advanced Search & Grep Logic', (WidgetTester tester) async {
+    // 1. アプリ起動
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1.0;
+    await tester.pumpWidget(createTestWidget(const EditorPage()));
+    await tester.pumpAndSettle();
+
+    final state = tester.state(find.byType(EditorPage)) as dynamic;
+    final EditorController controller = state.debugController;
+    // EditorDocumentのロジックを直接検証するため、activeDocumentを取得
+    final doc = controller.activeDocument;
+
+    // 2. テキスト準備
+    // Line 0: "abc 123"
+    // Line 1: "DEF 456"
+    // Line 2: "abc 789"
+    controller.lines = ['abc 123', 'DEF 456', 'abc 789'];
+    controller.cursorRow = 0;
+    controller.cursorCol = 0;
+    await tester.pump();
+
+    // --- Test 1: Grep検索 (通常) ---
+    // "abc" を検索
+    doc.search('abc');
+    await tester.pump();
+
+    expect(doc.searchResults.length, 2, reason: "通常検索: 'abc'は2箇所あるはず");
+    // ヒット箇所の検証
+    // 1つ目: Row 0, Col 0
+    expect(doc.searchResults[0].lineIndex, 0);
+    expect(doc.searchResults[0].startCol, 0);
+    // 2つ目: Row 2, Col 0
+    expect(doc.searchResults[1].lineIndex, 2);
+    expect(doc.searchResults[1].startCol, 0);
+
+    // --- Test 2: 正規表現検索 ---
+    // "\d+" (数字の連続) を検索
+    doc.search(r'\d+', isRegex: true);
+    await tester.pump();
+
+    expect(doc.searchResults.length, 3, reason: "正規表現検索: 数字ブロックは3箇所あるはず");
+    // 1つ目: "123" (Row 0, Col 4)
+    expect(doc.searchResults[0].lineIndex, 0);
+    expect(doc.searchResults[0].startCol, 4);
+    expect(doc.searchResults[0].length, 3);
+    // 2つ目: "456" (Row 1, Col 4)
+    expect(doc.searchResults[1].lineIndex, 1);
+    expect(doc.searchResults[1].startCol, 4);
+    // 3つ目: "789" (Row 2, Col 4)
+    expect(doc.searchResults[2].lineIndex, 2);
+    expect(doc.searchResults[2].startCol, 4);
+
+    // --- Test 3: 大文字小文字の区別 ---
+    // "def" を検索 (Case Sensitive: true) -> ヒットしないはず ("DEF"なので)
+    doc.search('def', isCaseSensitive: true);
+    await tester.pump();
+    expect(doc.searchResults.length, 0, reason: "大文字小文字区別あり: 'def'はヒットしない");
+
+    // "def" を検索 (Case Sensitive: false) -> ヒットするはず
+    doc.search('def', isCaseSensitive: false);
+    await tester.pump();
+    expect(doc.searchResults.length, 1, reason: "大文字小文字区別なし: 'def'で'DEF'がヒットする");
+    expect(doc.searchResults[0].lineIndex, 1);
+
+    // --- Test 4: 検索結果ジャンプ (Next/Prev) ---
+    // カーソルを先頭に戻す (これがないと、現在のカーソル位置(Row 1)以降のヒット(Row 2)が選択されてしまう)
+    doc.cursorRow = 0;
+    doc.cursorCol = 0;
+    doc.selectionOriginRow = null;
+    doc.selectionOriginCol = null;
+    await tester.pump();
+
+    // 再び "abc" を検索 (2件)
+    doc.search('abc');
+    await tester.pump();
+    
+    // 初期状態: index 0 (Row 0) が選択されているはず
+    expect(doc.currentSearchIndex, 0, reason: "初期選択: 最初のヒット");
+    expect(doc.cursorRow, 0);
+
+    // Next -> index 1 (Row 2)
+    doc.nextMatch();
+    await tester.pump();
+    expect(doc.currentSearchIndex, 1, reason: "Next: 次のヒットへ");
+    expect(doc.cursorRow, 2);
+
+    // Next (Loop) -> index 0 (Row 0)
+    doc.nextMatch();
+    await tester.pump();
+    expect(doc.currentSearchIndex, 0, reason: "Next(Loop): 最初に戻る");
+    expect(doc.cursorRow, 0);
+
+    // Prev (Loop) -> index 1 (Row 2)
+    doc.previousMatch();
+    await tester.pump();
+    expect(doc.currentSearchIndex, 1, reason: "Prev(Loop): 最後に戻る");
+    expect(doc.cursorRow, 2);
+
+    // --- Test 5: 正規表現置換 (Replace All) ---
+    // 数字 "\d+" を "NUM" に置換
+    doc.replaceAll(r'\d+', 'NUM', isRegex: true);
+    await tester.pump();
+
+    // 検証
+    // Line 0: "abc 123" -> "abc NUM"
+    expect(doc.lines[0], "abc NUM", reason: "正規表現置換: Row 0");
+    // Line 1: "DEF 456" -> "DEF NUM"
+    expect(doc.lines[1], "DEF NUM", reason: "正規表現置換: Row 1");
+    // Line 2: "abc 789" -> "abc NUM"
+    expect(doc.lines[2], "abc NUM", reason: "正規表現置換: Row 2");
+  });
 }
 
 // --- Mock Class ---
